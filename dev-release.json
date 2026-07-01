@@ -1,0 +1,6 @@
+{
+  "app": "CoachPulse",
+  "channel": "dev",
+  "updatedAt": "2026-07-01T13:00:00Z",
+  "note": "Deployment marker for Firebase Hosting DEV preview channel."
+}
