@@ -1,0 +1,35 @@
+{
+  "id": "matchs",
+  "name": "Matchs",
+  "status": "active-legacy",
+  "firebase": {
+    "collection": "matches",
+    "relatedCollections": [
+      "matchEvents",
+      "players",
+      "teams"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "pages/coach-stats.html",
+    "targetEntry": "modules/matchs/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Prise de statistiques match et evenements lies a playerId/matchId."
+}

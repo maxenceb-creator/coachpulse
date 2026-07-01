@@ -1,0 +1,34 @@
+{
+  "id": "presences",
+  "name": "Presences",
+  "status": "active-legacy",
+  "firebase": {
+    "collection": "attendance",
+    "relatedCollections": [
+      "sessions",
+      "players"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "pages/presences.html",
+    "targetEntry": "modules/presences/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Seances, presences, statuts et liens sessionId/playerId."
+}

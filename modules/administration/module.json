@@ -1,0 +1,33 @@
+{
+  "id": "administration",
+  "name": "Administration",
+  "status": "active-legacy",
+  "firebase": {
+    "collection": "settings",
+    "relatedCollections": [
+      "players",
+      "teams",
+      "staff",
+      "changeLogs",
+      "syncLogs"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN"
+    ],
+    "write": [
+      "ADMIN"
+    ],
+    "adminOnly": true
+  },
+  "routing": {
+    "currentScreen": "pages/admin-database.html",
+    "targetEntry": "modules/administration/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Gestion base de donnees, categories, equipes, doublons et logs."
+}

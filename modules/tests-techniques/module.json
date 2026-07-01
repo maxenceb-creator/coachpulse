@@ -1,0 +1,33 @@
+{
+  "id": "tests-techniques",
+  "name": "Tests techniques",
+  "status": "active-legacy",
+  "firebase": {
+    "collection": "technicalTests",
+    "relatedCollections": [
+      "players"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "pages/tests-techniques.html",
+    "targetEntry": "modules/tests-techniques/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Saisie et suivi des tests techniques."
+}

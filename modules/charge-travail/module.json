@@ -1,0 +1,34 @@
+{
+  "id": "charge-travail",
+  "name": "Charge de travail",
+  "status": "planned",
+  "firebase": {
+    "collection": "workloads",
+    "relatedCollections": [
+      "players",
+      "sessions"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": null,
+    "targetEntry": "modules/charge-travail/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Suivi charge, bien-etre, volume et contraintes."
+}

@@ -1,0 +1,38 @@
+{
+  "id": "medical",
+  "name": "Suivi medical",
+  "status": "active-legacy",
+  "firebase": {
+    "collection": "injuries",
+    "relatedCollections": [
+      "injuryUpdates",
+      "medicalAppointments",
+      "rehabRoutines",
+      "players"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR",
+      "LECTURE"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR",
+      "LECTURE"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "pages/suivi-medical.html",
+    "targetEntry": "modules/medical/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Suivi medical, douleurs, blessures, rendez-vous et reprise."
+}

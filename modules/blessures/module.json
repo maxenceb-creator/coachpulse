@@ -1,0 +1,36 @@
+{
+  "id": "blessures",
+  "name": "Blessures",
+  "status": "planned",
+  "firebase": {
+    "collection": "injuries",
+    "relatedCollections": [
+      "players",
+      "injuryUpdates"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR",
+      "LECTURE"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR",
+      "LECTURE"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "pages/suivi-medical.html",
+    "targetEntry": "modules/blessures/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Vue dediee blessures si elle est separee du suivi medical global."
+}

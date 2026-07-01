@@ -1,0 +1,29 @@
+{
+  "id": "parametres",
+  "name": "Parametres",
+  "status": "planned",
+  "firebase": {
+    "collection": "settings",
+    "relatedCollections": [
+      "staff"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN"
+    ],
+    "write": [
+      "ADMIN"
+    ],
+    "adminOnly": true
+  },
+  "routing": {
+    "currentScreen": null,
+    "targetEntry": "modules/parametres/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Configuration application, roles, modules actifs et securite."
+}
