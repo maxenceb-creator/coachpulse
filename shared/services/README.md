@@ -26,3 +26,16 @@ Responsabilités :
 
 Phase actuelle : service ajouté sans remplacer brutalement les fonctions existantes.
 
+## permissions-service.js
+
+Service partagé pour les rôles et droits d'accès.
+
+Responsabilités :
+- normaliser le rôle utilisateur ;
+- identifier Admin / Super Admin ;
+- vérifier les permissions par module ;
+- filtrer les modules visibles selon le rôle ;
+- préparer le futur branchement Firebase Auth custom claims.
+
+Phase actuelle : service ajouté sans retirer les fonctions historiques d'app.js.
+
