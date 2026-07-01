@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Data Hub CoachPulse</title>
+<style>
+:root{--green:#1d995b;--deep:#003f24;--gold:#cdb789;--bg:#f4f8f6;--card:#fff;--text:#10251b;--muted:#66756d;--line:#e1e9e5;--bad:#991b1b;--warn:#9a5a00;--shadow:0 16px 36px rgba(6,23,13,.12)}*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 8% 0,rgba(29,153,91,.16),transparent 28%),var(--bg);color:var(--text)}main{width:min(1480px,100%);margin:0 auto;padding:18px}.hub-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;background:linear-gradient(135deg,#06351f,#006936);color:#fff;border-bottom:4px solid var(--gold);border-radius:0 0 22px 22px;padding:22px;box-shadow:var(--shadow)}.hub-head h1{margin:0;font-size:clamp(26px,4vw,44px);letter-spacing:-.03em}.hub-head p{margin:6px 0 0;color:rgba(255,255,255,.82);font-weight:800}.badge{display:inline-flex;border:1px solid rgba(205,183,137,.55);border-radius:999px;padding:7px 10px;color:#f7e7b8;font-size:12px;font-weight:1000;white-space:nowrap}.grid{display:grid;grid-template-columns:380px 1fr;gap:14px;margin-top:14px}.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow);min-width:0}.card h2{margin:0 0 12px;color:#06351f}.field{display:grid;gap:6px;margin-bottom:10px}.field label{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:1000}input,select{width:100%;border:1px solid #d8e3dd;border-radius:12px;padding:11px;font:inherit;background:#fff}.actions{display:grid;grid-template-columns:1fr;gap:8px;margin-top:12px}button{border:0;border-radius:12px;padding:11px 13px;font:inherit;font-weight:1000;cursor:pointer;background:#f8fafc;border:1px solid var(--line);color:#06351f}button.primary{background:linear-gradient(135deg,var(--green),#006936);border-color:#006936;color:#fff}button.danger{background:#fee2e2;border-color:#fecaca;color:var(--bad)}button:disabled{opacity:.45;cursor:not-allowed}.kpis{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:8px;margin-bottom:12px}.kpi{background:#f8fafc;border:1px solid var(--line);border-radius:14px;padding:10px}.kpi b{display:block;font-size:23px;color:#06351f}.kpi span{font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:1000}.columns,.anomalies,.history{display:grid;gap:7px}.pill{display:inline-flex;align-items:center;width:max-content;max-width:100%;border:1px solid #bbf7d0;background:#f0fdf4;color:#14532d;border-radius:999px;padding:5px 8px;font-size:11px;font-weight:900}.pill.bad{border-color:#fee2e2;background:#fef2f2;color:var(--bad)}.pill.warn{border-color:#fde68a;background:#fffbeb;color:var(--warn)}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px}table{width:100%;border-collapse:collapse;background:#fff;min-width:760px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;font-size:12px;vertical-align:top}th{background:#f8fafc;color:#06351f;text-transform:uppercase;font-size:10px;letter-spacing:.05em}.muted{color:var(--muted);font-weight:800}.status{margin-top:10px;color:#006936;font-weight:1000}.status.bad{color:var(--bad)}.split{display:grid;grid-template-columns:1fr 1fr;gap:12px}.history-item{border:1px solid var(--line);border-radius:12px;background:#f8fafc;padding:10px}.history-item b{display:block;color:#06351f}.history-item span{display:block;color:var(--muted);font-size:12px;font-weight:800;margin-top:3px}@media(max-width:980px){.grid,.split{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr 1fr}.hub-head{display:grid}}@media(max-width:560px){main{padding:10px}.hub-head{border-radius:0 0 16px 16px;padding:16px}.card{border-radius:12px;padding:12px}.kpis{grid-template-columns:1fr 1fr}.actions{grid-template-columns:1fr}table{min-width:620px}}
+.status-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.status-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px;box-shadow:0 10px 24px rgba(6,23,13,.07)}.status-card span{display:block;color:var(--muted);font-size:10px;font-weight:1000;text-transform:uppercase;letter-spacing:.06em}.status-card b{display:block;color:#06351f;font-size:18px;margin-top:5px}.card{border-radius:18px}.hub-head{border-radius:0 0 26px 26px}.toolbar-note{border:1px solid rgba(205,183,137,.38);background:#fffaf0;color:#6f4e16;border-radius:14px;padding:10px;font-size:12px;font-weight:850;margin-top:10px}@media(max-width:760px){.status-strip{grid-template-columns:1fr 1fr}.hub-head{border-radius:0 0 18px 18px}}@media(max-width:460px){.status-strip{grid-template-columns:1fr}}</style>
+</head>
+<body>
+<header class="hub-head">
+  <div><h1>Data Hub CoachPulse</h1><p>Connecteurs d'import, simulation et synchronisation vers Firebase.</p></div>
+  <span id="connectorBadge" class="badge">Connecteur actif : Fiches joueuses</span>
+</header>
+<main>
+  <section class="status-strip"><div class="status-card"><span>Source</span><b>Excel / CSV / JSON</b></div><div class="status-card"><span>Contrôle</span><b>Simulation avant sync</b></div><div class="status-card"><span>Destination</span><b>Firestore central</b></div><div class="status-card"><span>Historique</span><b>syncLogs</b></div></section>
+  <section class="grid">
+    <aside class="card">
+      <h2>Importer</h2>
+      <div class="field"><label>Type de fichier</label><select id="fileType"><option value="fichesJoueuses">Fiches joueuses</option><option value="presences">Présences séances</option><option value="testsTechniques">Tests techniques</option><option value="testsPhysiques">Tests physiques</option><option disabled>Méthodologie</option><option disabled>Autre</option></select></div>
+      <div class="field"><label>Fichier</label><input id="fileInput" type="file" accept=".xlsx,.csv,.json,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div>
+      <div class="actions"><button id="analyzeBtn" class="primary">Analyser</button><button id="simulateBtn">Simulation</button><button id="syncBtn">Synchroniser Firebase</button><button id="refreshHistoryBtn">Actualiser historique</button></div><div class="toolbar-note">Aucune donnée n’est supprimée automatiquement. La simulation reste l’étape de contrôle avant écriture Firebase.</div>
+      <p id="status" class="status">Sélectionne un fichier pour commencer.</p>
+    </aside>
+    <section class="card">
+      <h2>Rapport</h2>
+      <div id="kpis" class="kpis"></div>
+      <div class="split">
+        <div><h2>Colonnes reconnues</h2><div id="columns" class="columns"></div></div>
+        <div><h2>Anomalies</h2><div id="anomalies" class="anomalies"></div></div>
+      </div>
+      <h2>Aperçu standardisé</h2>
+      <div id="preview" class="table-wrap"></div>
+    </section>
+  </section>
+  <section class="card" style="margin-top:14px">
+    <h2>Historique des synchronisations</h2>
+    <div id="history" class="history"></div>
+  </section>
+</main>
+<script type="module">
+import { analyzeRows as analyzePlayersRows } from '../connectors/fichesJoueusesConnector.js';
+import { analyzeRows as analyzePresencesRows } from '../connectors/presencesConnector.js';
+import { analyzeRows as analyzeTechnicalRows } from '../connectors/testsTechniquesConnector.js';
+import { analyzeRows as analyzePhysicalRows } from '../connectors/testsPhysiquesConnector.js';
+
+const $ = s => document.querySelector(s);
+const CONNECTORS={fichesJoueuses:{label:'Fiches joueuses',analyze:analyzePlayersRows},presences:{label:'Présences séances',analyze:analyzePresencesRows},testsTechniques:{label:'Tests techniques',analyze:analyzeTechnicalRows},testsPhysiques:{label:'Tests physiques',analyze:analyzePhysicalRows}};
+let state = {file:null, rows:[], analysis:null, simulation:null};
+
+function parentApi(){
+  return window.parent?.CoachPulseCentralData || null;
+}
+function setStatus(text, bad=false){
+  $('#status').textContent = text;
+  $('#status').classList.toggle('bad', bad);
+}
+function escapeHtml(v){
+  return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+function csvRows(text){
+  const sample = text.slice(0,2000);
+  const delimiter = (sample.match(/;/g)||[]).length >= (sample.match(/,/g)||[]).length ? ';' : ',';
+  const rows=[]; let row=[], cell='', quoted=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i], n=text[i+1];
+    if(c==='"' && quoted && n==='"'){cell+='"';i++;continue}
+    if(c==='"'){quoted=!quoted;continue}
+    if(c===delimiter && !quoted){row.push(cell);cell='';continue}
+    if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&n==='\n')i++;row.push(cell);rows.push(row);row=[];cell='';continue}
+    cell+=c;
+  }
+  if(cell||row.length){row.push(cell);rows.push(row)}
+  return tableToObjects(rows);
+}
+function tableToObjects(rows){
+  const clean=rows.filter(r => (r||[]).some(c => String(c??'').trim()));
+  if(!clean.length) return [];
+  const headers=clean[0].map((h,i)=>String(h||`colonne_${i+1}`).trim());
+  return clean.slice(1).map((row,idx) => {
+    const obj={__rowNumber:idx+2};
+    headers.forEach((h,i)=>obj[h]=String(row[i]??'').trim());
+    return obj;
+  });
+}
+async function inflate(bytes, method){
+  if(method===0) return bytes;
+  if(method!==8 || !('DecompressionStream' in window)) throw new Error('Lecture XLSX non disponible sur ce navigateur. Convertis en CSV si besoin.');
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function unzip(buffer){
+  const data=new Uint8Array(buffer), view=new DataView(buffer);
+  let eocd=-1;
+  for(let i=data.length-22;i>=0&&i>data.length-66000;i--){if(view.getUint32(i,true)===0x06054b50){eocd=i;break}}
+  if(eocd<0) throw new Error('Fichier XLSX illisible.');
+  const total=view.getUint16(eocd+10,true), cdOffset=view.getUint32(eocd+16,true);
+  const entries={}; let ptr=cdOffset;
+  for(let i=0;i<total;i++){
+    if(view.getUint32(ptr,true)!==0x02014b50) break;
+    const method=view.getUint16(ptr+10,true), compSize=view.getUint32(ptr+20,true);
+    const nameLen=view.getUint16(ptr+28,true), extraLen=view.getUint16(ptr+30,true), commentLen=view.getUint16(ptr+32,true);
+    const localOffset=view.getUint32(ptr+42,true);
+    const name=new TextDecoder().decode(data.slice(ptr+46,ptr+46+nameLen));
+    const localNameLen=view.getUint16(localOffset+26,true), localExtraLen=view.getUint16(localOffset+28,true);
+    const start=localOffset+30+localNameLen+localExtraLen;
+    entries[name]={method,bytes:data.slice(start,start+compSize)};
+    ptr+=46+nameLen+extraLen+commentLen;
+  }
+  const out={};
+  for(const [name,e] of Object.entries(entries)) out[name]=new TextDecoder().decode(await inflate(e.bytes,e.method));
+  return out;
+}
+function colIndex(ref){
+  const letters=String(ref||'').replace(/[^A-Z]/gi,'').toUpperCase();
+  let n=0; for(const ch of letters)n=n*26+ch.charCodeAt(0)-64;
+  return Math.max(0,n-1);
+}
+async function xlsxRows(file){
+  const entries=await unzip(await file.arrayBuffer());
+  const parser=new DOMParser();
+  const shared=[];
+  if(entries['xl/sharedStrings.xml']){
+    parser.parseFromString(entries['xl/sharedStrings.xml'],'application/xml').querySelectorAll('si').forEach(si=>shared.push([...si.querySelectorAll('t')].map(t=>t.textContent||'').join('')));
+  }
+  const sheet=Object.keys(entries).find(k=>/^xl\/worksheets\/sheet\d+\.xml$/.test(k));
+  if(!sheet) throw new Error('Aucune feuille Excel détectée.');
+  const doc=parser.parseFromString(entries[sheet],'application/xml');
+  const rows=[];
+  doc.querySelectorAll('sheetData row').forEach(rowNode=>{
+    const row=[], formulas={};
+    rowNode.querySelectorAll('c').forEach(c=>{
+      const idx=colIndex(c.getAttribute('r'));
+      let value='';
+      if(c.getAttribute('t')==='s') value=shared[Number(c.querySelector('v')?.textContent||0)]||'';
+      else if(c.getAttribute('t')==='inlineStr') value=c.querySelector('is t')?.textContent||'';
+      else value=c.querySelector('v')?.textContent||'';
+      row[idx]=value;
+      const formula=c.querySelector('f')?.textContent||'';
+      if(formula) formulas[idx]=formula;
+    });
+    row.__formulas=formulas;
+    rows.push(row);
+  });
+  const objects=tableToObjects(rows);
+  const headers=rows.filter(r=>(r||[]).some(c=>String(c??'').trim()))[0]||[];
+  objects.forEach((obj,i)=>{
+    const formulas=rows[i+1]?.__formulas||{};
+    const named={};
+    Object.entries(formulas).forEach(([idx,formula])=>named[headers[idx]||`colonne_${Number(idx)+1}`]=formula);
+    if(Object.keys(named).length)obj.__formulas=named;
+  });
+  return objects;
+}
+async function readFile(file){
+  const name=file.name.toLowerCase();
+  if(name.endsWith('.csv')) return csvRows(await file.text());
+  if(name.endsWith('.xlsx')) return xlsxRows(file);
+  if(name.endsWith('.json')){
+    const data=JSON.parse(await file.text());
+    if(Array.isArray(data)) return data;
+    if(Array.isArray(data.players)) return data.players;
+    if(data.collections?.players) return data.collections.players;
+    return Object.values(data).flat().filter(v=>v&&typeof v==='object');
+  }
+  throw new Error('Format non supporté.');
+}
+function renderKpis(extra={}){
+  const a=state.analysis, s=state.simulation;
+  const values=[
+    ['Lignes lues', a?.rowsRead||0],
+    ['Données valides', a?.items?.length||0],
+    ['Créations', s?.created??extra.created??0],
+    ['Mises à jour', s?.updated??extra.updated??0],
+    ['Ignorées', s?.unchanged??extra.unchanged??0],
+    ['Erreurs', s?.errors??(a?.anomalies||[]).filter(x=>x.level==='error').length]
+  ];
+  $('#kpis').innerHTML=values.map(([label,value])=>`<div class="kpi"><b>${value}</b><span>${label}</span></div>`).join('');
+}
+function renderAnalysis(){
+  const a=state.analysis;
+  renderKpis();
+  $('#columns').innerHTML=a?.columns?.length?a.columns.map(c=>`<span class="pill ${c.field==='non reconnu'?'bad':''}">${escapeHtml(c.header)} → ${escapeHtml(c.field)}</span>`).join(''):'<span class="muted">Aucune analyse.</span>';
+  $('#anomalies').innerHTML=a?.anomalies?.length?a.anomalies.slice(0,30).map(x=>`<span class="pill ${x.level==='error'?'bad':x.level==='warn'?'warn':''}">L${x.row} · ${escapeHtml(x.message)}</span>`).join(''):'<span class="pill">Aucune anomalie bloquante</span>';
+  const rows=(a?.items||[]).slice(0,14);
+  const headers=['type','playerId','sessionId','attendanceId','testId','nom','prenom','date','status','duration','charge','testName','value','unit','categorie','sousCategorie','theme'];
+  $('#preview').innerHTML=rows.length?`<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(item=>`<tr>${headers.map(h=>`<td>${escapeHtml(item[h]??'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`:'<div class="muted" style="padding:14px">Aucun aperçu.</div>';
+}
+async function analyze(){
+  const file=$('#fileInput').files?.[0];
+  if(!file) return setStatus('Choisis un fichier.', true);
+  try{
+    setStatus('Analyse en cours...');
+    state.file=file;
+    state.rows=await readFile(file);
+    const connector=CONNECTORS[$('#fileType').value]||CONNECTORS.fichesJoueuses;
+    state.analysis=connector.analyze(state.rows,{fileName:file.name});
+    $('#connectorBadge').textContent='Connecteur actif : '+connector.label;
+    state.simulation=null;
+    renderAnalysis();
+    setStatus(`${file.name} analysé : ${state.analysis.rowsRead} lignes.`);
+  }catch(e){setStatus(e.message||String(e), true)}
+}
+async function simulate(){
+  if(!state.analysis) await analyze();
+  const api=parentApi();
+  if(!api?.simulateDataHubSync) return setStatus('API Data Hub indisponible dans la PWA parente.', true);
+  try{
+    setStatus('Simulation Firebase...');
+    const connector=CONNECTORS[$('#fileType').value]||CONNECTORS.fichesJoueuses;
+    state.simulation=await api.simulateDataHubSync(state.analysis.items,{fileName:state.file?.name||'',fileType:connector.label,connector:state.analysis.connector||$('#fileType').value,rowsRead:state.analysis.rowsRead,anomalies:state.analysis.anomalies});
+    renderAnalysis();
+    setStatus(`Simulation OK : ${state.simulation.created} créations, ${state.simulation.updated} mises à jour.`);
+  }catch(e){setStatus(e.message||String(e), true)}
+}
+async function syncFirebase(){
+  if(!state.simulation) await simulate();
+  if(!state.simulation) return;
+  if(!confirm(`Synchroniser Firebase ?\nCréations : ${state.simulation.created}\nMises à jour : ${state.simulation.updated}\nIgnorées : ${state.simulation.unchanged}\nErreurs : ${state.simulation.errors}\n\nAucune suppression ne sera faite.`)) return;
+  const api=parentApi();
+  try{
+    setStatus('Synchronisation Firebase...');
+    const connector=CONNECTORS[$('#fileType').value]||CONNECTORS.fichesJoueuses;
+    const report=await api.syncDataHubItems(state.analysis.items,{fileName:state.file?.name||'',fileType:connector.label,connector:state.analysis.connector||$('#fileType').value,rowsRead:state.analysis.rowsRead,anomalies:state.analysis.anomalies});
+    state.simulation=report;
+    renderAnalysis();
+    await loadHistory();
+    setStatus(`Synchronisation terminée : ${report.written} documents préparés/actualisés.`);
+  }catch(e){setStatus(e.message||String(e), true)}
+}
+async function loadHistory(){
+  const api=parentApi();
+  if(!api?.readSyncLogs){$('#history').innerHTML='<span class="muted">Historique indisponible.</span>';return}
+  try{
+    const logs=await api.readSyncLogs(12);
+    $('#history').innerHTML=logs.length?logs.map(log=>`<div class="history-item"><b>${escapeHtml(log.fileName||'Import')} · ${escapeHtml(log.fileType||'')}</b><span>${escapeHtml(log.date||'')} · créations ${log.created||0} · mises à jour ${log.updated||0} · ignorées ${log.ignored||0} · erreurs ${log.errors||0}</span></div>`).join(''):'<span class="muted">Aucun historique pour le moment.</span>';
+  }catch(e){$('#history').innerHTML=`<span class="muted">${escapeHtml(e.message||String(e))}</span>`}
+}
+$('#analyzeBtn').addEventListener('click', analyze);
+$('#simulateBtn').addEventListener('click', simulate);
+$('#syncBtn').addEventListener('click', syncFirebase);
+$('#refreshHistoryBtn').addEventListener('click', loadHistory);
+$('#fileInput').addEventListener('change', () => {state={file:null,rows:[],analysis:null,simulation:null}; setStatus('Fichier sélectionné. Lance l’analyse.');});
+renderKpis();
+loadHistory();
+</script>
+</body>
+</html>

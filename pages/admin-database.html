@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Administration Base CoachPulse</title>
+<style>
+:root{--green:#1d995b;--deep:#003f24;--gold:#cdb789;--bg:#f4f8f6;--text:#10251b;--muted:#66756d;--line:#e1e9e5;--bad:#991b1b;--warn:#9a5a00;--shadow:0 16px 36px rgba(6,23,13,.12)}*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 9% 0,rgba(29,153,91,.15),transparent 28%),var(--bg);color:var(--text)}main{width:min(1540px,100%);margin:0 auto;padding:16px}.head{background:linear-gradient(135deg,#06351f,#006936);color:#fff;border-bottom:4px solid var(--gold);border-radius:0 0 22px 22px;padding:22px;box-shadow:var(--shadow);display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.head h1{margin:0;font-size:clamp(26px,4vw,44px);letter-spacing:-.03em}.head p{margin:6px 0 0;color:rgba(255,255,255,.82);font-weight:800}.badge{border:1px solid rgba(205,183,137,.55);border-radius:999px;padding:7px 10px;color:#f7e7b8;font-size:12px;font-weight:1000;white-space:nowrap}.layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;margin-top:14px}.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--shadow);min-width:0}.card h2{margin:0 0 10px;color:#06351f}.filters{display:grid;grid-template-columns:1.5fr repeat(5,1fr);gap:8px;margin-bottom:12px}input,select,textarea{width:100%;border:1px solid #d8e3dd;border-radius:11px;padding:10px;font:inherit;background:#fff}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px}table{width:100%;border-collapse:collapse;background:#fff;min-width:1040px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;font-size:12px;vertical-align:middle}th{background:#f8fafc;color:#06351f;text-transform:uppercase;font-size:10px;letter-spacing:.05em}.avatar{width:38px;height:38px;border-radius:999px;object-fit:cover;background:linear-gradient(135deg,var(--green),var(--deep));color:#fff;display:grid;place-items:center;font-weight:1000}.player-row{cursor:pointer}.player-row:hover{background:#f8fafc}.pill{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;background:#eef8f2;color:#006936;border:1px solid rgba(29,153,91,.18);font-size:11px;font-weight:1000}.pill.bad{background:#fee2e2;color:var(--bad);border-color:#fecaca}.pill.warn{background:#fffbeb;color:var(--warn);border-color:#fde68a}.actions{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}button{border:0;border-radius:11px;padding:9px 11px;font:inherit;font-weight:1000;cursor:pointer;background:#f8fafc;border:1px solid var(--line);color:#06351f}button.primary{background:linear-gradient(135deg,var(--green),#006936);color:#fff;border-color:#006936}button.danger{background:#fee2e2;color:var(--bad);border-color:#fecaca}.quality{display:grid;gap:8px}.quality button{width:100%;text-align:left;display:flex;justify-content:space-between}.logs{display:grid;gap:8px;max-height:320px;overflow:auto}.log{border:1px solid var(--line);border-radius:12px;background:#f8fafc;padding:9px}.log b{display:block;color:#06351f}.log span{display:block;color:var(--muted);font-size:12px;font-weight:800;margin-top:3px}.drawer{position:fixed;inset:0;z-index:40;display:none;background:rgba(6,23,13,.45);padding:18px;place-items:center}.drawer.open{display:grid}.sheet{width:min(860px,96vw);max-height:min(90vh,860px);overflow:auto;background:#fff;border:1px solid var(--line);border-radius:22px;padding:16px;box-shadow:0 28px 80px rgba(6,23,13,.28)}.form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.field{display:grid;gap:5px}.field label{font-size:11px;text-transform:uppercase;color:var(--muted);font-weight:1000}.wide{grid-column:1/-1}.muted{color:var(--muted);font-weight:800}.status{font-weight:1000;color:#006936}.status.bad{color:var(--bad)}@media(max-width:1100px){.layout{grid-template-columns:1fr}.filters{grid-template-columns:1fr 1fr}.head{display:grid}}@media(max-width:640px){main{padding:10px}.head{border-radius:0 0 16px 16px;padding:16px}.filters,.form{grid-template-columns:1fr}.sheet{width:100vw;height:100dvh;max-height:none;border-radius:0}.card{padding:12px;border-radius:12px}}
+.team-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.option-editor{display:grid;gap:8px}.option-editor textarea{min-height:170px}.team-form{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}.team-list{display:grid;gap:7px;max-height:330px;overflow:auto}.team-item{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;border:1px solid var(--line);border-radius:12px;background:#f8fafc;padding:8px}.team-item b{color:#06351f}.team-item span{color:var(--muted);font-size:12px;font-weight:800}.merge-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.merge-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.duplicate-list{display:grid;gap:8px;max-height:280px;overflow:auto}.duplicate-card{border:1px solid var(--line);border-radius:13px;background:#f8fafc;padding:10px;display:grid;gap:8px}.duplicate-card strong{color:#06351f}.duplicate-card small{color:var(--muted);font-weight:800}.duplicate-card button{text-align:left}.hint{background:#fff7ed;border:1px solid #fed7aa;color:#7c2d12;border-radius:12px;padding:9px;font-size:12px;font-weight:800}@media(max-width:900px){.team-grid,.team-form,.team-item,.merge-grid{grid-template-columns:1fr}}.admin-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.admin-summary div{background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px;box-shadow:0 10px 24px rgba(6,23,13,.07)}.admin-summary span{display:block;color:var(--muted);font-size:10px;font-weight:1000;text-transform:uppercase;letter-spacing:.06em}.admin-summary b{display:block;color:#06351f;font-size:18px;margin-top:5px}.head{border-radius:0 0 26px 26px}.card{border-radius:18px}.actions button,.team-form button,.merge-actions button{min-height:40px}.filters input,.filters select{min-height:42px}@media(max-width:760px){.admin-summary{grid-template-columns:1fr 1fr}.head{border-radius:0 0 18px 18px}}@media(max-width:460px){.admin-summary{grid-template-columns:1fr}}</style>
+</head>
+<body>
+<header class="head"><div><h1>Administration Base</h1><p>Gestion des joueuses depuis Firestore, sans Excel ni console Firebase.</p></div><span class="badge">Collection : players</span></header>
+<main>
+  <section class="admin-summary"><div><span>Collection</span><b>players</b></div><div><span>Référentiel</span><b>teams / settings</b></div><div><span>Contrôle</span><b>Qualité données</b></div><div><span>Historique</span><b>changeLogs</b></div></section>
+  <section class="layout">
+    <section class="card">
+      <h2>Joueuses</h2>
+      <div class="filters">
+        <input id="q" placeholder="Rechercher nom ou prénom">
+        <select id="cat"><option value="">Catégorie</option></select>
+        <select id="sub"><option value="">Sous-catégorie</option></select>
+        <select id="team"><option value="">Équipe</option></select>
+        <select id="poste"><option value="">Poste</option></select>
+        <select id="statusFilter"><option value="">Statut</option></select>
+      </div>
+      <div class="actions"><button class="primary" id="refreshBtn">Actualiser</button><button id="exportPlayersJson">Export players JSON</button><button id="exportPlayersCsv">Export players CSV</button><button id="exportAllJson">Backup Firebase JSON</button></div>
+      <p id="status" class="status">Chargement...</p>
+      <div class="table-wrap"><table><thead><tr><th>Photo</th><th>Nom</th><th>Prénom</th><th>Catégorie</th><th>Sous-cat.</th><th>Équipe</th><th>Poste</th><th>Naissance</th><th>Statut</th><th>Modifié</th></tr></thead><tbody id="tbody"></tbody></table></div>
+    </section>
+    <aside class="card">
+      <h2>Contrôle qualité</h2>
+      <div id="quality" class="quality"></div>
+      <h2 style="margin-top:14px">Historique</h2>
+      <div id="logs" class="logs"></div>
+    </aside>
+  </section>
+
+  <section class="card" style="margin-top:14px">
+    <h2>Équipes & catégories</h2>
+    <div class="team-grid">
+      <div>
+        <h2>Équipes</h2>
+        <div class="team-form">
+          <div class="field"><label>Nom équipe</label><input id="newTeamName" placeholder="U12-U13"></div>
+          <div class="field"><label>Catégorie liée</label><select id="newTeamCategory"></select></div>
+          <button class="primary" id="saveTeamBtn">Ajouter / modifier</button>
+        </div>
+        <div id="teamList" class="team-list"></div>
+      </div>
+      <div class="option-editor">
+        <h2>Catégories officielles</h2>
+        <div class="field"><label>Catégories, une par ligne</label><textarea id="categoriesText"></textarea></div>
+        <div class="field"><label>Sous-catégories, une par ligne</label><textarea id="subCategoriesText"></textarea></div>
+        <div class="actions"><button class="primary" id="saveOptionsBtn">Enregistrer catégories</button><button id="resetOptionsBtn">Réinitialiser valeurs recommandées</button></div>
+        <p id="teamStatus" class="status"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:14px">
+    <h2>Fusion doublons</h2>
+    <p class="muted">Choisis la fiche principale à conserver, puis la fiche doublon à archiver. Les historiques match, présences et tests sont transférés vers la fiche principale.</p>
+    <div class="merge-grid">
+      <div class="field"><label>Fiche principale conservée</label><select id="primaryMerge"></select></div>
+      <div class="field"><label>Fiche doublon archivée</label><select id="duplicateMerge"></select></div>
+    </div>
+    <div class="merge-actions"><button class="primary" id="mergeBtn">Fusionner les deux fiches</button><span id="mergeStatus" class="status"></span></div>
+    <div class="hint">Aucune suppression définitive : la fiche doublon passe en archivée, son playerId reste traçable, et un log est créé dans changeLogs.</div>
+    <h2 style="margin-top:14px">Doublons probables</h2>
+    <div id="duplicateList" class="duplicate-list"></div>
+  </section>
+</main>
+<div id="drawer" class="drawer"><div class="sheet">
+  <h2 id="drawerTitle">Fiche joueuse</h2>
+  <p id="drawerMeta" class="muted"></p>
+  <div class="form">
+    <div class="field"><label>Nom</label><input id="fNom"></div>
+    <div class="field"><label>Prénom</label><input id="fPrenom"></div>
+    <div class="field"><label>Date de naissance</label><input id="fBirth" placeholder="YYYY-MM-DD"></div>
+    <div class="field"><label>Catégorie</label><select id="fCategorie"></select></div>
+    <div class="field"><label>Sous-catégorie</label><select id="fSub"></select></div>
+    <div class="field"><label>Équipe</label><input id="fTeam"></div>
+    <div class="field"><label>Poste</label><input id="fPoste"></div>
+    <div class="field"><label>Numéro</label><input id="fNumero"></div>
+    <div class="field"><label>Photo</label><input id="fPhoto"></div>
+    <div class="field"><label>Statut</label><select id="fStatus"><option value="active">Active</option><option value="left">Partie</option><option value="injured">Blessée</option><option value="archived">Archivée</option></select></div>
+    <div class="field wide"><label>Commentaire interne</label><textarea id="fComment"></textarea></div>
+  </div>
+  <div class="actions"><button class="primary" id="saveBtn">Enregistrer</button><button id="archiveBtn">Archiver</button><button id="reactivateBtn">Réactiver</button><button class="danger" id="closeBtn">Fermer</button></div>
+  <p id="saveStatus" class="status"></p>
+</div></div>
+<script type="module">
+const $=s=>document.querySelector(s);
+const CATEGORIES=['U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'];
+const SUBS=['U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U19','R1'];
+const STATUSES=['active','left','injured','archived'];
+const DEFAULT_CATEGORIES=['U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'];
+const DEFAULT_SUBS=['U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U19','R1'];
+let players=[], filtered=[], selected=null, teams=[], dbSettings=null;
+function api(){return window.parent?.CoachPulseCentralData}
+function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+function statusLabel(v){return ({ACTIVE:'Active',active:'Active',left:'Partie',injured:'Blessée',archived:'Archivée',ARCHIVED:'Archivée'}[v]||v||'Active')}
+function setStatus(t,bad=false){$('#status').textContent=t;$('#status').classList.toggle('bad',bad)}
+function fillSelect(id,values,first){const el=$(id);el.innerHTML=`<option value="">${first}</option>`+values.filter(Boolean).map(v=>`<option>${escapeHtml(v)}</option>`).join('')}
+function initSelects(){fillSelect('#cat',CATEGORIES,'Catégorie');fillSelect('#sub',SUBS,'Sous-catégorie');fillSelect('#statusFilter',STATUSES,'Statut');fillSelect('#newTeamCategory',CATEGORIES,'Catégorie liée');['#fCategorie','#fSub'].forEach((id,i)=>fillSelect(id,i?SUBS:CATEGORIES,'Choisir'))}
+function uniq(arr){return [...new Set(arr.filter(Boolean).map(String))].sort((a,b)=>a.localeCompare(b,'fr'))}
+async function load(){try{setStatus('Chargement Firestore...');players=await api().adminListPlayers();fillSelect('#team',uniq(players.map(p=>p.team)),'Équipe');fillSelect('#poste',uniq(players.map(p=>p.poste)),'Poste');render();await loadTeams();await loadLogs();setStatus(`${players.length} joueuses chargées.`)}catch(e){setStatus(e.message||String(e),true)}}
+function match(p){const q=$('#q').value.trim().toLowerCase();return (!q||`${p.nom||''} ${p.prenom||''} ${p.displayName||''}`.toLowerCase().includes(q))&&(!$('#cat').value||p.categorie===$('#cat').value)&&(!$('#sub').value||p.subCategory===$('#sub').value)&&(!$('#team').value||p.team===$('#team').value)&&(!$('#poste').value||p.poste===$('#poste').value)&&(!$('#statusFilter').value||String(p.status||'active').toLowerCase()===$('#statusFilter').value)}
+function initials(p){return String(p.prenom||p.nom||'?').slice(0,1).toUpperCase()}
+function render(){filtered=players.filter(match);$('#tbody').innerHTML=filtered.map(p=>`<tr class="player-row" data-id="${escapeHtml(p.playerId||p.id)}"><td>${p.photo?`<img class="avatar" src="${escapeHtml(p.photo)}">`:`<div class="avatar">${escapeHtml(initials(p))}</div>`}</td><td><b>${escapeHtml(p.nom||'')}</b></td><td>${escapeHtml(p.prenom||'')}</td><td>${escapeHtml(p.categorie||'')}</td><td>${escapeHtml(p.subCategory||'')}</td><td>${escapeHtml(p.team||'')}</td><td>${escapeHtml(p.poste||'')}</td><td>${escapeHtml(p.birth||p.dateNaissance||'')}</td><td><span class="pill ${String(p.status).toLowerCase()==='archived'?'bad':''}">${escapeHtml(statusLabel(p.status))}</span></td><td>${escapeHtml(p.updatedAtIso||'')}</td></tr>`).join('')||'<tr><td colspan="10" class="muted">Aucune joueuse.</td></tr>';renderQuality();renderMerge()}
+function qualityItems(){const out=[];const active=players.filter(p=>String(p.status||'active').toLowerCase()!=='archived');const missingCat=active.filter(p=>!p.categorie);const missingSub=active.filter(p=>!p.subCategory);const missingBirth=active.filter(p=>!(p.birth||p.dateNaissance));const missingTeam=active.filter(p=>!p.team);const incoherent=active.filter(p=>String(p.nom||'')!==String(p.nom||'').toUpperCase()||!p.prenom);const map=new Map();active.forEach(p=>{const k=`${p.nom||''}-${p.prenom||''}-${p.subCategory||''}`.toLowerCase();map.set(k,[...(map.get(k)||[]),p])});const dup=[...map.values()].filter(x=>x.length>1).flat();out.push(['Sans catégorie',missingCat],['Sans sous-catégorie',missingSub],['Naissance manquante',missingBirth],['Sans équipe',missingTeam],['Nom/prénom incohérent',incoherent],['Doublons potentiels',dup]);return out}
+function renderQuality(){const items=qualityItems();$('#quality').innerHTML=items.map(([label,list])=>`<button data-quality="${escapeHtml(label)}"><span>${escapeHtml(label)}</span><b>${list.length}</b></button>`).join('')}
+function normalizeKey(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/gi,'').toLowerCase()}
+function playerId(p){return p.playerId||p.id}
+function playerLabel(p){return `${p.nom||''} ${p.prenom||''}`.trim()+` · ${p.categorie||'-'} / ${p.subCategory||'-'} · ${p.team||'-'} · ${playerId(p)}`}
+function duplicatePairs(){const active=players.filter(p=>String(p.status||'active').toLowerCase()!=='archived');const groups=new Map();active.forEach(p=>{const key=[normalizeKey(p.nom),normalizeKey(p.prenom),normalizeKey(p.subCategory||p.categorie)].join('|');if(key.replace(/\|/g,''))groups.set(key,[...(groups.get(key)||[]),p])});const pairs=[];groups.forEach(group=>{if(group.length>1){for(let i=0;i<group.length;i++){for(let j=i+1;j<group.length;j++)pairs.push([group[i],group[j]])}}});return pairs}
+function renderMerge(){const options=players.map(p=>`<option value="${escapeHtml(playerId(p))}">${escapeHtml(playerLabel(p))}</option>`).join('');$('#primaryMerge').innerHTML='<option value="">Choisir la fiche à garder</option>'+options;$('#duplicateMerge').innerHTML='<option value="">Choisir la fiche à archiver</option>'+options;const pairs=duplicatePairs();$('#duplicateList').innerHTML=pairs.length?pairs.slice(0,30).map(([a,b])=>`<div class="duplicate-card"><strong>${escapeHtml(`${a.nom||''} ${a.prenom||''}`.trim())}</strong><small>${escapeHtml(playerLabel(a))}<br>${escapeHtml(playerLabel(b))}</small><button data-merge-primary="${escapeHtml(playerId(a))}" data-merge-duplicate="${escapeHtml(playerId(b))}">Préparer cette fusion</button></div>`).join(''):'<span class="muted">Aucun doublon probable détecté avec les noms/prénoms/sous-catégories actuels.</span>'}
+function prepareMerge(primaryId,duplicateId){$('#primaryMerge').value=primaryId;$('#duplicateMerge').value=duplicateId;$('#mergeStatus').textContent='Fusion préparée, vérifie la fiche principale avant validation.';window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'})}
+async function mergePlayers(){const primaryPlayerId=$('#primaryMerge').value;const duplicatePlayerId=$('#duplicateMerge').value;const primary=players.find(p=>playerId(p)===primaryPlayerId);const duplicate=players.find(p=>playerId(p)===duplicatePlayerId);if(!primary||!duplicate)return alert('Choisis deux fiches joueuses.');if(primaryPlayerId===duplicatePlayerId)return alert('La fiche principale et la fiche doublon doivent être différentes.');const msg=`Fusionner ces deux fiches ?\n\nFICHE CONSERVÉE\n${playerLabel(primary)}\n\nFICHE ARCHIVÉE\n${playerLabel(duplicate)}\n\nLes références matchEvents, attendance, technicalTests et physicalTests seront transférées vers la fiche conservée. La fiche doublon ne sera pas supprimée.`;if(!confirm(msg))return;try{$('#mergeStatus').textContent='Fusion en cours...';const result=await api().adminMergePlayers({primaryPlayerId,duplicatePlayerId});$('#mergeStatus').textContent=`Fusion terminée. Références transférées : ${Object.entries(result.refCounts||{}).map(([k,v])=>`${k} ${v}`).join(', ')||'0'}.`;await load();await loadLogs()}catch(e){$('#mergeStatus').textContent=e.message||String(e);$('#mergeStatus').classList.add('bad')}}
+function openPlayer(id){selected=players.find(p=>(p.playerId||p.id)===id);if(!selected)return;$('#drawer').classList.add('open');$('#drawerTitle').textContent=`${selected.nom||''} ${selected.prenom||''}`.trim();$('#drawerMeta').textContent=`playerId : ${selected.playerId||selected.id}`;$('#fNom').value=selected.nom||'';$('#fPrenom').value=selected.prenom||'';$('#fBirth').value=selected.birth||selected.dateNaissance||'';$('#fCategorie').value=selected.categorie||'';$('#fSub').value=selected.subCategory||'';$('#fTeam').value=selected.team||'';$('#fPoste').value=selected.poste||'';$('#fNumero').value=selected.numero||'';$('#fPhoto').value=selected.photo||'';$('#fStatus').value=String(selected.status||'active').toLowerCase();$('#fComment').value=selected.commentaireInterne||'';$('#saveStatus').textContent=''}
+function formUpdates(){return{nom:$('#fNom').value.trim(),prenom:$('#fPrenom').value.trim(),birth:$('#fBirth').value.trim(),dateNaissance:$('#fBirth').value.trim(),categorie:$('#fCategorie').value,subCategory:$('#fSub').value,team:$('#fTeam').value.trim(),poste:$('#fPoste').value.trim(),numero:$('#fNumero').value.trim(),photo:$('#fPhoto').value.trim(),status:$('#fStatus').value,commentaireInterne:$('#fComment').value.trim()}}
+function diffSummary(updates){return Object.entries(updates).filter(([k,v])=>String(selected?.[k]??'')!==String(v??'')).map(([k,v])=>`${k}: ${selected?.[k]||'-'} → ${v||'-'}`)}
+async function save(){if(!selected)return;const updates=formUpdates();const diff=diffSummary(updates);if(!diff.length){$('#saveStatus').textContent='Aucun changement.';return}if(!confirm(`Enregistrer ces changements ?\n\n${diff.join('\\n')}\n\nUn log sera créé dans changeLogs.`))return;try{$('#saveStatus').textContent='Enregistrement...';await api().adminUpdatePlayer(selected.playerId||selected.id,updates,'update');$('#saveStatus').textContent='Fiche mise à jour.';await load();openPlayer(selected.playerId||selected.id)}catch(e){$('#saveStatus').textContent=e.message||String(e);$('#saveStatus').classList.add('bad')}}
+async function archive(archived){if(!selected)return;if(!confirm(archived?'Archiver cette joueuse sans supprimer son historique ?':'Réactiver cette joueuse ?'))return;try{await api().adminArchivePlayer(selected.playerId||selected.id,archived);await load();openPlayer(selected.playerId||selected.id)}catch(e){alert(e.message||String(e))}}
+
+async function loadTeams(){try{const data=await api().adminListTeamsAndSettings();teams=data.teams||[];dbSettings=data.settings||{categories:DEFAULT_CATEGORIES,subCategories:DEFAULT_SUBS};renderTeams()}catch(e){$('#teamStatus').textContent=e.message||String(e);$('#teamStatus').classList.add('bad')}}
+function renderTeams(){const cats=dbSettings?.categories?.length?dbSettings.categories:DEFAULT_CATEGORIES;const subs=dbSettings?.subCategories?.length?dbSettings.subCategories:DEFAULT_SUBS;$('#categoriesText').value=cats.join('\n');$('#subCategoriesText').value=subs.join('\n');fillSelect('#newTeamCategory',cats,'Catégorie liée');$('#teamList').innerHTML=teams.length?teams.map(t=>`<div class="team-item"><div><b>${escapeHtml(t.name||t.teamId||'')}</b><span>${escapeHtml(t.teamId||t.id||'')}</span></div><input data-team-name="${escapeHtml(t.teamId||t.id)}" value="${escapeHtml(t.name||'')}"><button data-save-team="${escapeHtml(t.teamId||t.id)}">Sauver</button></div>`).join(''):'<span class="muted">Aucune équipe enregistrée.</span>'}
+function lines(id){return $('#'+id).value.split(/\n+/).map(x=>x.trim()).filter(Boolean)}
+async function saveTeam(teamId=''){const name=teamId?document.querySelector(`[data-team-name="${teamId}"]`)?.value:$('#newTeamName').value;const category=teamId?(teams.find(t=>(t.teamId||t.id)===teamId)?.category||''):$('#newTeamCategory').value;if(!name?.trim())return alert('Nom équipe obligatoire.');if(!confirm(`Enregistrer l’équipe : ${name} ?`))return;try{$('#teamStatus').textContent='Enregistrement équipe...';await api().adminSaveTeam({teamId,name,category});$('#newTeamName').value='';await loadTeams();$('#teamStatus').textContent='Équipe enregistrée.';await loadLogs()}catch(e){$('#teamStatus').textContent=e.message||String(e);$('#teamStatus').classList.add('bad')}}
+async function saveOptions(reset=false){const categories=reset?DEFAULT_CATEGORIES:lines('categoriesText');const subCategories=reset?DEFAULT_SUBS:lines('subCategoriesText');if(!confirm('Enregistrer les catégories et sous-catégories officielles ?'))return;try{$('#teamStatus').textContent='Enregistrement catégories...';dbSettings=await api().adminSaveDatabaseOptions({categories,subCategories});renderTeams();$('#teamStatus').textContent='Catégories enregistrées.';await loadLogs()}catch(e){$('#teamStatus').textContent=e.message||String(e);$('#teamStatus').classList.add('bad')}}
+
+async function loadLogs(){try{const logs=await api().adminReadChangeLogs(30);$('#logs').innerHTML=logs.map(l=>`<div class="log"><b>${escapeHtml(l.summary||l.type||'Modification')}</b><span>${escapeHtml(l.updatedAtIso||'')} · ${escapeHtml(l.updatedByEmail||'')}</span></div>`).join('')||'<span class="muted">Aucun log.</span>'}catch(e){$('#logs').innerHTML=`<span class="muted">${escapeHtml(e.message||String(e))}</span>`}}
+document.addEventListener('click',e=>{const row=e.target.closest('.player-row');if(row)openPlayer(row.dataset.id);if(e.target.dataset.mergePrimary)prepareMerge(e.target.dataset.mergePrimary,e.target.dataset.mergeDuplicate)});
+['q','cat','sub','team','poste','statusFilter'].forEach(id=>$('#'+id).addEventListener('input',render));
+$('#refreshBtn').addEventListener('click',load);$('#saveTeamBtn').addEventListener('click',()=>saveTeam(''));$('#teamList').addEventListener('click',e=>{if(e.target.dataset.saveTeam)saveTeam(e.target.dataset.saveTeam)});$('#saveOptionsBtn').addEventListener('click',()=>saveOptions(false));$('#resetOptionsBtn').addEventListener('click',()=>saveOptions(true));$('#mergeBtn').addEventListener('click',mergePlayers);$('#closeBtn').addEventListener('click',()=>$('#drawer').classList.remove('open'));$('#drawer').addEventListener('click',e=>{if(e.target.id==='drawer')$('#drawer').classList.remove('open')});$('#saveBtn').addEventListener('click',save);$('#archiveBtn').addEventListener('click',()=>archive(true));$('#reactivateBtn').addEventListener('click',()=>archive(false));$('#exportPlayersJson').addEventListener('click',()=>api().adminExportPlayers('json'));$('#exportPlayersCsv').addEventListener('click',()=>api().adminExportPlayers('csv'));$('#exportAllJson').addEventListener('click',()=>api().exportCentralFirestore('json'));
+initSelects();load();
+</script>
+</body>
+</html>
