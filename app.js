@@ -75,10 +75,22 @@ function openDrawer(){
   overlay.classList.add('show');
 }
 function requireAuth(){ return Boolean(authReady && currentUser); }
-function getCurrentUserRole(){ return (currentProfile?.role || currentUserRole || 'STAFF').toUpperCase(); }
-function isAdmin(){ return ['ADMIN','RESPONSABLE'].includes(getCurrentUserRole()); }
-function isSuperAdmin(){ return getCurrentUserRole() === 'ADMIN'; }
+function getCurrentUserRole(){
+  const service = permissionsService();
+  if(service?.getRole) return service.getRole(currentProfile, currentUserRole);
+  return (currentProfile?.role || currentUserRole || 'STAFF').toUpperCase();
+}
+function isAdmin(){
+  const service = permissionsService();
+  return service?.isAdminRole ? service.isAdminRole(getCurrentUserRole()) : ['ADMIN','RESPONSABLE'].includes(getCurrentUserRole());
+}
+function isSuperAdmin(){
+  const service = permissionsService();
+  return service?.isSuperAdminRole ? service.isSuperAdminRole(getCurrentUserRole()) : getCurrentUserRole() === 'ADMIN';
+}
 function hasModulePermission(module, action='read'){
+  const service = permissionsService();
+  if(service?.canUseModule) return service.canUseModule(module, getCurrentUserRole(), action);
   if(!module || module.active === false) return false;
   const roles = module.permissions?.[action] || module.permissions?.read || [];
   return roles.map(String).map(r => r.toUpperCase()).includes(getCurrentUserRole());
@@ -95,6 +107,9 @@ function escapeHtml(v){
 function playersService(){
   return window.CoachPulsePlayersService || null;
 }
+function permissionsService(){
+  return window.CoachPulsePermissionsService || null;
+}
 function sortPlayersForApp(players){
   const service = playersService();
   if(service?.dedupePlayers) return service.dedupePlayers(players);
@@ -102,7 +117,10 @@ function sortPlayersForApp(players){
 }
 
 function visibleModules(section){
-  return moduleRegistry().filter(module => module.active !== false && module.settings?.showInNav !== false && (!section || module.section === section) && hasModulePermission(module, 'read'));
+  const service = permissionsService();
+  const modules = moduleRegistry();
+  if(service?.visibleModules) return service.visibleModules(modules, getCurrentUserRole(), section);
+  return modules.filter(module => module.active !== false && module.settings?.showInNav !== false && (!section || module.section === section) && hasModulePermission(module, 'read'));
 }
 function renderModuleShell(){
   tools = buildTools();
