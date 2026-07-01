@@ -1,0 +1,12 @@
+{
+  "name": "coachpulse",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CoachPulse PWA for staff, match stats, attendance, tests, medical follow-up and administration.",
+  "scripts": {
+    "check": "node --check app.js && node --check sw.js",
+    "deploy:prod": "firebase deploy --project coach-pulse-ee6b0",
+    "deploy:dev": "firebase hosting:channel:deploy dev --project coach-pulse-ee6b0",
+    "firebase:project": "firebase use"
+  }
+}

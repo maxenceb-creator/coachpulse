@@ -53,3 +53,34 @@ Pour ajouter un module :
 6. Ajouter un connecteur Data Hub si le module importe Excel/CSV/JSON.
 
 Les modules lisent tous la meme base commune `players`, `teams` et `settings`.
+
+## Structure cible progressive
+
+La migration doit se faire module par module. Les pages historiques dans `pages/` restent fonctionnelles tant que leur equivalent modulaire n'est pas pret.
+
+Structure preparee :
+
+- `modules/dashboard/` : accueil et indicateurs staff
+- `modules/matchs/` : prise de stats et evenements de match
+- `modules/joueuses/` : fiches joueuses et liens `playerId`
+- `modules/medical/` : suivi medical central
+- `modules/blessures/` : vues dediees blessures si separees du medical
+- `modules/presences/` : seances et attendance
+- `modules/tests-techniques/` : tests techniques
+- `modules/tests-athletiques/` : tests physiques / athletiques
+- `modules/charge-travail/` : charge et bien-etre
+- `modules/rapports/` : bilans et exports
+- `modules/administration/` : base de donnees et droits
+- `modules/parametres/` : configuration application
+
+Dossiers partages :
+
+- `shared/components/` : composants reutilisables
+- `shared/services/` : acces Firebase, cache, exports
+- `shared/utils/` : normalisation, dates, formats
+- `shared/ui/` : helpers visuels
+- `css/` : theme global, layout, composants
+- `js/` : router, bootstrap, configuration
+
+Regle de migration : ne deplacer un module dans `modules/` que lorsqu'il est teste et que son ancienne page est encore disponible comme fallback.
+

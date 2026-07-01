@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "coach-pulse-ee6b0"
+    "default": "coach-pulse-ee6b0",
+    "prod": "coach-pulse-ee6b0"
   }
 }
