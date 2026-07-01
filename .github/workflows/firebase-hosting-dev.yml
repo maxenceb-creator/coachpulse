@@ -6,14 +6,32 @@ on:
   push:
     branches:
       - dev
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 jobs:
   build_and_deploy_dev:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COACH_PULSE_EE6B0 }}
-          projectId: coach-pulse-ee6b0
-          channelId: dev
+      - name: Prepare Firebase credentials
+        run: |
+          cat > "$HOME/firebase-service-account.json" <<'SERVICE_ACCOUNT'
+          ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COACH_PULSE_EE6B0 }}
+          SERVICE_ACCOUNT
+      - name: Deploy DEV preview channel
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /home/runner/firebase-service-account.json
+        run: |
+          set +e
+          npx firebase-tools@latest hosting:channel:deploy dev --project coach-pulse-ee6b0 --non-interactive --expires 30d 2>&1 | tee firebase-dev-deploy.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          if grep -q "is the current active version" firebase-dev-deploy.log; then
+            echo "Firebase DEV channel is already on this version. Treating as success."
+            exit 0
+          fi
+          exit "$status"
