@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-20-20260701-medical-ui-upgrade';
+const CACHE_NAME = 'coachpulse-v6-4-24-20260702-admin-create-player-dev';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',

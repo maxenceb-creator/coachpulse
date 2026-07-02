@@ -9,7 +9,7 @@
   }
 
   function getRole(profile={}, fallback='STAFF'){
-    return normalizeRole(profile.role || fallback);
+    return normalizeRole(profile?.role || fallback);
   }
 
   function isAdminRole(role){
