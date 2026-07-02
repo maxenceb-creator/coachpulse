@@ -1782,7 +1782,10 @@ if(typeof window.v51Season==='function'){
 <script id="coachstats-v726-custom-players">
 (function(){
   "use strict";
-  function readPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=p.playerId||p.id||[p.nom,p.prenom,p.categorie,p.subCategory].filter(Boolean).join("-");if(key)by.set(key,p)});return Array.from(by.values())}catch(_){return []}}
+  function normalizeKey(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/gi,"").toLowerCase();}
+  function playerKey(p){return [p.nom,p.prenom].map(normalizeKey).join("|");}
+  function mergePlayer(a,b){const out=Object.assign({},a||{});Object.keys(b||{}).forEach(k=>{if((out[k]==null||out[k]==="")&&b[k]!=null&&b[k]!=="")out[k]=b[k]});if(b&&b.photo&&!out.photo)out.photo=b.photo;return out;}
+  function readPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=playerKey(p)||p.playerId||p.id;if(!key)return;by.set(key,mergePlayer(by.get(key),p))});return Array.from(by.values())}catch(_){return []}}
   function displayName(p){return `${String(p.nom||"").toUpperCase()} ${String(p.prenom||"").trim()}`.trim();}
   function teamCategory(p){
     const sub=String(p.categorie||p.subCategory||"").toUpperCase();
@@ -1800,12 +1803,18 @@ if(typeof window.v51Season==='function'){
   function merge(){
     if(!Array.isArray(window.PLAYER_DB)&&typeof PLAYER_DB==="undefined")return;
     const db=typeof PLAYER_DB!=="undefined"?PLAYER_DB:window.PLAYER_DB;
+    const byName=new Map(db.map(p=>[p.name,p]));
     const names=new Set(db.map(p=>p.name));
     readPlayers().forEach(p=>{
       const name=displayName(p);
-      if(!name||names.has(name))return;
+      if(!name)return;
+      const existing=byName.get(name);
+      if(existing){
+        if(p.photo&&!existing.photo)existing.photo=p.photo;
+        return;
+      }
       const row={source:"Saisie manuelle CoachPulse",birth:p.birth||"",age:p.age||"",lastName:String(p.nom||"").toUpperCase(),firstName:String(p.prenom||"").toUpperCase(),name,nationality:"France",season:"2026-2027",category:teamCategory(p),subCategory:p.categorie||p.subCategory||"",foot:p.foot||"",team:p.team||teamCategory(p),arrival:"2026-2027",departure:"",returnDate:"",leftClub:"",photo:p.photo||""};
-      db.push(row); names.add(name);
+      db.push(row); names.add(name); byName.set(name,row);
       try{if(Array.isArray(ROSTER)&&!ROSTER.includes(name))ROSTER.push(name);}catch(_){}
       try{PLAYER_MAP[name]=row;}catch(_){}
     });
