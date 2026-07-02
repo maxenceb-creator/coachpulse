@@ -107,8 +107,14 @@ function escapeHtml(v){
 function playersService(){
   return window.CoachPulsePlayersService || null;
 }
+function teamsService(){
+  return window.CoachPulseTeamsService || null;
+}
 function permissionsService(){
   return window.CoachPulsePermissionsService || null;
+}
+function firestoreServiceContext(){
+  return {firebaseFns, db, user:currentUser};
 }
 function sortPlayersForApp(players){
   const service = playersService();
@@ -620,7 +626,7 @@ async function pullCentralPlayersToLocal(manual=true){
   const service = playersService();
   let players = [];
   if(service?.readFirestorePlayers){
-    players = await service.readFirestorePlayers({firebaseFns, db});
+    players = await service.readFirestorePlayers(firestoreServiceContext());
   }else{
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
     snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
@@ -1250,7 +1256,8 @@ async function adminListPlayers(){
   if(!guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = playersService();
-  if(service?.readFirestorePlayers) return service.readFirestorePlayers({firebaseFns, db});
+  if(service?.listPlayers) return service.listPlayers(firestoreServiceContext());
+  if(service?.readFirestorePlayers) return service.readFirestorePlayers(firestoreServiceContext());
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
   const players = [];
   snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
@@ -1289,9 +1296,10 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   if(!guardAdminAction()) return {changed:false, changes:{}};
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   if(!playerId) throw new Error('playerId manquant.');
+  const service = playersService();
   const ref = firebaseFns.doc(db, 'players', playerId);
-  const snap = await firebaseFns.getDoc(ref);
-  const before = snap.exists() ? {id:snap.id, playerId:snap.id, ...snap.data()} : {};
+  const snap = service?.getPlayer ? null : await firebaseFns.getDoc(ref);
+  const before = service?.getPlayer ? (await service.getPlayer(playerId, firestoreServiceContext()) || {}) : (snap.exists() ? {id:snap.id, playerId:snap.id, ...snap.data()} : {});
   const clean = {...updates};
   if(clean.nom) clean.nom = String(clean.nom).trim().toUpperCase();
   if(clean.prenom) clean.prenom = String(clean.prenom).trim();
@@ -1305,7 +1313,8 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   const after = {...before, ...clean};
   const changes = playerAdminDiff(before, after);
   if(!Object.keys(changes).length) return {changed:false, changes:{}};
-  await firebaseFns.setDoc(ref, clean, {merge:true});
+  if(service?.savePlayer) await service.savePlayer(after, firestoreServiceContext());
+  else await firebaseFns.setDoc(ref, clean, {merge:true});
   const summary = Object.entries(changes).map(([field,v]) => `${field}: ${v.before || '-'} → ${v.after || '-'}`).join(' · ');
   await writeChangeLog({collectionName:'players', documentId:playerId, action, before, after, changes, summary});
   if(clean.teamId && clean.team) await firebaseFns.setDoc(firebaseFns.doc(db, 'teams', clean.teamId), {teamId:clean.teamId, name:clean.team, source:'Administration', updatedAt:firebaseFns.serverTimestamp()}, {merge:true});
@@ -1344,6 +1353,13 @@ const DEFAULT_DB_OPTIONS = {
 async function adminListTeamsAndSettings(){
   if(!guardAdminAction()) return {teams:[], settings:DEFAULT_DB_OPTIONS};
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const service = teamsService();
+  if(service?.listTeams && service?.readDatabaseOptions){
+    return {
+      teams:await service.listTeams(firestoreServiceContext()),
+      settings:await service.readDatabaseOptions(firestoreServiceContext())
+    };
+  }
   const teamsSnap = await firebaseFns.getDocs(firebaseFns.collection(db, 'teams'));
   const teams = [];
   teamsSnap.forEach(docSnap => teams.push({id:docSnap.id, teamId:docSnap.id, ...docSnap.data()}));
@@ -1366,11 +1382,22 @@ async function adminSaveTeam(team={}){
   if(!name) throw new Error('Nom d’équipe obligatoire.');
   const teamId = team.teamId || team.id || stableFirestoreId('team', name);
   const ref = firebaseFns.doc(db, 'teams', teamId);
-  const snap = await firebaseFns.getDoc(ref);
-  const before = snap.exists() ? {id:snap.id, ...snap.data()} : {};
-  const after = {teamId, name, category:team.category || '', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''};
-  await firebaseFns.setDoc(ref, after, {merge:true});
-  await writeChangeLog({collectionName:'teams', documentId:teamId, action:snap.exists()?'update':'create', before, after:{...before,...after}, changes:objectDiff(before, after, ['name','category']), summary:`Équipe ${snap.exists()?'modifiée':'créée'} : ${name}`});
+  const service = teamsService();
+  let before = {};
+  let created = false;
+  let after = {teamId, name, category:team.category || '', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''};
+  if(service?.saveTeam){
+    const result = await service.saveTeam(after, firestoreServiceContext());
+    before = result.before || {};
+    created = result.created;
+    after = result.team;
+  }else{
+    const snap = await firebaseFns.getDoc(ref);
+    before = snap.exists() ? {id:snap.id, ...snap.data()} : {};
+    created = !snap.exists();
+    await firebaseFns.setDoc(ref, after, {merge:true});
+  }
+  await writeChangeLog({collectionName:'teams', documentId:teamId, action:created?'create':'update', before, after:{...before,...after}, changes:objectDiff(before, after, ['name','category']), summary:`Équipe ${created?'créée':'modifiée'} : ${name}`});
   return {teamId, name};
 }
 function cleanOptionList(values){
@@ -1382,7 +1409,8 @@ async function adminSaveDatabaseOptions(options={}){
   const ref = firebaseFns.doc(db, 'settings', 'database-options');
   const snap = await firebaseFns.getDoc(ref);
   const before = snap.exists() ? snap.data() : {};
-  const after = {
+  const service = teamsService();
+  const after = service?.saveDatabaseOptions ? await service.saveDatabaseOptions(options, firestoreServiceContext()) : {
     settingsId:'database-options',
     categories:cleanOptionList(options.categories),
     subCategories:cleanOptionList(options.subCategories),
@@ -1391,11 +1419,16 @@ async function adminSaveDatabaseOptions(options={}){
     updatedBy:currentUser.uid,
     updatedByEmail:currentUser.email || ''
   };
-  await firebaseFns.setDoc(ref, after, {merge:true});
+  if(!service?.saveDatabaseOptions) await firebaseFns.setDoc(ref, after, {merge:true});
   await writeChangeLog({collectionName:'settings', documentId:'database-options', action:'update', before, after:{...before,...after}, changes:objectDiff(before, after, ['categories','subCategories']), summary:'Options catégories mises à jour'});
   return after;
 }
 async function updatePlayerRefsInCollection(collectionName, fromPlayerId, toPlayerId){
+  const service = playersService();
+  if(service?.updatePlayerRefs){
+    const counts = await service.updatePlayerRefs({fromPlayerId, toPlayerId, collections:[collectionName]}, firestoreServiceContext());
+    return counts[collectionName] || 0;
+  }
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, collectionName));
   const writes = [];
   let count = 0;

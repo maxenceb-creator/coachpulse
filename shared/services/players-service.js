@@ -1,60 +1,109 @@
 // CoachPulse shared players service.
-// Phase 1: standalone helper. Existing modules keep their current paths.
+// Phase 1: canonical player model + CRUD helpers, while keeping legacy local cache compatibility.
 
 (function(global){
   const CACHE_KEY = 'coachpulse:centralPlayers';
   const CUSTOM_CACHE_KEY = 'coachpulse:customPlayers';
+  const COLLECTION = 'players';
+  const ACTIVE_STATUSES = ['active', 'injured', 'left', 'archived'];
+  const PLAYER_REF_COLLECTIONS = ['matchEvents', 'attendance', 'technicalTests', 'physicalTests', 'injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines'];
 
   function asText(value){ return String(value ?? '').trim(); }
   function normalizeUpper(value){ return asText(value).toUpperCase(); }
+  function nowIso(){ return new Date().toISOString(); }
 
-  function stableId(...parts){
-    const raw = parts.map(part =>
+  function stableId(){
+    const raw = Array.from(arguments).map(part =>
       asText(part).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     ).join('-');
-    return raw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `id-${Date.now().toString(36)}`;
+    return raw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || `id-${Date.now().toString(36)}`;
+  }
+
+  function normalizeTeamFromCategory(category){
+    const c = normalizeUpper(category);
+    const n = Number((c.match(/\d+/) || [])[0] || 0);
+    if(c.includes('R1') || c.includes('SENIOR') || c.includes('SÉNIOR')) return 'R1';
+    if(!n) return c || 'Non renseignee';
+    if(n <= 7) return 'U7';
+    if(n <= 9) return 'U8-U9';
+    if(n <= 11) return 'U10-U11';
+    if(n <= 13) return 'U12-U13';
+    if(n <= 14) return 'U12-U13-U14';
+    if(n <= 16) return 'U14-U15-U16';
+    return 'U19';
   }
 
   function displayName(player){
     const nom = player?.nom || player?.lastName || '';
     const prenom = player?.prenom || player?.firstName || '';
-    return asText(player?.displayName || [nom, prenom].filter(Boolean).join(' '));
+    return asText(player?.displayName || [normalizeUpper(nom), prenom].filter(Boolean).join(' '));
   }
 
-  function normalizePlayer(raw={}){
-    const full = asText(raw.displayName || raw.joueuse || raw.name || raw.playerName);
+  function splitName(raw={}){
+    const full = asText(raw.displayName || raw.joueuse || raw.name || raw.fullName || raw.playerName);
     let nom = asText(raw.nom || raw.lastName);
     let prenom = asText(raw.prenom || raw.firstName);
 
-    if(!nom && full){
+    if((!nom || !prenom) && full){
       const parts = full.split(/\s+/).filter(Boolean);
-      nom = parts.shift() || '';
-      prenom = parts.join(' ');
+      const upper = [];
+      while(parts.length && parts[0] === parts[0].toUpperCase()) upper.push(parts.shift());
+      if(upper.length && parts.length){
+        nom = nom || upper.join(' ');
+        prenom = prenom || parts.join(' ');
+      }else{
+        nom = nom || parts.slice(0, -1).join(' ');
+        prenom = prenom || parts.slice(-1).join(' ');
+      }
     }
 
+    return {nom:normalizeUpper(nom), prenom};
+  }
+
+  function normalizePlayer(raw={}){
+    const names = splitName(raw);
     const categorie = asText(raw.categorie || raw.category);
-    const subCategory = asText(raw.subCategory || raw.sousCategorie || raw.sous_category);
+    const subCategory = asText(raw.subCategory || raw.sousCategorie || raw.sous_category || categorie);
     const birth = asText(raw.birth || raw.dateNaissance || raw.birthDate);
-    const playerId = asText(raw.playerId || raw.id) || stableId('player', nom, prenom, categorie, subCategory, birth);
-    const team = asText(raw.team || raw.equipe || categorie);
+    const team = asText(raw.team || raw.equipe || normalizeTeamFromCategory(subCategory || categorie));
+    const importedId = raw.id && !String(raw.id).startsWith('manual-') ? raw.id : '';
+    const playerId = asText(raw.playerId || importedId) || stableId('player', names.nom, names.prenom, categorie, subCategory, birth);
+    const status = asText(raw.status || 'active').toLowerCase();
 
     return {
       ...raw,
       id: playerId,
       playerId,
-      nom: normalizeUpper(nom),
-      prenom,
-      displayName: asText(raw.displayName || [normalizeUpper(nom), prenom].filter(Boolean).join(' ')),
+      nom: names.nom,
+      prenom: names.prenom,
+      displayName: displayName({...raw, nom:names.nom, prenom:names.prenom}),
       categorie,
       subCategory,
       team,
       teamId: asText(raw.teamId) || stableId('team', team || categorie || 'global'),
       poste: asText(raw.poste || raw.position),
+      numero: asText(raw.numero || raw.number),
       photo: asText(raw.photo || raw.avatar),
+      foot: asText(raw.foot || raw.pied),
       birth,
       dateNaissance: asText(raw.dateNaissance || birth),
-      status: asText(raw.status || 'active')
+      status: ACTIVE_STATUSES.includes(status) ? status : status || 'active',
+      source: asText(raw.source || 'CoachPulse')
     };
+  }
+
+  function normalizePlayerForWrite(raw={}, context={}){
+    const player = normalizePlayer(raw);
+    const iso = context.nowIso || nowIso();
+    const clean = {
+      ...player,
+      updatedAtIso: iso,
+      updatedBy: context.user?.uid || raw.updatedBy || '',
+      updatedByEmail: context.user?.email || raw.updatedByEmail || ''
+    };
+    if(context.firebaseFns?.serverTimestamp) clean.updatedAt = context.firebaseFns.serverTimestamp();
+    if(!raw.createdAtIso) clean.createdAtIso = iso;
+    return clean;
   }
 
   function parseCache(key){
@@ -67,7 +116,7 @@
   function dedupePlayers(players=[]){
     const byId = new Map();
     players.map(normalizePlayer).forEach(player => {
-      if(player.playerId) byId.set(player.playerId, {...(byId.get(player.playerId)||{}), ...player});
+      if(player.playerId) byId.set(player.playerId, {...(byId.get(player.playerId) || {}), ...player});
     });
     return [...byId.values()].sort((a,b) => displayName(a).localeCompare(displayName(b), 'fr'));
   }
@@ -82,12 +131,108 @@
     return normalized;
   }
 
-  async function readFirestorePlayers({firebaseFns, db}={}){
-    if(!firebaseFns || !db) return readCachedPlayers();
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
+  function firestoreContext({firebaseFns, db}={}){
+    if(!firebaseFns || !db) throw new Error('Connexion Firebase requise.');
+    return {firebaseFns, db};
+  }
+
+  async function listPlayers(ctx={}, filters={}){
+    if(!ctx.firebaseFns || !ctx.db) return filterPlayers(readCachedPlayers(), filters);
+    const {firebaseFns, db} = firestoreContext(ctx);
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION));
     const rows = [];
     snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()})));
-    return writeCache(rows);
+    const normalized = writeCache(rows);
+    return filterPlayers(normalized, filters);
+  }
+
+  async function readFirestorePlayers(ctx){ return listPlayers(ctx); }
+
+  async function getPlayer(playerId, ctx={}){
+    if(!playerId) return null;
+    if(!ctx.firebaseFns || !ctx.db) return readCachedPlayers().find(p => p.playerId === playerId || p.id === playerId) || null;
+    const {firebaseFns, db} = firestoreContext(ctx);
+    const snap = await firebaseFns.getDoc(firebaseFns.doc(db, COLLECTION, playerId));
+    return snap.exists() ? normalizePlayer({id:snap.id, playerId:snap.id, ...snap.data()}) : null;
+  }
+
+  async function savePlayer(player={}, ctx={}, options={}){
+    const {firebaseFns, db} = firestoreContext(ctx);
+    const clean = normalizePlayerForWrite(player, {firebaseFns, user:ctx.user});
+    const ref = firebaseFns.doc(db, COLLECTION, clean.playerId);
+    const beforeSnap = await firebaseFns.getDoc(ref);
+    const before = beforeSnap.exists() ? normalizePlayer({id:beforeSnap.id, playerId:beforeSnap.id, ...beforeSnap.data()}) : null;
+    const payload = {...clean};
+    if(before && before.createdAtIso) delete payload.createdAtIso;
+    if(!before && firebaseFns.serverTimestamp) payload.createdAt = firebaseFns.serverTimestamp();
+    await firebaseFns.setDoc(ref, payload, {merge:true});
+    if(options.writeTeam !== false && clean.teamId && clean.team){
+      await firebaseFns.setDoc(firebaseFns.doc(db, 'teams', clean.teamId), {
+        teamId:clean.teamId,
+        name:clean.team,
+        category:clean.categorie || '',
+        source:'players',
+        updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined,
+        updatedAtIso:payload.updatedAtIso
+      }, {merge:true});
+    }
+    await listPlayers(ctx).catch(()=>{});
+    return {player:clean, before, created:!before};
+  }
+
+  async function archivePlayer(playerId, archived=true, ctx={}){
+    const existing = await getPlayer(playerId, ctx);
+    if(!existing) throw new Error('Joueuse introuvable.');
+    return savePlayer({...existing, status:archived ? 'archived' : 'active'}, ctx, {writeTeam:false});
+  }
+
+  async function updatePlayerRefs({fromPlayerId, toPlayerId, collections=PLAYER_REF_COLLECTIONS}={}, ctx={}){
+    if(!fromPlayerId || !toPlayerId) throw new Error('playerId manquant.');
+    const {firebaseFns, db} = firestoreContext(ctx);
+    const refCounts = {};
+    for(const collectionName of collections){
+      const snap = await firebaseFns.getDocs(firebaseFns.collection(db, collectionName));
+      const writes = [];
+      let count = 0;
+      snap.forEach(docSnap => {
+        const data = docSnap.data() || {};
+        if(data.playerId === fromPlayerId){
+          count++;
+          writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
+            playerId:toPlayerId,
+            mergedFromPlayerId:fromPlayerId,
+            updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined,
+            updatedAtIso:nowIso(),
+            updatedBy:ctx.user?.uid || '',
+            updatedByEmail:ctx.user?.email || ''
+          }, {merge:true}));
+        }
+      });
+      await Promise.all(writes);
+      refCounts[collectionName] = count;
+    }
+    return refCounts;
+  }
+
+  async function mergePlayers({primaryPlayerId, duplicatePlayerId, collections}={}, ctx={}){
+    if(!primaryPlayerId || !duplicatePlayerId || primaryPlayerId === duplicatePlayerId) throw new Error('Choisis deux fiches différentes.');
+    const primary = await getPlayer(primaryPlayerId, ctx);
+    const duplicate = await getPlayer(duplicatePlayerId, ctx);
+    if(!primary || !duplicate) throw new Error('Une des deux fiches est introuvable.');
+
+    const refCounts = await updatePlayerRefs({fromPlayerId:duplicatePlayerId, toPlayerId:primaryPlayerId, collections}, ctx);
+    const fill = {};
+    ['photo','birth','dateNaissance','poste','numero','commentaireInterne','team','teamId','categorie','subCategory','foot'].forEach(key => {
+      if((primary[key] == null || primary[key] === '') && duplicate[key]) fill[key] = duplicate[key];
+    });
+    if(Object.keys(fill).length) await savePlayer({...primary, ...fill}, ctx, {writeTeam:false});
+    await savePlayer({
+      ...duplicate,
+      status:'archived',
+      archivedReason:'Fusion doublon',
+      mergedIntoPlayerId:primaryPlayerId
+    }, ctx, {writeTeam:false});
+    return {primary, duplicate, refCounts, filledFields:Object.keys(fill)};
   }
 
   function filterPlayers(players=[], filters={}){
@@ -97,14 +242,17 @@
       && (!filters.categorie || player.categorie === filters.categorie)
       && (!filters.subCategory || player.subCategory === filters.subCategory)
       && (!filters.team || player.team === filters.team)
-      && (!filters.status || player.status === filters.status)
+      && (!filters.status || String(player.status || '').toLowerCase() === String(filters.status).toLowerCase())
     );
   }
 
   const service = {
-    CACHE_KEY, CUSTOM_CACHE_KEY, stableId, displayName,
-    normalizePlayer, dedupePlayers, readCachedPlayers,
-    readFirestorePlayers, writeCache, filterPlayers
+    CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
+    stableId, normalizeTeamFromCategory, displayName, splitName,
+    normalizePlayer, normalizePlayerForWrite, dedupePlayers,
+    readCachedPlayers, writeCache, filterPlayers,
+    listPlayers, readFirestorePlayers, getPlayer, savePlayer, archivePlayer,
+    updatePlayerRefs, mergePlayers
   };
 
   global.CoachPulsePlayersService = service;

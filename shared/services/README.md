@@ -14,7 +14,7 @@ Regle : un service partage ne doit pas dependre d'un module precis.
 
 ## players-service.js
 
-Premier service partagé stable pour la base joueuses.
+Service partagé stable pour la base joueuses commune.
 
 Responsabilités :
 - normaliser une joueuse ;
@@ -23,8 +23,38 @@ Responsabilités :
 - lire Firestore `players` quand Firebase est disponible ;
 - dédupliquer par `playerId` ;
 - filtrer par recherche, catégorie, sous-catégorie, équipe et statut.
+- créer ou mettre à jour une fiche joueuse ;
+- archiver une fiche sans suppression ;
+- fusionner deux fiches en transférant les références `playerId`.
 
-Phase actuelle : service ajouté sans remplacer brutalement les fonctions existantes.
+Contrat modèle principal :
+- `playerId` : identifiant stable et clé du document Firestore.
+- `nom`, `prenom`, `displayName`.
+- `categorie`, `subCategory`, `team`, `teamId`.
+- `poste`, `numero`, `photo`, `foot`, `birth`, `dateNaissance`.
+- `status` : `active`, `injured`, `left` ou `archived`.
+- `createdAtIso`, `updatedAtIso`, `updatedBy`, `updatedByEmail`.
+
+Phase actuelle : `app.js` garde l'API historique `CoachPulseCentralData`, mais délègue progressivement lecture et écriture à ce service.
+
+## teams-service.js
+
+Service partagé pour les équipes, groupes d'âge et options de base.
+
+Responsabilités :
+- normaliser une équipe ;
+- garantir un `teamId` stable ;
+- lire et écrire Firestore `teams` ;
+- lire et écrire `settings/database-options` ;
+- fournir les catégories et sous-catégories officielles.
+
+Contrat modèle principal :
+- `teamId` : identifiant stable et clé du document Firestore.
+- `name`.
+- `category`.
+- `subCategories`.
+- `status`.
+- `createdAtIso`, `updatedAtIso`, `updatedBy`, `updatedByEmail`.
 
 ## permissions-service.js
 
@@ -38,4 +68,3 @@ Responsabilités :
 - préparer le futur branchement Firebase Auth custom claims.
 
 Phase actuelle : service ajouté sans retirer les fonctions historiques d'app.js.
-
