@@ -90,3 +90,5 @@ Ne jamais travailler directement sur `main`. La production doit rester stable po
 La methode de travail a deux est detaillee ici : [docs/workflow-equipe.md](docs/workflow-equipe.md).
 
 Principe : pas de roles fixes pour le moment. On repartit les fonctionnalites, pas les metiers, afin que chacun comprenne progressivement tout CoachPulse.
+
+Test collaboration Git - Maxence
