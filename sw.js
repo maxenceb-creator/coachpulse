@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-20-20260701-medical-ui-upgrade';
+const CACHE_NAME = 'coachpulse-v6-4-22-20260702-player-name-dedupe';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',

@@ -39,6 +39,41 @@
     return asText(player?.displayName || [normalizeUpper(nom), prenom].filter(Boolean).join(' '));
   }
 
+  function keyPart(value){
+    return asText(value).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '');
+  }
+
+  function identityKey(player, withBirth=false){
+    const names = splitName(player || {});
+    const categorie = asText(player?.categorie || player?.category);
+    const subCategory = asText(player?.subCategory || player?.sousCategorie || categorie);
+    const birth = asText(player?.birth || player?.dateNaissance || player?.birthDate);
+    const parts = [names.nom, names.prenom, subCategory || categorie];
+    if(withBirth) parts.push(birth);
+    const key = parts.map(keyPart).join('|');
+    return key.replace(/\|/g, '') ? key : '';
+  }
+
+  function personKey(player){
+    const names = splitName(player || {});
+    const key = [names.nom, names.prenom].map(keyPart).join('|');
+    return key.replace(/\|/g, '') ? key : '';
+  }
+
+  function isOfficialCategory(value){
+    const key = normalizeUpper(value).replace(/\s+/g, '');
+    return ['U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'].includes(key);
+  }
+
+  function isOfficialSubCategory(value){
+    const key = normalizeUpper(value).replace(/\s+/g, '');
+    return ['U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U19','R1'].includes(key);
+  }
+
+  function looksLikeImportSeason(value){
+    return /^U20\d{2}$/i.test(asText(value));
+  }
+
   function splitName(raw={}){
     const full = asText(raw.displayName || raw.joueuse || raw.name || raw.fullName || raw.playerName);
     let nom = asText(raw.nom || raw.lastName);
@@ -113,12 +148,50 @@
     }catch(_e){ return []; }
   }
 
-  function dedupePlayers(players=[]){
-    const byId = new Map();
-    players.map(normalizePlayer).forEach(player => {
-      if(player.playerId) byId.set(player.playerId, {...(byId.get(player.playerId) || {}), ...player});
+  function mergePlayerRecords(previous={}, incoming={}){
+    const preferredId = previous.playerId || previous.id || incoming.playerId || incoming.id;
+    const merged = {...previous};
+    Object.keys(incoming).forEach(key => {
+      if((merged[key] == null || merged[key] === '') && incoming[key] != null && incoming[key] !== '') merged[key] = incoming[key];
     });
-    return [...byId.values()].sort((a,b) => displayName(a).localeCompare(displayName(b), 'fr'));
+    if(incoming.photo && !previous.photo) merged.photo = incoming.photo;
+    if(incoming.avatar && !previous.avatar) merged.avatar = incoming.avatar;
+    if(incoming.subCategory && (!isOfficialSubCategory(merged.subCategory) || looksLikeImportSeason(merged.subCategory)) && isOfficialSubCategory(incoming.subCategory)){
+      merged.subCategory = incoming.subCategory;
+    }
+    if(incoming.categorie && !isOfficialCategory(merged.categorie) && isOfficialCategory(incoming.categorie)){
+      merged.categorie = incoming.categorie;
+    }
+    if(incoming.team && (!merged.team || looksLikeImportSeason(merged.team)) && !looksLikeImportSeason(incoming.team)){
+      merged.team = incoming.team;
+    }
+    if(preferredId){
+      merged.playerId = preferredId;
+      merged.id = preferredId;
+    }
+    return normalizePlayer(merged);
+  }
+
+  function dedupePlayers(players=[]){
+    const byCanonicalKey = new Map();
+    const aliases = new Map();
+    players.map(normalizePlayer).forEach(player => {
+      const aliasCandidates = [
+        player.playerId,
+        player.id,
+        identityKey(player, true),
+        identityKey(player, false),
+        personKey(player)
+      ].filter(Boolean);
+      const canonicalKey = aliasCandidates.map(key => aliases.get(key)).find(Boolean) || aliasCandidates[0];
+      if(!canonicalKey) return;
+      const merged = byCanonicalKey.has(canonicalKey)
+        ? mergePlayerRecords(byCanonicalKey.get(canonicalKey), player)
+        : player;
+      byCanonicalKey.set(canonicalKey, merged);
+      aliasCandidates.forEach(key => aliases.set(key, canonicalKey));
+    });
+    return [...byCanonicalKey.values()].sort((a,b) => displayName(a).localeCompare(displayName(b), 'fr'));
   }
 
   function readCachedPlayers(){
@@ -142,7 +215,7 @@
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION));
     const rows = [];
     snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()})));
-    const normalized = writeCache(rows);
+    const normalized = writeCache([...rows, ...parseCache(CUSTOM_CACHE_KEY)]);
     return filterPlayers(normalized, filters);
   }
 
@@ -249,7 +322,7 @@
   const service = {
     CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
     stableId, normalizeTeamFromCategory, displayName, splitName,
-    normalizePlayer, normalizePlayerForWrite, dedupePlayers,
+    normalizePlayer, normalizePlayerForWrite, identityKey, personKey, dedupePlayers,
     readCachedPlayers, writeCache, filterPlayers,
     listPlayers, readFirestorePlayers, getPlayer, savePlayer, archivePlayer,
     updatePlayerRefs, mergePlayers
