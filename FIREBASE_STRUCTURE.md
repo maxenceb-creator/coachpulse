@@ -2,14 +2,33 @@
 
 Cette version garde les écrans existants en local-first, mais ajoute une base Firestore normalisée. Firebase devient la source officielle progressivement, sans casser les anciennes données locales.
 
+## Phase 1 v1.0 - Base commune
+
+Objectif : `players`, `teams` et `settings/database-options` deviennent le socle commun lu par tous les modules. Les modules historiques peuvent continuer à utiliser leur cache local, mais ce cache doit être alimenté depuis Firestore par les services partagés.
+
+Services partagés :
+
+- `shared/services/players-service.js` : modèle joueuse, normalisation, cache, CRUD, archivage, fusion et transfert des références `playerId`.
+- `shared/services/teams-service.js` : modèle équipe, catégories, sous-catégories et options communes.
+- `shared/services/permissions-service.js` : rôles et visibilité des modules.
+
+Fichiers Firebase versionnés :
+
+- `firestore.rules` : règles d'accès par rôle.
+- `firestore.indexes.json` : index composites nécessaires aux requêtes actuelles et futures.
+
 ## Collections
 
 - `players` : base officielle des joueuses.
   - ID stable : `playerId`
-  - Champs principaux : `prenom`, `nom`, `displayName`, `categorie`, `subCategory`, `team`, `teamId`, `foot`, `birth`, `photo`, `status`, `source`
+  - Champs principaux : `prenom`, `nom`, `displayName`, `categorie`, `subCategory`, `team`, `teamId`, `poste`, `numero`, `foot`, `birth`, `dateNaissance`, `photo`, `status`, `source`
+  - Statuts autorisés : `active`, `injured`, `left`, `archived`
+  - Règle : aucune suppression définitive ; une fiche sortie ou doublon passe en `archived`
 - `teams` : équipes et groupes d'âge.
   - ID stable : `teamId`
-  - Champs principaux : `name`, `category`, `source`
+  - Champs principaux : `name`, `category`, `subCategories`, `status`, `source`
+- `settings/database-options` : listes officielles utilisées par la base commune.
+  - Champs principaux : `categories`, `subCategories`
 - `matches` : fiche d'un match.
   - ID stable : `matchId`
   - Champs principaux : `date`, `team`, `opponent`, `score`, `competition`
@@ -30,6 +49,36 @@ Cette version garde les écrans existants en local-first, mais ajoute une base F
   - ID stable : `staffId`
   - Champs principaux : `uid`, `email`, `name`, `role`, `scope`, `status`
 - `settings` : configuration et version du schéma.
+
+## Règles d'accès v1.0
+
+Rôles applicatifs :
+
+- `ADMIN` : gestion complète.
+- `RESPONSABLE` : gestion des données communes et métier.
+- `EDUCATEUR` : écriture des données sportives et médicales autorisées.
+- `LECTURE` : lecture uniquement.
+
+Principes :
+
+- lecture centrale réservée aux comptes staff actifs ;
+- écriture `players`, `teams`, `settings`, `syncLogs`, `changeLogs` réservée à `ADMIN` et `RESPONSABLE` ;
+- écriture des collections métier (`matches`, `attendance`, `technicalTests`, `injuries`, etc.) autorisée à `ADMIN`, `RESPONSABLE` et `EDUCATEUR` ;
+- suppression directe interdite pour les collections centrales et métier ;
+- `coachpulse_common_base/{uid}` reste accessible uniquement au propriétaire connecté pour préserver la sauvegarde legacy.
+
+Attention bootstrap : la création automatique d'un premier profil staff doit être validée avec les règles Firestore de production. Le flux recommandé est de précréer au moins un profil `ADMIN` dans `staff_members`.
+
+## Index v1.0
+
+Les index Firestore versionnés couvrent les requêtes prévues :
+
+- `players` par statut, catégorie, sous-catégorie, équipe et nom ;
+- `teams` par catégorie et nom ;
+- `matches`, `sessions` par équipe et date ;
+- `attendance`, `technicalTests`, `physicalTests` par `playerId` et date ;
+- `injuries` et `injuryUpdates` par joueuse, équipe, statut et date ;
+- `syncLogs` et `changeLogs` par type et date.
 
 ## Migration progressive
 

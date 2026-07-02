@@ -1,0 +1,140 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "players",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "categorie", "order": "ASCENDING"},
+        {"fieldPath": "subCategory", "order": "ASCENDING"},
+        {"fieldPath": "displayName", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "players",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "teamId", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "displayName", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "teams",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "category", "order": "ASCENDING"},
+        {"fieldPath": "name", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "teamId", "order": "ASCENDING"},
+        {"fieldPath": "date", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "matchEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "matchId", "order": "ASCENDING"},
+        {"fieldPath": "playerId", "order": "ASCENDING"},
+        {"fieldPath": "minute", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "teamId", "order": "ASCENDING"},
+        {"fieldPath": "date", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "attendance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "sessionId", "order": "ASCENDING"},
+        {"fieldPath": "playerId", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "attendance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "playerId", "order": "ASCENDING"},
+        {"fieldPath": "date", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "technicalTests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "playerId", "order": "ASCENDING"},
+        {"fieldPath": "date", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "technicalTests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "categorie", "order": "ASCENDING"},
+        {"fieldPath": "season", "order": "DESCENDING"},
+        {"fieldPath": "date", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "physicalTests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "playerId", "order": "ASCENDING"},
+        {"fieldPath": "date", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "injuries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "playerId", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "declaredAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "injuries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "teamId", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "declaredAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "injuryUpdates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "injuryId", "order": "ASCENDING"},
+        {"fieldPath": "date", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "syncLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "connector", "order": "ASCENDING"},
+        {"fieldPath": "date", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "changeLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "collection", "order": "ASCENDING"},
+        {"fieldPath": "updatedAtIso", "order": "DESCENDING"}
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
