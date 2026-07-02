@@ -1285,6 +1285,60 @@ async function writeChangeLog({collectionName, documentId, action, before, after
   }, {merge:true});
   return logId;
 }
+async function adminCreatePlayer(data={}){
+  if(!guardAdminAction()) return {created:false};
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const clean = {...data};
+  clean.nom = String(clean.nom || '').trim().toUpperCase();
+  clean.prenom = String(clean.prenom || '').trim();
+  if(!clean.nom || !clean.prenom) throw new Error('Nom et prénom obligatoires.');
+  clean.categorie = String(clean.categorie || '').trim();
+  clean.subCategory = String(clean.subCategory || clean.categorie || '').trim();
+  clean.team = String(clean.team || normalizeTeamFromCategory(clean.categorie || clean.subCategory) || '').trim();
+  clean.teamId = clean.team ? stableFirestoreId('team', clean.team) : '';
+  clean.birth = String(clean.birth || clean.dateNaissance || '').trim();
+  clean.dateNaissance = clean.birth;
+  clean.poste = String(clean.poste || '').trim();
+  clean.numero = String(clean.numero || '').trim();
+  clean.photo = String(clean.photo || '').trim();
+  clean.status = String(clean.status || 'active').trim() || 'active';
+  clean.commentaireInterne = String(clean.commentaireInterne || '').trim();
+  clean.playerId = clean.playerId || stableFirestoreId('player', clean.nom, clean.prenom, clean.categorie, clean.subCategory, clean.birth);
+  clean.id = clean.playerId;
+  clean.displayName = [clean.nom, clean.prenom].filter(Boolean).join(' ').trim();
+  clean.createdAt = firebaseFns.serverTimestamp();
+  clean.createdAtIso = new Date().toISOString();
+  clean.updatedAt = firebaseFns.serverTimestamp();
+  clean.updatedAtIso = new Date().toISOString();
+  clean.createdBy = currentUser.uid;
+  clean.createdByEmail = currentUser.email || '';
+  clean.updatedBy = currentUser.uid;
+  clean.updatedByEmail = currentUser.email || '';
+  const existing = await adminListPlayers();
+  const duplicate = existing.find(p => {
+    const sameId = (p.playerId || p.id) === clean.playerId;
+    const sameIdentity = String(p.nom || '').toUpperCase() === clean.nom
+      && String(p.prenom || '').trim().toLowerCase() === clean.prenom.toLowerCase()
+      && String(p.categorie || '') === clean.categorie
+      && String(p.subCategory || '') === clean.subCategory;
+    return sameId || sameIdentity;
+  });
+  if(duplicate) throw new Error(`Joueuse déjà présente : ${duplicate.displayName || `${duplicate.nom || ''} ${duplicate.prenom || ''}`.trim()}`);
+  await firebaseFns.setDoc(firebaseFns.doc(db, 'players', clean.playerId), clean, {merge:true});
+  if(clean.teamId && clean.team) await firebaseFns.setDoc(firebaseFns.doc(db, 'teams', clean.teamId), {teamId:clean.teamId, name:clean.team, category:clean.categorie || '', source:'Administration', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString()}, {merge:true});
+  await writeChangeLog({
+    collectionName:'players',
+    documentId:clean.playerId,
+    action:'create',
+    before:{},
+    after:clean,
+    changes:playerAdminDiff({}, clean),
+    summary:`Joueuse créée : ${clean.displayName}`
+  });
+  await pullCentralPlayersToLocal(false).catch(()=>{});
+  notifyFramesPlayersUpdated();
+  return {created:true, playerId:clean.playerId, player:clean};
+}
 async function adminUpdatePlayer(playerId, updates={}, action='update'){
   if(!guardAdminAction()) return {changed:false, changes:{}};
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
@@ -1617,7 +1671,7 @@ async function adminSaveModuleSettings(moduleId, updates={}){
   updateRoleUi();
   return getModuleCatalog();
 }
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   snapshotLocalData({fromCloud:true});
