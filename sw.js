@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-22-20260702-player-name-dedupe';
+const CACHE_NAME = 'coachpulse-v6-4-25-20260702-player-dedupe-admin-create';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',
