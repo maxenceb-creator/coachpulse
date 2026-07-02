@@ -1,0 +1,33 @@
+{
+  "id": "tests-athletiques",
+  "name": "Tests athletiques",
+  "status": "planned",
+  "firebase": {
+    "collection": "physicalTests",
+    "relatedCollections": [
+      "players"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "pages/tests-techniques.html",
+    "targetEntry": "modules/tests-athletiques/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Futurs tests physiques et athletiques."
+}

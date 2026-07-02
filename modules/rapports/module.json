@@ -1,0 +1,35 @@
+{
+  "id": "rapports",
+  "name": "Rapports",
+  "status": "planned",
+  "firebase": {
+    "collection": "reports",
+    "relatedCollections": [
+      "players",
+      "matches",
+      "attendance",
+      "technicalTests",
+      "physicalTests"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": null,
+    "targetEntry": "modules/rapports/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Bilans individuels, exports et syntheses staff."
+}

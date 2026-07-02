@@ -25,12 +25,12 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: /home/runner/firebase-service-account.json
         run: |
           set +e
-          npx firebase-tools@latest hosting:channel:deploy dev --project coach-pulse-ee6b0 --non-interactive --expires 30d 2>&1 | tee firebase-dev-deploy.log
+          npx firebase-tools@latest hosting:channel:deploy dev --project coach-pulse-ee6b0 --non-interactive --expires 30d 2>&1 | tee "$RUNNER_TEMP/firebase-dev-deploy.log"
           status=${PIPESTATUS[0]}
           if [ "$status" -eq 0 ]; then
             exit 0
           fi
-          if grep -q "is the current active version" firebase-dev-deploy.log; then
+          if grep -q "is the current active version" "$RUNNER_TEMP/firebase-dev-deploy.log"; then
             echo "Firebase DEV channel is already on this version. Treating as success."
             exit 0
           fi

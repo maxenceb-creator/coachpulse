@@ -18,6 +18,9 @@ Cette premiere etape evite de toucher a la production existante. Plus tard, si b
 
 - `main` : version stable, deployee automatiquement en PROD
 - `dev` : version de test, deployee automatiquement sur le canal DEV
+- `feature/...` : branche de travail pour une fonctionnalite precise
+- `fix/...` : branche de correction ciblee
+- `docs/...` : branche de documentation
 
 ## Commandes principales
 
@@ -39,42 +42,70 @@ Deployer manuellement en PROD :
 npm run deploy:prod
 ```
 
-## Workflow recommande
+## Workflow recommande en equipe
 
-1. Partir de `main` a jour.
-2. Creer ou passer sur `dev`.
+1. Partir de `dev` a jour.
+2. Creer une branche `feature/...`.
 3. Faire les modifications avec Codex.
-4. Tester.
-5. Commit sur `dev`.
-6. Push sur GitHub : deploiement automatique DEV.
-7. Si valide, fusionner `dev` vers `main`.
-8. Push `main` : deploiement automatique PROD.
+4. Tester localement.
+5. Commit et push de la branche de travail.
+6. Ouvrir une Pull Request vers `dev`.
+7. Tester le deploiement DEV.
+8. Quand la version DEV est valide, fusionner `dev` vers `main`.
+9. Push `main` : deploiement automatique PROD.
 
 ## Commandes type
 
 ```bash
-git checkout main
-git pull
-git checkout -B dev
+git checkout dev
+git pull origin dev
+git checkout -b feature/nom-fonctionnalite
 
 # modifications CoachPulse
 
 npm run check
 git add .
-git commit -m "Description claire"
-git push -u origin dev
+git commit -m "feat: description claire"
+git push -u origin feature/nom-fonctionnalite
 ```
 
-Quand la version DEV est valide :
+Quand la fonctionnalite est valide, ouvrir une Pull Request vers `dev`.
+
+Quand la version DEV complete est valide :
 
 ```bash
 git checkout main
 git pull
 git merge dev
-git tag v1.1.0
+git tag v1.2.0
 git push
-git push origin v1.1.0
+git push origin v1.2.0
 ```
+
+## Protection des branches conseillee
+
+Sur GitHub, configurer les protections suivantes dans `Settings > Branches` :
+
+- `main` : Pull Request obligatoire, push direct interdit, 1 validation recommandee.
+- `dev` : Pull Request recommandee, push direct reserve aux petites corrections urgentes.
+
+Les branches `feature/...` ne doivent jamais deployer directement la production.
+
+## Gestion des conflits
+
+Si deux personnes modifient le meme fichier :
+
+```bash
+git checkout feature/nom-fonctionnalite
+git fetch origin
+git merge origin/dev
+npm run check
+git add .
+git commit
+git push
+```
+
+Si le conflit est sensible, valider ensemble avant de fusionner.
 
 ## Retour arriere
 

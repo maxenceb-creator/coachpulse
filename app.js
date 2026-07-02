@@ -75,10 +75,22 @@ function openDrawer(){
   overlay.classList.add('show');
 }
 function requireAuth(){ return Boolean(authReady && currentUser); }
-function getCurrentUserRole(){ return (currentProfile?.role || currentUserRole || 'STAFF').toUpperCase(); }
-function isAdmin(){ return ['ADMIN','RESPONSABLE'].includes(getCurrentUserRole()); }
-function isSuperAdmin(){ return getCurrentUserRole() === 'ADMIN'; }
+function getCurrentUserRole(){
+  const service = permissionsService();
+  if(service?.getRole) return service.getRole(currentProfile, currentUserRole);
+  return (currentProfile?.role || currentUserRole || 'STAFF').toUpperCase();
+}
+function isAdmin(){
+  const service = permissionsService();
+  return service?.isAdminRole ? service.isAdminRole(getCurrentUserRole()) : ['ADMIN','RESPONSABLE'].includes(getCurrentUserRole());
+}
+function isSuperAdmin(){
+  const service = permissionsService();
+  return service?.isSuperAdminRole ? service.isSuperAdminRole(getCurrentUserRole()) : getCurrentUserRole() === 'ADMIN';
+}
 function hasModulePermission(module, action='read'){
+  const service = permissionsService();
+  if(service?.canUseModule) return service.canUseModule(module, getCurrentUserRole(), action);
   if(!module || module.active === false) return false;
   const roles = module.permissions?.[action] || module.permissions?.read || [];
   return roles.map(String).map(r => r.toUpperCase()).includes(getCurrentUserRole());
@@ -92,8 +104,23 @@ function guardAdminAction(label='Action réservée aux administrateurs'){
 function escapeHtml(v){
   return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 }
+function playersService(){
+  return window.CoachPulsePlayersService || null;
+}
+function permissionsService(){
+  return window.CoachPulsePermissionsService || null;
+}
+function sortPlayersForApp(players){
+  const service = playersService();
+  if(service?.dedupePlayers) return service.dedupePlayers(players);
+  return [...players].sort((a,b) => String(a.nom||a.displayName||'').localeCompare(String(b.nom||b.displayName||''), 'fr'));
+}
+
 function visibleModules(section){
-  return moduleRegistry().filter(module => module.active !== false && module.settings?.showInNav !== false && (!section || module.section === section) && hasModulePermission(module, 'read'));
+  const service = permissionsService();
+  const modules = moduleRegistry();
+  if(service?.visibleModules) return service.visibleModules(modules, getCurrentUserRole(), section);
+  return modules.filter(module => module.active !== false && module.settings?.showInNav !== false && (!section || module.section === section) && hasModulePermission(module, 'read'));
 }
 function renderModuleShell(){
   tools = buildTools();
@@ -590,10 +617,15 @@ async function migrateLocalDataToCentralFirestore(manual=true){
 async function pullCentralPlayersToLocal(manual=true){
   if(manual && !guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
-  const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
-  const players = [];
-  snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
-  localStorage.setItem('coachpulse:centralPlayers', JSON.stringify(players));
+  const service = playersService();
+  let players = [];
+  if(service?.readFirestorePlayers){
+    players = await service.readFirestorePlayers({firebaseFns, db});
+  }else{
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
+    snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
+    localStorage.setItem('coachpulse:centralPlayers', JSON.stringify(players));
+  }
   notifyFramesPlayersUpdated();
   updateCloudKpis();
   if(manual) alert(`${players.length} joueuses récupérées depuis Firebase.`);
@@ -1217,11 +1249,12 @@ async function readSyncLogs(limit=20){
 async function adminListPlayers(){
   if(!guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const service = playersService();
+  if(service?.readFirestorePlayers) return service.readFirestorePlayers({firebaseFns, db});
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
   const players = [];
   snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
-  players.sort((a,b) => String(a.nom||a.displayName||'').localeCompare(String(b.nom||b.displayName||''), 'fr'));
-  return players;
+  return sortPlayersForApp(players);
 }
 function playerAdminDiff(before={}, after={}){
   const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','photo','status','commentaireInterne'];
@@ -1443,6 +1476,9 @@ function saveLocalMedicalPayload(payload){
 }
 async function moduleListPlayers(){
   if(!requireAuth()) throw new Error('Connexion Firebase requise.');
+  const service = playersService();
+  if(service?.readFirestorePlayers && db && currentUser) return service.readFirestorePlayers({firebaseFns, db});
+  if(service?.readCachedPlayers) return service.readCachedPlayers();
   const byId = new Map();
   parseStoredJson('coachpulse:centralPlayers', []).forEach(p => { const id=p.playerId||p.id; if(id) byId.set(id,{...p,playerId:id,id}); });
   parseStoredJson('coachpulse:customPlayers', []).forEach(p => { const id=p.playerId||p.id; if(id) byId.set(id,{...p,playerId:id,id}); });
@@ -1450,7 +1486,7 @@ async function moduleListPlayers(){
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
     snap.forEach(docSnap => byId.set(docSnap.id, {id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
   }
-  return [...byId.values()].sort((a,b) => String(a.nom||a.displayName||'').localeCompare(String(b.nom||b.displayName||''), 'fr'));
+  return sortPlayersForApp([...byId.values()]);
 }
 async function medicalListPlayers(){
   if(!guardMedical('read')) return [];

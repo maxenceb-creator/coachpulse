@@ -1,0 +1,33 @@
+{
+  "id": "dashboard",
+  "name": "Dashboard",
+  "status": "planned",
+  "firebase": {
+    "collection": null,
+    "relatedCollections": []
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR",
+      "LECTURE"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR",
+      "LECTURE"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "index.html",
+    "targetEntry": "modules/dashboard/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Accueil staff, indicateurs saison, alertes et acces rapides."
+}

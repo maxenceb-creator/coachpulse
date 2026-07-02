@@ -84,3 +84,29 @@ Dossiers partages :
 
 Regle de migration : ne deplacer un module dans `modules/` que lorsqu'il est teste et que son ancienne page est encore disponible comme fallback.
 
+## Contrat `module.json`
+
+Chaque dossier dans `modules/` contient maintenant un fichier `module.json`. Ce fichier sert de contrat avant migration complete.
+
+Champs principaux :
+
+- `id` : identifiant stable du module.
+- `name` : nom lisible.
+- `status` : `active-legacy`, `active-shared` ou `planned`.
+- `firebase.collection` : collection Firestore principale.
+- `firebase.relatedCollections` : collections liees.
+- `permissions` : roles autorises.
+- `routing.currentScreen` : page actuelle encore utilisee.
+- `routing.targetEntry` : future entree modulaire.
+- `migration.strategy` : strategie de migration progressive.
+
+Les manifestes ne changent pas encore le fonctionnement de l'application. Ils documentent les frontieres et preparent le futur router modulaire.
+
+## Ordre de migration conseille
+
+1. Extraire les services partages sans toucher au visuel : `players`, permissions, exports.
+2. Migrer un petit module peu risque vers `modules/` en gardant son ancienne page comme fallback.
+3. Migrer `presences`, puis `tests`, puis `medical`.
+4. Migrer `matchs` en dernier, car c'est le module le plus sensible en direct.
+5. Une fois les modules stabilises, reduire progressivement `app.js`.
+

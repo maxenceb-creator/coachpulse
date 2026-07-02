@@ -1,0 +1,34 @@
+{
+  "id": "joueuses",
+  "name": "Joueuses",
+  "status": "active-shared",
+  "firebase": {
+    "collection": "players",
+    "relatedCollections": [
+      "teams",
+      "settings"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE",
+      "EDUCATEUR"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "pages/admin-database.html",
+    "targetEntry": "modules/joueuses/index.html"
+  },
+  "migration": {
+    "phase": 1,
+    "strategy": "legacy-page-kept-as-fallback"
+  },
+  "description": "Base commune joueuses, filtres, categories, equipes et playerId."
+}
