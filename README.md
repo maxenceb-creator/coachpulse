@@ -1,5 +1,7 @@
 # CoachPulse
 
+<!-- Test Codex -->
+
 CoachPulse est la plateforme staff ASSE pour centraliser les donnees sportives : matchs, presences, joueuses, tests, bilans, Data Hub, administration et modules futurs.
 
 ## Liens
