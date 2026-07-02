@@ -2,6 +2,14 @@
 
 Decrire clairement ce que cette modification apporte.
 
+## Cadrage de la fonctionnalite
+
+- Responsable :
+- Pourquoi c'est utile :
+- Fichiers ou modules principaux modifies :
+- Critere de fin :
+- Risque de conflit avec une autre branche :
+
 ## Module concerne
 
 - [ ] Accueil / Dashboard
@@ -25,12 +33,17 @@ Decrire clairement ce que cette modification apporte.
 
 ## Tests effectues
 
-- [ ] Verification locale lancee
+- [ ] Verification locale lancee avec `npm run check`
 - [ ] Test ordinateur
 - [ ] Test tablette
 - [ ] Test mobile
 - [ ] Aucune donnee supprimee
 - [ ] Aucun fichier sensible ajoute
+- [ ] Firebase / workflows GitHub non modifies, ou modification expliquee
+
+## Points a verifier par l'autre personne
+
+Lister les zones a relire ou tester en priorite.
 
 ## Risques ou points a verifier
 

@@ -11,6 +11,18 @@ Ce document explique comment travailler a deux sur CoachPulse sans casser la pro
 - Fusionner une fonctionnalite dans `dev` avant de toucher a `main`.
 - Garder des commits courts et lisibles.
 
+## Methode sans roles fixes
+
+Pour le moment, les roles ne sont pas figes. Chaque personne peut travailler sur plusieurs parties du projet afin de comprendre progressivement CoachPulse dans son ensemble.
+
+On repartit le travail par fonctionnalite :
+
+- une fonctionnalite = une branche ;
+- une branche = un objectif clair ;
+- une Pull Request = une validation par l'autre personne.
+
+Avant de commencer une fonctionnalite, verifier le document : [docs/workflow-equipe.md](docs/workflow-equipe.md).
+
 ## Branches
 
 | Branche | Role |
@@ -21,6 +33,17 @@ Ce document explique comment travailler a deux sur CoachPulse sans casser la pro
 | `fix/...` | Correction ciblee |
 | `docs/...` | Documentation |
 | `chore/...` | Organisation, configuration, maintenance |
+
+## Avant de commencer une fonctionnalite
+
+Repondre rapidement a ces questions :
+
+- Qu'est-ce qu'on veut construire ?
+- Pourquoi cette fonctionnalite est utile ?
+- Qui s'en occupe ?
+- Quels fichiers ou modules seront probablement modifies ?
+- Comment saura-t-on que c'est termine ?
+- Est-ce que l'autre personne travaille deja sur les memes fichiers ?
 
 ## Demarrer une fonctionnalite
 
