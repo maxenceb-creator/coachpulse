@@ -109,25 +109,59 @@ document.addEventListener('DOMContentLoaded',init);
 <script id="tests-v16-custom-players">
 (function(){
   "use strict";
-  function readPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=p.playerId||p.id||[p.nom,p.prenom,p.categorie,p.subCategory].filter(Boolean).join("-");if(key)by.set(key,p)});return Array.from(by.values())}catch(_){return []}}
+  function slug(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"joueuse"}
+  function personKey(p){return [p.nom||p.lastName,p.prenom||p.firstName].map(x=>slug(x)).join("|")}
+  function readCachedPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=personKey(p)||p.playerId||p.id;if(key)by.set(key,Object.assign({},by.get(key)||{},p))});return Array.from(by.values())}catch(_){return []}}
+  async function readPlayers(){try{const api=window.parent&&window.parent.CoachPulseCentralData;if(api&&typeof api.listPlayers==="function"){const players=await api.listPlayers();if(Array.isArray(players)&&players.length)return players}}catch(_){}return readCachedPlayers()}
   function displayName(p){return `${String(p.prenom||"").trim()} ${String(p.nom||"").toUpperCase()}`.trim();}
-  function merge(){
+  function toTestPlayer(p,existing){
+    const id=(existing&&existing.id)||p.playerId||p.id||displayName(p).toUpperCase();
+    const cat=p.subCategory||p.sousCategorie||p.categorie||p.category||existing?.categorie||"";
+    const categoryList=p.categorie||p.category||p.team||existing?.categorieListe||cat;
+    return {
+      id,
+      key:id,
+      playerId:p.playerId||p.id||id,
+      label:displayName(p)||existing?.label||id,
+      nom:String(p.nom||p.lastName||existing?.nom||"").toUpperCase(),
+      prenom:String(p.prenom||p.firstName||existing?.prenom||"").toUpperCase(),
+      categorie:cat,
+      categorieListe:categoryList,
+      sousCategorie:cat,
+      equipe:p.team||existing?.equipe||categoryList,
+      nationalite:p.nationalite||p.nationality||existing?.nationalite||"France",
+      drapeau:existing?.drapeau||"🇫🇷",
+      meilleurPiedLabel:p.foot||existing?.meilleurPiedLabel||"",
+      saisonArrivee:existing?.saisonArrivee||"",
+      saison:existing?.saison||"2026-2027",
+      photo:p.photo||existing?.photo||""
+    };
+  }
+  function refreshViews(){
+    try{fillCats($('commonCat'),'Choisir');fillPlayerSelect($('commonPlayer'),{empty:'Choisir une joueuse',grouped:true,showCat:false});fillCats($('cat'),'Toutes');fillPlayerSelect($('player'),{empty:'Toutes les joueuses',grouped:true,showCat:false});fillCats($('bCat'),'Toutes');fillPlayerSelect($('bPlayer'),{empty:'Toutes',grouped:false,showCat:true});renderObjectives();updateJongles();renderBilan();}catch(_){}
+  }
+  async function merge(){
     if(typeof DATA==="undefined"||!DATA.players)return;
-    const ids=new Set(DATA.players.map(p=>p.id));
-    readPlayers().forEach(p=>{
-      const id=p.id||displayName(p).toUpperCase();
-      if(!id||ids.has(id))return;
-      const cat=p.categorie||p.subCategory||"";
-      DATA.players.push({id,key:id,label:displayName(p),nom:String(p.nom||"").toUpperCase(),prenom:String(p.prenom||"").toUpperCase(),categorie:cat,categorieListe:p.team||cat,sousCategorie:cat,nationalite:"France",drapeau:"🇫🇷",photo:p.photo||""});
-      if(cat&&Array.isArray(DATA.cats)&&!DATA.cats.includes(cat))DATA.cats.push(cat);
-      if(cat&&DATA.obj&&!DATA.obj[cat])DATA.obj[cat]={};
-      ids.add(id);
+    const previousByPerson=new Map(DATA.players.map(p=>[personKey(p),p]));
+    const central=await readPlayers();
+    if(!central.length)return;
+    const seen=new Set();
+    const next=[];
+    central.forEach(p=>{
+      const key=personKey(p);
+      if(!key||seen.has(key))return;
+      next.push(toTestPlayer(p,previousByPerson.get(key)));
+      seen.add(key);
     });
+    DATA.players.splice(0,DATA.players.length,...next);
+    const cats=[...new Set([...DATA.cats,...next.map(p=>p.categorie)].filter(Boolean))].sort((a,b)=>catRank(a)-catRank(b)||String(a).localeCompare(String(b),'fr',{numeric:true}));
+    DATA.cats.splice(0,DATA.cats.length,...cats);
+    DATA.cats.forEach(cat=>{if(cat&&DATA.obj&&!DATA.obj[cat])DATA.obj[cat]={};});
+    refreshViews();
   }
   merge();
-  window.addEventListener("message",e=>{if(e.data&&(/coachpulse-(players|cloud)-updated/.test(e.data.type||""))){merge();try{fillCats($('commonCat'),'Choisir');fillPlayerSelect($('commonPlayer'),{empty:'Choisir une joueuse',grouped:true,showCat:false});fillCats($('cat'),'Toutes');fillPlayerSelect($('player'),{empty:'Toutes les joueuses',grouped:true,showCat:false});fillCats($('bCat'),'Toutes');fillPlayerSelect($('bPlayer'),{empty:'Toutes',grouped:false,showCat:true});renderObjectives();updateJongles();renderBilan();}catch(_){}}});
+  window.addEventListener("message",e=>{if(e.data&&(/coachpulse-(players|cloud)-updated/.test(e.data.type||"")))merge();});
   window.addEventListener("storage",e=>{if(e.key==="coachpulse:customPlayers"||e.key==="coachpulse:centralPlayers")merge();});
-  window.addEventListener("message",e=>{if(e.data&&e.data.type==="coachpulse-players-updated")merge();});
 })();
 </script>
 </body></html>

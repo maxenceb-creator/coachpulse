@@ -319,20 +319,39 @@ renderFilters();installFilterEvents();renderAll();renderCalendar();
 (function(){
   "use strict";
   function embedded(){try{return window.self!==window.top;}catch(_){return true;}}
-  function readPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=p.playerId||p.id||[p.nom,p.prenom,p.categorie,p.subCategory].filter(Boolean).join("-");if(key)by.set(key,p)});return Array.from(by.values())}catch(_){return []}}
+  function readCachedPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=personKey(p)||p.playerId||p.id;if(key)by.set(key,Object.assign({},by.get(key)||{},p))});return Array.from(by.values())}catch(_){return []}}
+  async function readPlayers(){try{const api=window.parent&&window.parent.CoachPulseCentralData;if(api&&typeof api.listPlayers==="function"){const players=await api.listPlayers();if(Array.isArray(players)&&players.length)return players}}catch(_){}return readCachedPlayers()}
   function slug(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"joueuse"}
-  function normalizeCategory(p){return p.categorie||p.subCategory||p.category||""}
-  function mergeCustomPlayers(){
+  function personKey(p){return [p.nom||p.lastName,p.prenom||p.firstName].map(x=>slug(x)).join("|")}
+  function normalizeCategory(p){return p.subCategory||p.sousCategorie||p.categorie||p.category||""}
+  function toPresencePlayer(p,existing){
+    const id=(existing&&existing.id)||p.playerId||p.id||("manual-"+slug((p.prenom||p.firstName||"")+"-"+(p.nom||p.lastName||"")));
+    return {
+      id,
+      playerId:p.playerId||p.id||id,
+      nom:String(p.nom||p.lastName||existing?.nom||"").toUpperCase(),
+      prenom:p.prenom||p.firstName||existing?.prenom||"",
+      annee:p.birth||p.dateNaissance||p.age||existing?.annee||"",
+      categorie:normalizeCategory(p)||existing?.categorie||"",
+      team:p.team||existing?.team||"",
+      photo:p.photo||existing?.photo||"",
+      source:"players-central"
+    };
+  }
+  async function mergeCustomPlayers(){
     if(typeof ROSTER==="undefined"||!Array.isArray(ROSTER))return;
-    const ids=new Set(ROSTER.map(p=>p.id));
-    readPlayers().forEach(p=>{
-      const id=p.id||("manual-"+slug((p.prenom||p.firstName||"")+"-"+(p.nom||p.lastName||"")));
-      if(ids.has(id))return;
-      const prenom=p.prenom||p.firstName||"";
-      const nom=String(p.nom||p.lastName||"").toUpperCase();
-      ROSTER.push({id,nom,prenom,annee:p.birth||p.age||"",categorie:normalizeCategory(p),custom:true});
-      ids.add(id);
+    const previousByPerson=new Map(ROSTER.map(p=>[personKey(p),p]));
+    const central=await readPlayers();
+    if(!central.length)return;
+    const next=[];
+    const seen=new Set();
+    central.forEach(p=>{
+      const key=personKey(p);
+      if(!key||seen.has(key))return;
+      next.push(toPresencePlayer(p,previousByPerson.get(key)));
+      seen.add(key);
     });
+    ROSTER.splice(0,ROSTER.length,...next);
     try{renderFilters();renderAll();renderCalendar();}catch(_){}
   }
   function init(){

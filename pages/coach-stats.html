@@ -1783,12 +1783,13 @@ if(typeof window.v51Season==='function'){
 (function(){
   "use strict";
   function normalizeKey(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/gi,"").toLowerCase();}
-  function playerKey(p){return [p.nom,p.prenom].map(normalizeKey).join("|");}
+  function playerKey(p){return [p.nom||p.lastName,p.prenom||p.firstName].map(normalizeKey).join("|");}
   function mergePlayer(a,b){const out=Object.assign({},a||{});Object.keys(b||{}).forEach(k=>{if((out[k]==null||out[k]==="")&&b[k]!=null&&b[k]!=="")out[k]=b[k]});if(b&&b.photo&&!out.photo)out.photo=b.photo;return out;}
-  function readPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=playerKey(p)||p.playerId||p.id;if(!key)return;by.set(key,mergePlayer(by.get(key),p))});return Array.from(by.values())}catch(_){return []}}
-  function displayName(p){return `${String(p.nom||"").toUpperCase()} ${String(p.prenom||"").trim()}`.trim();}
+  function readCachedPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=playerKey(p)||p.playerId||p.id;if(!key)return;by.set(key,mergePlayer(by.get(key),p))});return Array.from(by.values())}catch(_){return []}}
+  async function readPlayers(){try{const api=window.parent&&window.parent.CoachPulseCentralData;if(api&&typeof api.listPlayers==="function"){const players=await api.listPlayers();if(Array.isArray(players)&&players.length)return players}}catch(_){}return readCachedPlayers()}
+  function displayName(p){return `${String(p.nom||p.lastName||"").toUpperCase()} ${String(p.prenom||p.firstName||"").trim()}`.trim();}
   function teamCategory(p){
-    const sub=String(p.categorie||p.subCategory||"").toUpperCase();
+    const sub=String(p.subCategory||p.sousCategorie||p.categorie||p.category||p.team||"").toUpperCase();
     if(sub==="R1"||sub.includes("SENIOR")||sub.includes("SÉNIOR"))return "R1";
     const n=(sub.match(/\d+/)||[])[0];
     if(!n)return String(p.team||"");
@@ -1800,30 +1801,55 @@ if(typeof window.v51Season==='function'){
     if(v<=16)return "U14-U15-U16";
     return "U19";
   }
-  function merge(){
+  function toMatchPlayer(p,existing){
+    const name=displayName(p)||existing?.name||"";
+    const category=p.categorie||p.category||p.team||existing?.category||teamCategory(p);
+    const subCategory=p.subCategory||p.sousCategorie||existing?.subCategory||category;
+    return {
+      source:p.source||existing?.source||"Base joueuses CoachPulse",
+      playerId:p.playerId||p.id||existing?.playerId||"",
+      birth:p.birth||p.dateNaissance||existing?.birth||"",
+      age:p.age||existing?.age||"",
+      lastName:String(p.nom||p.lastName||existing?.lastName||"").toUpperCase(),
+      firstName:String(p.prenom||p.firstName||existing?.firstName||""),
+      name,
+      nationality:p.nationalite||p.nationality||existing?.nationality||"France",
+      season:existing?.season||"2026-2027",
+      category:category||teamCategory(p),
+      subCategory,
+      foot:p.foot||existing?.foot||"",
+      team:p.team||existing?.team||category||teamCategory(p),
+      arrival:existing?.arrival||"2026-2027",
+      departure:existing?.departure||"",
+      returnDate:existing?.returnDate||"",
+      leftClub:existing?.leftClub||"",
+      photo:p.photo||existing?.photo||""
+    };
+  }
+  async function merge(){
     if(!Array.isArray(window.PLAYER_DB)&&typeof PLAYER_DB==="undefined")return;
     const db=typeof PLAYER_DB!=="undefined"?PLAYER_DB:window.PLAYER_DB;
-    const byName=new Map(db.map(p=>[p.name,p]));
-    const names=new Set(db.map(p=>p.name));
-    readPlayers().forEach(p=>{
-      const name=displayName(p);
-      if(!name)return;
-      const existing=byName.get(name);
-      if(existing){
-        if(p.photo&&!existing.photo)existing.photo=p.photo;
-        return;
-      }
-      const row={source:"Saisie manuelle CoachPulse",birth:p.birth||"",age:p.age||"",lastName:String(p.nom||"").toUpperCase(),firstName:String(p.prenom||"").toUpperCase(),name,nationality:"France",season:"2026-2027",category:teamCategory(p),subCategory:p.categorie||p.subCategory||"",foot:p.foot||"",team:p.team||teamCategory(p),arrival:"2026-2027",departure:"",returnDate:"",leftClub:"",photo:p.photo||""};
-      db.push(row); names.add(name); byName.set(name,row);
-      try{if(Array.isArray(ROSTER)&&!ROSTER.includes(name))ROSTER.push(name);}catch(_){}
-      try{PLAYER_MAP[name]=row;}catch(_){}
+    const previousByPerson=new Map(db.map(p=>[playerKey(p),p]));
+    const central=await readPlayers();
+    if(!central.length)return;
+    const next=[];
+    const seen=new Set();
+    central.forEach(p=>{
+      const key=playerKey(p);
+      if(!key||seen.has(key))return;
+      const row=toMatchPlayer(p,previousByPerson.get(key));
+      if(!row.name)return;
+      next.push(row);
+      seen.add(key);
     });
+    db.splice(0,db.length,...next);
+    try{if(Array.isArray(ROSTER))ROSTER.splice(0,ROSTER.length,...next.map(p=>p.name));}catch(_){}
+    try{Object.keys(PLAYER_MAP).forEach(k=>delete PLAYER_MAP[k]);next.forEach(p=>{PLAYER_MAP[p.name]=p;});}catch(_){}
     try{ensure();save();renderAll();}catch(_){}
   }
   merge();
   window.addEventListener("message",e=>{if(e.data&&(/coachpulse-(players|cloud)-updated/.test(e.data.type||"")))setTimeout(merge,50);});
   window.addEventListener("storage",e=>{if(e.key==="coachpulse:customPlayers"||e.key==="coachpulse:centralPlayers")merge();});
-  window.addEventListener("message",e=>{if(e.data&&e.data.type==="coachpulse-players-updated")merge();});
 })();
 </script>
 </body></html>
