@@ -19,12 +19,57 @@
     return raw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || `id-${Date.now().toString(36)}`;
   }
 
+  function seasonFromDate(date=new Date()){
+    const d = date instanceof Date ? date : new Date(date);
+    const safe = Number.isNaN(d.getTime()) ? new Date() : d;
+    const year = safe.getFullYear();
+    return safe.getMonth() >= 6 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+  }
+
+  function seasonEndYear(season=seasonFromDate()){
+    const match = asText(season).match(/(\d{4})\s*-\s*(\d{4})/);
+    return match ? Number(match[2]) : Number(seasonFromDate().slice(5));
+  }
+
+  function birthYear(playerOrDate){
+    const value = typeof playerOrDate === 'object' && playerOrDate
+      ? asText(playerOrDate.birth || playerOrDate.dateNaissance || playerOrDate.birthDate)
+      : asText(playerOrDate);
+    if(!value) return 0;
+    const iso = value.match(/^(\d{4})[-/]/);
+    if(iso) return Number(iso[1]);
+    const fr = value.match(/(?:^|\/)(\d{4})$/);
+    if(fr) return Number(fr[1]);
+    const any = value.match(/\b(19|20)\d{2}\b/);
+    return any ? Number(any[0]) : 0;
+  }
+
+  function subCategoryForSeason(player={}, season=seasonFromDate()){
+    const year = birthYear(player);
+    if(!year) return '';
+    const ageCategory = seasonEndYear(season) - year;
+    if(ageCategory >= 6 && ageCategory <= 19) return `U${ageCategory}`;
+    if(ageCategory > 19) return 'R1';
+    return '';
+  }
+
+  function categorySnapshotForSeason(player={}, season=seasonFromDate()){
+    const selectedSeason = asText(season) || seasonFromDate();
+    const history = player?.seasonHistory && typeof player.seasonHistory === 'object' ? player.seasonHistory : {};
+    const fromHistory = history[selectedSeason] || {};
+    const computedSub = subCategoryForSeason(player, selectedSeason);
+    const subCategory = computedSub || asText(fromHistory.subCategory || player.subCategory || player.sousCategorie);
+    const categorie = normalizeTeamFromCategory(subCategory || fromHistory.categorie || player.categorie || player.category);
+    const team = asText(fromHistory.team || player.team || player.equipe || categorie);
+    return {season:selectedSeason, categorie, subCategory, team};
+  }
+
   function normalizeTeamFromCategory(category){
     const c = normalizeUpper(category);
     const n = Number((c.match(/\d+/) || [])[0] || 0);
     if(c.includes('R1') || c.includes('SENIOR') || c.includes('SÉNIOR')) return 'R1';
     if(!n) return c || 'Non renseignee';
-    if(n <= 7) return 'U7';
+    if(n <= 7) return 'U6-U7';
     if(n <= 9) return 'U8-U9';
     if(n <= 11) return 'U10-U11';
     if(n <= 13) return 'U12-U13';
@@ -36,7 +81,7 @@
   function displayName(player){
     const nom = player?.nom || player?.lastName || '';
     const prenom = player?.prenom || player?.firstName || '';
-    return asText(player?.displayName || [normalizeUpper(nom), prenom].filter(Boolean).join(' '));
+    return normalizeUpper(player?.displayName || [prenom, normalizeUpper(nom)].filter(Boolean).join(' '));
   }
 
   function keyPart(value){
@@ -45,10 +90,8 @@
 
   function identityKey(player, withBirth=false){
     const names = splitName(player || {});
-    const categorie = asText(player?.categorie || player?.category);
-    const subCategory = asText(player?.subCategory || player?.sousCategorie || categorie);
     const birth = asText(player?.birth || player?.dateNaissance || player?.birthDate);
-    const parts = [names.nom, names.prenom, subCategory || categorie];
+    const parts = [names.nom, names.prenom];
     if(withBirth) parts.push(birth);
     const key = parts.map(keyPart).join('|');
     return key.replace(/\|/g, '') ? key : '';
@@ -62,12 +105,12 @@
 
   function isOfficialCategory(value){
     const key = normalizeUpper(value).replace(/\s+/g, '');
-    return ['U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'].includes(key);
+    return ['U6-U7','U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'].includes(key);
   }
 
   function isOfficialSubCategory(value){
     const key = normalizeUpper(value).replace(/\s+/g, '');
-    return ['U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U19','R1'].includes(key);
+    return ['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','R1'].includes(key);
   }
 
   function looksLikeImportSeason(value){
@@ -92,18 +135,32 @@
       }
     }
 
-    return {nom:normalizeUpper(nom), prenom};
+    return {nom:normalizeUpper(nom), prenom:normalizeUpper(prenom)};
   }
 
   function normalizePlayer(raw={}){
     const names = splitName(raw);
-    const categorie = asText(raw.categorie || raw.category);
-    const subCategory = asText(raw.subCategory || raw.sousCategorie || raw.sous_category || categorie);
     const birth = asText(raw.birth || raw.dateNaissance || raw.birthDate);
-    const team = asText(raw.team || raw.equipe || normalizeTeamFromCategory(subCategory || categorie));
+    const sourceSeason = asText(raw.season || raw.saison || raw.currentSeason) || seasonFromDate();
+    const currentSeason = seasonFromDate();
+    const storedCategorie = asText(raw.categorie || raw.category);
+    const storedSubCategory = asText(raw.subCategory || raw.sousCategorie || raw.sous_category || storedCategorie);
+    const sourceSubCategory = subCategoryForSeason({...raw, birth}, sourceSeason) || storedSubCategory;
+    const sourceCategory = normalizeTeamFromCategory(sourceSubCategory || storedCategorie);
+    const categorie = isOfficialCategory(storedCategorie) ? storedCategorie : sourceCategory;
+    const subCategory = isOfficialSubCategory(sourceSubCategory) ? sourceSubCategory : storedSubCategory;
+    const team = asText(raw.team || raw.equipe || sourceCategory || normalizeTeamFromCategory(subCategory || categorie));
     const importedId = raw.id && !String(raw.id).startsWith('manual-') ? raw.id : '';
-    const playerId = asText(raw.playerId || importedId) || stableId('player', names.nom, names.prenom, categorie, subCategory, birth);
+    const playerId = asText(raw.playerId || importedId) || stableId('player', names.nom, names.prenom, birth || 'no-birth');
     const status = asText(raw.status || 'active').toLowerCase();
+    const seasonHistory = raw.seasonHistory && typeof raw.seasonHistory === 'object' ? {...raw.seasonHistory} : {};
+    if(sourceSeason) seasonHistory[sourceSeason] = {
+      categorie,
+      subCategory,
+      team,
+      updatedAtIso: asText(raw.updatedAtIso || raw.createdAtIso || '')
+    };
+    const currentSnapshot = categorySnapshotForSeason({...raw, birth, categorie, subCategory, team, seasonHistory}, currentSeason);
 
     return {
       ...raw,
@@ -112,16 +169,20 @@
       nom: names.nom,
       prenom: names.prenom,
       displayName: displayName({...raw, nom:names.nom, prenom:names.prenom}),
-      categorie,
-      subCategory,
-      team,
-      teamId: asText(raw.teamId) || stableId('team', team || categorie || 'global'),
+      categorie: currentSnapshot.categorie || categorie,
+      subCategory: currentSnapshot.subCategory || subCategory,
+      team: currentSnapshot.team || team,
+      teamId: asText(raw.teamId) || stableId('team', currentSnapshot.team || team || categorie || 'global'),
       poste: asText(raw.poste || raw.position),
       numero: asText(raw.numero || raw.number),
       photo: asText(raw.photo || raw.avatar),
       foot: asText(raw.foot || raw.pied),
       birth,
       dateNaissance: asText(raw.dateNaissance || birth),
+      currentSeason,
+      seasonStart: currentSeason ? `${currentSeason.slice(0,4)}-07-01` : '',
+      seasonEnd: currentSeason ? `${currentSeason.slice(5)}-06-30` : '',
+      seasonHistory,
       status: ACTIVE_STATUSES.includes(status) ? status : status || 'active',
       source: asText(raw.source || 'CoachPulse')
     };
@@ -170,6 +231,21 @@
       merged.id = preferredId;
     }
     return normalizePlayer(merged);
+  }
+
+  function playerForSeason(player={}, season=seasonFromDate()){
+    const normalized = normalizePlayer(player);
+    const snapshot = categorySnapshotForSeason(normalized, season);
+    return {
+      ...normalized,
+      categorie:snapshot.categorie || normalized.categorie,
+      subCategory:snapshot.subCategory || normalized.subCategory,
+      team:snapshot.team || normalized.team,
+      teamId:stableId('team', snapshot.team || normalized.team || snapshot.categorie || normalized.categorie || 'global'),
+      currentSeason:snapshot.season || normalized.currentSeason,
+      seasonStart:snapshot.season ? `${snapshot.season.slice(0,4)}-07-01` : normalized.seasonStart,
+      seasonEnd:snapshot.season ? `${snapshot.season.slice(5)}-06-30` : normalized.seasonEnd
+    };
   }
 
   function dedupePlayers(players=[]){
@@ -310,8 +386,11 @@
 
   function filterPlayers(players=[], filters={}){
     const q = asText(filters.q).toLowerCase();
-    return dedupePlayers(players).filter(player =>
+    const displaySeason = filters.season && filters.season !== 'all' ? filters.season : seasonFromDate();
+    return dedupePlayers(players).map(player => playerForSeason(player, displaySeason)).filter(player =>
       (!q || displayName(player).toLowerCase().includes(q))
+      && (!filters.season || filters.season === 'all' || player.currentSeason === filters.season || player.seasonHistory?.[filters.season])
+      && (filters.includeArchived || filters.status || String(player.status || 'active').toLowerCase() !== 'archived')
       && (!filters.categorie || player.categorie === filters.categorie)
       && (!filters.subCategory || player.subCategory === filters.subCategory)
       && (!filters.team || player.team === filters.team)
@@ -321,7 +400,8 @@
 
   const service = {
     CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
-    stableId, normalizeTeamFromCategory, displayName, splitName,
+    stableId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
+    categorySnapshotForSeason, playerForSeason, normalizeTeamFromCategory, displayName, splitName,
     normalizePlayer, normalizePlayerForWrite, identityKey, personKey, dedupePlayers,
     readCachedPlayers, writeCache, filterPlayers,
     listPlayers, readFirestorePlayers, getPlayer, savePlayer, archivePlayer,

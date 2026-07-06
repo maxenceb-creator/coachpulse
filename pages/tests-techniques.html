@@ -27,7 +27,8 @@ function avg(vals){const v=vals.map(num).filter(x=>x!==0);return v.length?Math.r
 function pct(a,b){a=num(a);b=num(b);if(a===0&&b===0)return 0;if(a===0)return b>0?999:0;return Math.round(((b-a)/a)*100)}
 function fmtPct(v){if(v===null||v===undefined)return '-';return (v>0?'+':'')+v+'%'}
 function trendClass(v){return v>0?'up':v<0?'down':'flat'}
-function seasonFromDate(d){if(!d)return '';const x=new Date(d+'T00:00:00');if(Number.isNaN(x.getTime()))return '';const y=x.getFullYear();return x.getMonth()+1>=7?`${y}-${y+1}`:`${y-1}-${y}`;}
+	function seasonFromDate(d){if(!d)return '';const x=new Date(d+'T00:00:00');if(Number.isNaN(x.getTime()))return '';const y=x.getFullYear();return x.getMonth()+1>=7?`${y}-${y+1}`:`${y-1}-${y}`;}
+	function appCurrentSeason(){try{return window.parent?.CoachPulseCentralData?.currentSeason?.()||seasonFromDate(new Date().toISOString().slice(0,10))||'2026-2027'}catch(_){return seasonFromDate(new Date().toISOString().slice(0,10))||'2026-2027'}}
 function escAttr(s){return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function sanitizeRow(row){const tests={};TESTS.forEach(([k])=>{const v=row?.tests?.[k];tests[k]=hasValue(v)?Number(v):'';});return {...row,tests};}
 function allRows(){return [...DATA.hist.map(sanitizeRow),...localRows().map(sanitizeRow)].sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));}
@@ -36,7 +37,7 @@ function catRank(c){if(String(c||'').toUpperCase().includes('SÉNIOR')||String(c
 function sortedPlayers(){return [...DATA.players].sort((a,b)=>catRank(a.categorie)-catRank(b.categorie)||String(a.label).localeCompare(String(b.label),'fr',{numeric:true}));}
 function fillCats(select,empty='Toutes'){if(!select)return;const cur=select.value;select.innerHTML='';select.appendChild(opt('',empty));DATA.cats.forEach(c=>select.appendChild(opt(c,c)));if([...select.options].some(o=>o.value===cur))select.value=cur;}
 function fillPlayerSelect(select,{empty='Choisir une joueuse',cat='',grouped=true,showCat=true}={}){if(!select)return;const cur=select.value;select.innerHTML='';select.appendChild(opt('',empty));const list=sortedPlayers().filter(p=>!cat||p.categorie===cat);if(grouped){const cats=[...new Set(list.map(p=>p.categorie))];cats.forEach(c=>{const og=document.createElement('optgroup');og.label=c;list.filter(p=>p.categorie===c).forEach(p=>og.appendChild(opt(p.id,showCat?`${p.label} · ${p.categorie}`:p.label)));select.appendChild(og);});}else{list.forEach(p=>select.appendChild(opt(p.id,showCat?`${p.label} · ${p.categorie}`:p.label)));}if(cur&&[...select.querySelectorAll('option')].some(o=>o.value===cur))select.value=cur;}
-function fillSeasons(){const cur=$('seasonFilter').value;const s=[...new Set(allRows().map(r=>r.saison).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b)));$('seasonFilter').innerHTML='';$('seasonFilter').appendChild(opt('','Toutes'));s.forEach(x=>$('seasonFilter').appendChild(opt(x,x)));if([...$('seasonFilter').options].some(o=>o.value===cur))$('seasonFilter').value=cur;$('bSeason').innerHTML='';$('bSeason').appendChild(opt('','Toutes'));s.forEach(x=>$('bSeason').appendChild(opt(x,x)));}
+	function fillSeasons(){const cur=$('seasonFilter').value||'__current',bcur=$('bSeason').value||'__current',current=appCurrentSeason();const s=[...new Set([current,...allRows().map(r=>r.saison).filter(Boolean)])].sort((a,b)=>String(a).localeCompare(String(b)));$('seasonFilter').innerHTML='';$('seasonFilter').appendChild(opt('__current','Saison courante'));$('seasonFilter').appendChild(opt('all','Toutes saisons'));s.forEach(x=>$('seasonFilter').appendChild(opt(x,x)));$('seasonFilter').value=[...$('seasonFilter').options].some(o=>o.value===cur)?cur:'__current';$('bSeason').innerHTML='';$('bSeason').appendChild(opt('__current','Saison courante'));$('bSeason').appendChild(opt('all','Toutes saisons'));s.forEach(x=>$('bSeason').appendChild(opt(x,x)));$('bSeason').value=[...$('bSeason').options].some(o=>o.value===bcur)?bcur:'__current';}
 function buildFields(){$('fieldsMax').innerHTML='';$('fieldsReg').innerHTML='';$('fieldsMouv').innerHTML='';GROUPS.max.forEach(t=>addField('fieldsMax',t));GROUPS.reg.forEach(t=>addField('fieldsReg',t));GROUPS.mouv.forEach(t=>addField('fieldsMouv',t));}
 function addField(zoneId,[key,label]){const d=document.createElement('div');d.innerHTML=`<label>${label}</label><input id="c_${key}" type="number">`;$(zoneId).appendChild(d);}
 function syncCommonSeason(){if($('commonDate'))$('commonSeason').value=seasonFromDate($('commonDate').value);}
@@ -46,7 +47,9 @@ function commonPlayerChanged(){const p=DATA.players.find(x=>x.id===$('commonPlay
 function saveCommon(){if($('commonTestType').value!=='jongles'){$('commonMsg').textContent='Module prêt, champs spécifiques à définir.';return;}const id=$('commonPlayer').value,d=$('commonDate').value,p=DATA.players.find(x=>x.id===id);if(!id||!d){$('commonMsg').textContent='Choisis une joueuse et une date.';return;}const tests={};TESTS.forEach(([k])=>{const f=$('c_'+k);tests[k]=f&&f.value!==''?Number(f.value):'';});const rows=localRows();rows.push({joueuse:id,categorie:p?.categorie||$('commonCat').value,date:d,saison:seasonFromDate(d),tests,objectifs:objectives()[p?.categorie||$('commonCat').value]||{},source:'Saisie V15'});setLocalRows(rows);$('player').value=id;if(p)$('cat').value=p.categorie||'';fillSeasons();updateJongles();renderBilan();$('commonMsg').textContent='Test enregistré. Onglet Jongle mis à jour.';}
 function clearCommon(){TESTS.forEach(([k])=>{const f=$('c_'+k);if(f)f.value='';});$('commonDate').valueAsDate=new Date();syncCommonSeason();$('commonMsg').textContent='Saisie annulée.';}
 function filterChanged(){fillPlayerSelect($('player'),{empty:'Toutes les joueuses',cat:$('cat').value,grouped:true,showCat:false});updateJongles();}
-function selectedRows(){const player=$('player').value,cat=$('cat').value,sea=$('seasonFilter').value;return allRows().filter(r=>(!player||r.joueuse===player)&&(!cat||r.categorie===cat)&&(!sea||r.saison===sea));}
+	function selectedSeasonValue(id){const v=$(id).value||'__current';return v==='__current'?appCurrentSeason():v}
+	function seasonMatches(rowSeason,filter){return filter==='all'||!filter||rowSeason===filter}
+	function selectedRows(){const player=$('player').value,cat=$('cat').value,sea=selectedSeasonValue('seasonFilter');return allRows().filter(r=>(!player||r.joueuse===player)&&(!cat||r.categorie===cat)&&seasonMatches(r.saison,sea));}
 function rowsWithFamily(rows,fam){return rows.filter(r=>GROUPS[fam].some(([k])=>hasValue(r.tests?.[k])));}
 function familyAvg(row,fam){return row?avg(GROUPS[fam].map(([k])=>row.tests?.[k])):null;}
 function pair(rows){if(!rows.length)return [null,null];if(rows.length===1)return [null,rows[0]];return $('cmp').value==='last'?[rows[rows.length-2],rows[rows.length-1]]:[rows[0],rows[rows.length-1]];}
@@ -75,7 +78,7 @@ function updateProfile(rows){
 }
 
 function currentAnalysisCategory(rows){const selected=$('player').value;const p=DATA.players.find(x=>x.id===selected);return p?.categorie||rows.find(r=>r.categorie)?.categorie||$('cat').value||'';}
-function currentSeason(){return $('seasonFilter').value||'';}
+	function currentSeason(){return selectedSeasonValue('seasonFilter');}
 function valuesForTest(rows,key){return rows.map(r=>r.tests?.[key]).filter(hasValue).map(num);}
 function averageOfValues(vals){return vals.length?Math.round((vals.reduce((a,b)=>a+b,0)/vals.length)*10)/10:null;}
 function categoryAverageForTest(key,cat,season){if(!cat)return null;const vals=allRows().filter(r=>r.categorie===cat&&(!season||r.saison===season)&&hasValue(r.tests?.[key])).map(r=>num(r.tests?.[key]));return averageOfValues(vals);}
@@ -97,9 +100,9 @@ function updateJongles(){const rows=selectedRows();updateProfile(rows);updateKpi
 function toggleFamily(btn){const f=btn.dataset.family;familyState[f]=!familyState[f];btn.textContent=(familyState[f]?'👁️ ':'🙈 ')+FAMILY_LABEL[f];updateJongles();}
 function renderObjectives(){const obj=objectives(),tb=$('objTable').querySelector('tbody');tb.innerHTML='';DATA.cats.forEach(c=>{obj[c]??={};const tr=document.createElement('tr');tr.innerHTML=`<td><b>${c}</b></td>`+TESTS.map(([k])=>`<td><input data-cat="${c}" data-key="${k}" type="number" value="${obj[c][k]??''}"></td>`).join('');tb.appendChild(tr);});}
 function saveObjectives(){const obj=objectives();document.querySelectorAll('#objTable input').forEach(i=>{obj[i.dataset.cat]??={};obj[i.dataset.cat][i.dataset.key]=i.value===''?'':Number(i.value);});setObjectives(obj);updateJongles();$('commonMsg').textContent='Objectifs sauvegardés.';}
-function playerStats(p){const rows=allRows().filter(r=>r.joueuse===p.id&&(!$('bSeason').value||r.saison===$('bSeason').value));if(rows.length<2)return null;const out={player:p.label,cat:p.categorie,tests:rows.length,first:rows[0].date,last:rows[rows.length-1].date,pm:0,pr:0,pv:0,glob:0,best:{label:'-',p:-999}};['max','reg','mouv'].forEach(f=>{const fr=rowsWithFamily(rows,f);if(fr.length<2)return;const [a,b]=[fr[0],fr[fr.length-1]],e=pct(familyAvg(a,f),familyAvg(b,f));if(f==='max')out.pm=e;if(f==='reg')out.pr=e;if(f==='mouv')out.pv=e;});out.glob=Math.round((out.pm+out.pr+out.pv)/3);TESTS.forEach(([k,label])=>{const fr=rows.filter(r=>hasValue(r.tests?.[k]));if(fr.length<2)return;const e=pct(num(fr[0].tests?.[k]),num(fr[fr.length-1].tests?.[k]));if(e>out.best.p)out.best={label,p:e};});return out;}
+	function playerStats(p){const sea=selectedSeasonValue('bSeason');const rows=allRows().filter(r=>r.joueuse===p.id&&seasonMatches(r.saison,sea));if(rows.length<2)return null;const out={player:p.label,cat:p.categorie,tests:rows.length,first:rows[0].date,last:rows[rows.length-1].date,pm:0,pr:0,pv:0,glob:0,best:{label:'-',p:-999}};['max','reg','mouv'].forEach(f=>{const fr=rowsWithFamily(rows,f);if(fr.length<2)return;const [a,b]=[fr[0],fr[fr.length-1]],e=pct(familyAvg(a,f),familyAvg(b,f));if(f==='max')out.pm=e;if(f==='reg')out.pr=e;if(f==='mouv')out.pv=e;});out.glob=Math.round((out.pm+out.pr+out.pv)/3);TESTS.forEach(([k,label])=>{const fr=rows.filter(r=>hasValue(r.tests?.[k]));if(fr.length<2)return;const e=pct(num(fr[0].tests?.[k]),num(fr[fr.length-1].tests?.[k]));if(e>out.best.p)out.best={label,p:e};});return out;}
 function renderBilan(){let rows=DATA.players.filter(p=>(!$('bCat').value||p.categorie===$('bCat').value)&&(!$('bPlayer').value||p.id===$('bPlayer').value)).map(playerStats).filter(Boolean);const s=$('bSort').value;rows.sort((a,b)=>s==='max'?b.pm-a.pm:s==='reg'?b.pr-a.pr:s==='mouv'?b.pv-a.pv:b.glob-a.glob);const tb=$('bTable').querySelector('tbody');tb.innerHTML='';rows.forEach((r,i)=>{const tr=document.createElement('tr');tr.innerHTML=`<td><b>${i+1}</b></td><td><b>${r.player}</b></td><td><span class="badge">${r.cat}</span></td><td>${r.tests}</td><td>${fmtPct(r.glob)}</td><td>${fmtPct(r.pm)}</td><td>${fmtPct(r.pr)}</td><td>${fmtPct(r.pv)}</td><td>${r.best.label} · ${fmtPct(r.best.p)}</td><td>${r.first}</td><td>${r.last}</td>`;tb.appendChild(tr);});$('bHighlights').innerHTML=rows.slice(0,5).map((r,i)=>`<div class="box" style="margin-bottom:10px"><b>${i+1}. ${r.player}</b><h3>${fmtPct(r.glob)}</h3><p>Meilleur test : ${r.best.label} (${fmtPct(r.best.p)})</p></div>`).join('')||'<p class="muted">Pas assez de données.</p>';renderBest();chart('bChart','bar',rows.slice(0,10).map(r=>r.player),[{label:'Progression globale %',data:rows.slice(0,10).map(r=>r.glob)}]);}
-function renderBest(){const tb=$('bestTable').querySelector('tbody');tb.innerHTML='';TESTS.forEach(([k,label])=>{let best=null;DATA.players.forEach(p=>{const fr=allRows().filter(r=>r.joueuse===p.id&&hasValue(r.tests?.[k]));if(fr.length<2)return;const e=pct(num(fr[0].tests?.[k]),num(fr[fr.length-1].tests?.[k]));if(!best||e>best.e)best={p,e,from:num(fr[0].tests?.[k]),to:num(fr[fr.length-1].tests?.[k])};});if(best){const tr=document.createElement('tr');tr.innerHTML=`<td><b>${label}</b></td><td>${best.p.label}</td><td><span class="badge">${best.p.categorie}</span></td><td>${fmtPct(best.e)}</td><td>${best.from}</td><td>${best.to}</td>`;tb.appendChild(tr);}});}
+	function renderBest(){const sea=selectedSeasonValue('bSeason');const tb=$('bestTable').querySelector('tbody');tb.innerHTML='';TESTS.forEach(([k,label])=>{let best=null;DATA.players.forEach(p=>{const fr=allRows().filter(r=>r.joueuse===p.id&&seasonMatches(r.saison,sea)&&hasValue(r.tests?.[k]));if(fr.length<2)return;const e=pct(num(fr[0].tests?.[k]),num(fr[fr.length-1].tests?.[k]));if(!best||e>best.e)best={p,e,from:num(fr[0].tests?.[k]),to:num(fr[fr.length-1].tests?.[k])};});if(best){const tr=document.createElement('tr');tr.innerHTML=`<td><b>${label}</b></td><td>${best.p.label}</td><td><span class="badge">${best.p.categorie}</span></td><td>${fmtPct(best.e)}</td><td>${best.from}</td><td>${best.to}</td>`;tb.appendChild(tr);}});}
 function toggleSharedSelection(){const wrap=$('sharedSelectionWrap');const active=document.querySelector('.tab.active')?.dataset.tab;if(wrap)wrap.classList.toggle('visible',!!active&&active!=='saisie');}
 function bind(){document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.tab).classList.add('active');toggleSharedSelection();if(b.dataset.tab==='jongles')updateJongles();if(b.dataset.tab==='bilan')renderBilan();}));$('commonCat').addEventListener('change',commonCatChanged);$('commonPlayer').addEventListener('change',commonPlayerChanged);$('commonDate').addEventListener('change',syncCommonSeason);$('commonTestType').addEventListener('change',syncCommonType);$('commonSave').addEventListener('click',saveCommon);$('commonClear').addEventListener('click',clearCommon);['seasonFilter','cat'].forEach(id=>$(id).addEventListener('change',filterChanged));['player','cmp'].forEach(id=>$(id).addEventListener('change',updateJongles));document.querySelectorAll('.family-toggle').forEach(b=>b.addEventListener('click',()=>toggleFamily(b)));$('hideEmptyBtn').addEventListener('click',()=>{hideEmpty=true;updateJongles();});$('showAllResultsBtn').addEventListener('click',()=>{hideEmpty=false;familyState={max:true,reg:true,mouv:true};document.querySelectorAll('.family-toggle').forEach(b=>b.textContent='👁️ '+FAMILY_LABEL[b.dataset.family]);updateJongles();});['bCat','bSeason','bSort','bPlayer'].forEach(id=>$(id).addEventListener('change',renderBilan));$('saveObj').addEventListener('click',saveObjectives);$('resetObj').addEventListener('click',()=>{localStorage.removeItem('coachStatsV13Objectives');renderObjectives();updateJongles();});}
 function init(){buildFields();fillCats($('commonCat'),'Choisir');fillPlayerSelect($('commonPlayer'),{empty:'Choisir une joueuse',grouped:true,showCat:false});fillCats($('cat'),'Toutes');fillPlayerSelect($('player'),{empty:'Toutes les joueuses',grouped:true,showCat:false});fillCats($('bCat'),'Toutes');fillPlayerSelect($('bPlayer'),{empty:'Toutes',grouped:false,showCat:true});fillSeasons();$('commonDate').valueAsDate=new Date();syncCommonSeason();syncCommonType();renderObjectives();bind();toggleSharedSelection();updateJongles();renderBilan();}
@@ -111,13 +114,52 @@ document.addEventListener('DOMContentLoaded',init);
   "use strict";
   function slug(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"joueuse"}
   function personKey(p){return [p.nom||p.lastName,p.prenom||p.firstName].map(x=>slug(x)).join("|")}
-  function readCachedPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=personKey(p)||p.playerId||p.id;if(key)by.set(key,Object.assign({},by.get(key)||{},p))});return Array.from(by.values())}catch(_){return []}}
-  async function readPlayers(){try{const api=window.parent&&window.parent.CoachPulseCentralData;if(api&&typeof api.listPlayers==="function"){const players=await api.listPlayers();if(Array.isArray(players)&&players.length)return players}}catch(_){}return readCachedPlayers()}
-  function displayName(p){return `${String(p.prenom||"").trim()} ${String(p.nom||"").toUpperCase()}`.trim();}
+  function readCachedPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();manual.concat(central).forEach(p=>{const key=personKey(p)||p.playerId||p.id;if(key)by.set(key,Object.assign({},by.get(key)||{},p))});return Array.from(by.values())}catch(_){return []}}
+  function selectedPlayerSeason(){
+    const active=document.querySelector(".tab.active")?.dataset.tab;
+    const id=active==="bilan"?"bSeason":"seasonFilter";
+    const el=document.getElementById(id)||document.getElementById("seasonFilter")||document.getElementById("bSeason");
+    const value=el?.value||"__current";
+    if(value==="__current"){
+      try{return window.parent?.CoachPulseCentralData?.currentSeason?.()||"2026-2027"}catch(_){return "2026-2027"}
+    }
+    return value;
+  }
+  async function readPlayers(){
+    const season=selectedPlayerSeason();
+    try{
+      const api=window.parent&&window.parent.CoachPulseCentralData;
+      if(api&&typeof api.listPlayers==="function"){
+        const filters=season&&season!=="all"?{season}:season==="all"?{season:"all"}:{};
+        const players=await api.listPlayers(filters);
+        if(Array.isArray(players)&&players.length)return players;
+      }
+    }catch(_){}
+    return readCachedPlayers();
+  }
+  function displayName(p){return `${String(p.prenom||"").trim()} ${String(p.nom||"").toUpperCase()}`.trim().toUpperCase();}
+  function teamCategoryFromSubCategory(value){
+    const raw=String(value||"").toUpperCase().replace(/\s+/g,"");
+    if(raw==="R1"||raw.includes("SENIOR")||raw.includes("SÉNIOR"))return "R1";
+    const n=Number((raw.match(/\d+/)||[])[0]||0);
+    if(!n)return "";
+    if(n<=7)return "U6-U7";
+    if(n<=9)return "U8-U9";
+    if(n<=11)return "U10-U11";
+    if(n<=14)return "U12-U13-U14";
+    if(n<=16)return "U14-U15-U16";
+    return "U19";
+  }
+  function mainCategory(p,existing,subCategory){
+    const raw=p.categorie||p.category||p.team||existing?.categorieListe||existing?.categorie||"";
+    const value=String(raw||"").trim();
+    if(/^U([1-9]|1[0-9])$/i.test(value))return teamCategoryFromSubCategory(value);
+    return value||teamCategoryFromSubCategory(subCategory);
+  }
   function toTestPlayer(p,existing){
     const id=(existing&&existing.id)||p.playerId||p.id||displayName(p).toUpperCase();
-    const cat=p.subCategory||p.sousCategorie||p.categorie||p.category||existing?.categorie||"";
-    const categoryList=p.categorie||p.category||p.team||existing?.categorieListe||cat;
+    const subCategory=p.subCategory||p.sousCategorie||existing?.sousCategorie||existing?.categorie||"";
+    const categoryList=mainCategory(p,existing,subCategory);
     return {
       id,
       key:id,
@@ -125,9 +167,9 @@ document.addEventListener('DOMContentLoaded',init);
       label:displayName(p)||existing?.label||id,
       nom:String(p.nom||p.lastName||existing?.nom||"").toUpperCase(),
       prenom:String(p.prenom||p.firstName||existing?.prenom||"").toUpperCase(),
-      categorie:cat,
+      categorie:categoryList,
       categorieListe:categoryList,
-      sousCategorie:cat,
+      sousCategorie:subCategory||categoryList,
       equipe:p.team||existing?.equipe||categoryList,
       nationalite:p.nationalite||p.nationality||existing?.nationalite||"France",
       drapeau:existing?.drapeau||"🇫🇷",
@@ -139,6 +181,14 @@ document.addEventListener('DOMContentLoaded',init);
   }
   function refreshViews(){
     try{fillCats($('commonCat'),'Choisir');fillPlayerSelect($('commonPlayer'),{empty:'Choisir une joueuse',grouped:true,showCat:false});fillCats($('cat'),'Toutes');fillPlayerSelect($('player'),{empty:'Toutes les joueuses',grouped:true,showCat:false});fillCats($('bCat'),'Toutes');fillPlayerSelect($('bPlayer'),{empty:'Toutes',grouped:false,showCat:true});renderObjectives();updateJongles();renderBilan();}catch(_){}
+  }
+  function bindSeasonReload(){
+    ["seasonFilter","bSeason"].forEach(id=>{
+      const el=document.getElementById(id);
+      if(!el||el.dataset.centralPlayersSeasonBound)return;
+      el.dataset.centralPlayersSeasonBound="1";
+      el.addEventListener("change",()=>setTimeout(merge,0));
+    });
   }
   async function merge(){
     if(typeof DATA==="undefined"||!DATA.players)return;
@@ -154,11 +204,13 @@ document.addEventListener('DOMContentLoaded',init);
       seen.add(key);
     });
     DATA.players.splice(0,DATA.players.length,...next);
-    const cats=[...new Set([...DATA.cats,...next.map(p=>p.categorie)].filter(Boolean))].sort((a,b)=>catRank(a)-catRank(b)||String(a).localeCompare(String(b),'fr',{numeric:true}));
+    const cats=[...new Set(next.map(p=>p.categorie).filter(Boolean))].sort((a,b)=>catRank(a)-catRank(b)||String(a).localeCompare(String(b),'fr',{numeric:true}));
     DATA.cats.splice(0,DATA.cats.length,...cats);
     DATA.cats.forEach(cat=>{if(cat&&DATA.obj&&!DATA.obj[cat])DATA.obj[cat]={};});
+    bindSeasonReload();
     refreshViews();
   }
+  bindSeasonReload();
   merge();
   window.addEventListener("message",e=>{if(e.data&&(/coachpulse-(players|cloud)-updated/.test(e.data.type||"")))merge();});
   window.addEventListener("storage",e=>{if(e.key==="coachpulse:customPlayers"||e.key==="coachpulse:centralPlayers")merge();});

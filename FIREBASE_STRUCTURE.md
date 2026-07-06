@@ -84,6 +84,8 @@ Les index Firestore versionnés couvrent les requêtes prévues :
 
 Le bouton `Migrer Firestore` du panneau Cloud lit les données locales existantes puis crée ou met à jour les documents Firestore.
 
+Pour la reconstruction complète de la base joueuses et le remapping des historiques, suivre le protocole dédié : [PLAYER_DATA_MIGRATION_PLAN.md](PLAYER_DATA_MIGRATION_PLAN.md).
+
 Les anciennes données locales restent conservées :
 
 - `coachpulse_common_base` continue de servir de sauvegarde globale de compatibilité.
