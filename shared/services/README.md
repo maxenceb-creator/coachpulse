@@ -29,8 +29,15 @@ Responsabilités :
 
 Contrat modèle principal :
 - `playerId` : identifiant stable et clé du document Firestore.
+  - Il est indépendant de la catégorie sportive.
+  - Une montée de saison, par exemple U10 vers U11, ne doit jamais changer le `playerId`.
+  - Pour les nouvelles joueuses, il est généré à partir de l'identité stable, idéalement nom + prénom + date de naissance.
 - `nom`, `prenom`, `displayName`.
 - `categorie`, `subCategory`, `team`, `teamId`.
+- `currentSeason`, `seasonStart`, `seasonEnd`, `seasonHistory`.
+  - Une saison commence le 1er juillet et finit le 30 juin.
+  - Exemple : `2026-2027` va du 1er juillet 2026 au 30 juin 2027.
+  - La catégorie de saison est recalculée depuis la date de naissance quand elle est disponible.
 - `poste`, `numero`, `photo`, `foot`, `birth`, `dateNaissance`.
 - `status` : `active`, `injured`, `left` ou `archived`.
 - `createdAtIso`, `updatedAtIso`, `updatedBy`, `updatedByEmail`.

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-26-20260706-player-single-source';
+const CACHE_NAME = 'coachpulse-v6-4-39-20260706-presence-category-filter';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',

@@ -17,6 +17,7 @@ firebase-debug.*.log*
 *.tar.gz
 backups/
 exports/
+migration-output/
 
 # Firebase cache
 .firebase/
