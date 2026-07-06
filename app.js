@@ -1575,9 +1575,19 @@ async function moduleListPlayers(){
   }
   return sortPlayersForApp([...byId.values()]);
 }
+async function listPlayers(filters={}){
+  const players = await moduleListPlayers();
+  const service = playersService();
+  return service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
+}
+async function getPlayer(playerId){
+  if(!playerId) return null;
+  const players = await listPlayers();
+  return players.find(player => (player.playerId || player.id) === playerId) || null;
+}
 async function medicalListPlayers(){
   if(!guardMedical('read')) return [];
-  return moduleListPlayers();
+  return listPlayers();
 }
 async function medicalListData(){
   if(!guardMedical('read')) return localMedicalPayload();
@@ -1704,7 +1714,7 @@ async function adminSaveModuleSettings(moduleId, updates={}){
   updateRoleUi();
   return getModuleCatalog();
 }
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, listPlayers, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   snapshotLocalData({fromCloud:true});
