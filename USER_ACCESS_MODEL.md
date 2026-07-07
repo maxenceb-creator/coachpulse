@@ -58,10 +58,12 @@ Legacy roles are normalized during transition:
 - `LECTEUR`: can read allowed modules.
 - `SAISIE`: can read and write allowed modules.
 - `EDITEUR`: can read, write and use advanced actions on allowed modules.
+- `ADMIN`: can access every team, every module and every action.
 
 Legacy permission migration:
 
-- old `ADMIN`, `RESPONSABLE`, `RESPONSABLE_CATEGORIE` -> `EDITEUR`
+- old `ADMIN` -> `ADMIN`
+- old `RESPONSABLE`, `RESPONSABLE_CATEGORIE` -> `EDITEUR`
 - old `LECTURE`, `OBSERVATEUR_STAFF`, `JOUEUSE_PARENT` -> `LECTEUR`
 - other old staff roles -> `SAISIE`
 

@@ -39,26 +39,28 @@ service cloud.firestore {
     }
 
     function legacyPermissionFromRole() {
-      return role() in ['ADMIN', 'RESPONSABLE', 'RESPONSABLE_CATEGORIE'] ? 'EDITEUR'
-        : (role() in ['LECTURE', 'LECTURE_SEULE', 'OBSERVATEUR', 'OBSERVATEUR_STAFF', 'JOUEUSE_PARENT'] ? 'LECTEUR' : 'SAISIE');
+      return role() == 'ADMIN' ? 'ADMIN'
+        : (role() in ['RESPONSABLE', 'RESPONSABLE_CATEGORIE'] ? 'EDITEUR'
+        : (role() in ['LECTURE', 'LECTURE_SEULE', 'OBSERVATEUR', 'OBSERVATEUR_STAFF', 'JOUEUSE_PARENT'] ? 'LECTEUR' : 'SAISIE'));
     }
 
     function canReadData() {
-      return hasActiveStaffProfile() && permissionLevel() in ['LECTEUR', 'SAISIE', 'EDITEUR'];
+      return hasActiveStaffProfile() && permissionLevel() in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN'];
     }
 
     function canWriteData() {
-      return hasActiveStaffProfile() && permissionLevel() in ['SAISIE', 'EDITEUR'];
+      return hasActiveStaffProfile() && permissionLevel() in ['SAISIE', 'EDITEUR', 'ADMIN'];
     }
 
     function canEditData() {
-      return hasActiveStaffProfile() && permissionLevel() == 'EDITEUR';
+      return hasActiveStaffProfile() && permissionLevel() in ['EDITEUR', 'ADMIN'];
     }
 
     function canAccessModule(moduleId) {
       return hasActiveStaffProfile()
         && (
-          role() == 'ADMIN'
+          permissionLevel() == 'ADMIN'
+          || role() == 'ADMIN'
           || profileList('allowedModules').size() == 0
           || profileList('allowedModules').hasAny([moduleId])
         );
@@ -100,7 +102,8 @@ service cloud.firestore {
     }
 
     function canAccessTeam(teamId) {
-      return !hasTeamScope()
+      return permissionLevel() == 'ADMIN'
+        || !hasTeamScope()
         || profileList('teamIds').hasAny([teamId])
         || profileList('allowedTeamIds').hasAny([teamId])
         || profileList('authorizedTeams').hasAny([teamId])
@@ -112,7 +115,8 @@ service cloud.firestore {
     }
 
     function canAccessPlayerId(playerId) {
-      return profileList('playerIds').size() == 0 && profileList('allowedPlayerIds').size() == 0
+      return permissionLevel() == 'ADMIN'
+        || profileList('playerIds').size() == 0 && profileList('allowedPlayerIds').size() == 0
         || profileList('playerIds').hasAny([playerId])
         || profileList('allowedPlayerIds').hasAny([playerId]);
     }
@@ -157,7 +161,7 @@ service cloud.firestore {
         || (
           signedIn()
           && request.auth.uid == uid
-          && request.resource.data.permissionLevel == 'EDITEUR'
+          && request.resource.data.permissionLevel == 'ADMIN'
           && request.auth.token.email != null
           && (
             request.auth.token.email.matches('.*@asse\\.fr$')

@@ -54,19 +54,22 @@
   const PERMISSIONS = {
     LECTEUR:'LECTEUR',
     SAISIE:'SAISIE',
-    EDITEUR:'EDITEUR'
+    EDITEUR:'EDITEUR',
+    ADMIN:'ADMIN'
   };
 
   const PERMISSION_LABELS = {
     LECTEUR:'Lecteur',
     SAISIE:'Saisie',
-    EDITEUR:'Éditeur'
+    EDITEUR:'Éditeur',
+    ADMIN:'Admin'
   };
 
   const PERMISSION_RANK = {
     LECTEUR:1,
     SAISIE:2,
-    EDITEUR:3
+    EDITEUR:3,
+    ADMIN:4
   };
 
   const MODULE_PERMISSIONS = {
@@ -119,7 +122,8 @@
 
   function legacyPermissionFromRole(role){
     const raw = normalizeKey(role, '');
-    if(raw === 'ADMIN' || raw === 'RESPONSABLE' || raw === 'RESPONSABLE_CATEGORIE') return 'EDITEUR';
+    if(raw === 'ADMIN') return 'ADMIN';
+    if(raw === 'RESPONSABLE' || raw === 'RESPONSABLE_CATEGORIE') return 'EDITEUR';
     if(['LECTURE','LECTURE_SEULE','OBSERVATEUR','OBSERVATEUR_STAFF','JOUEUSE','PARENT','JOUEUSE_PARENT'].includes(raw)) return 'LECTEUR';
     return 'SAISIE';
   }
@@ -170,6 +174,7 @@
   }
 
   function hasExplicitModuleScope(profile={}){
+    if(normalizePermission(null, profile) === 'ADMIN') return false;
     return list(profile?.allowedModules || profile?.modulesAutorises).length > 0
       || Object.keys(profile?.modulePermissions || profile?.permissionsSpecifiques || {}).length > 0;
   }
@@ -180,6 +185,7 @@
   }
 
   function moduleAllowedByScope(profile={}, moduleId=''){
+    if(normalizePermission(null, profile) === 'ADMIN') return true;
     if(moduleId === 'home') return true;
     if(!hasExplicitModuleScope(profile)){
       const legacy = legacyRoleModules(profile);
@@ -214,6 +220,7 @@
 
   function canAccessTeam(profile={}, teamId=''){
     if(!isActive(profile)) return false;
+    if(normalizePermission(null, profile) === 'ADMIN') return true;
     const allowed = teamIds(profile);
     if(!allowed.length) return true;
     const target = asText(teamId).toLowerCase();
@@ -222,6 +229,7 @@
 
   function canAccessPlayer(profile={}, player={}){
     if(!isActive(profile)) return false;
+    if(normalizePermission(null, profile) === 'ADMIN') return true;
     const ownPlayerIds = list(profile?.playerIds || profile?.allowedPlayerIds).map(v => v.toLowerCase());
     const playerId = asText(player?.playerId || player?.id || player).toLowerCase();
     if(ownPlayerIds.length) return Boolean(playerId) && ownPlayerIds.includes(playerId);

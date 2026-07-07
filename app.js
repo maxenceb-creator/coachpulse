@@ -318,7 +318,7 @@ async function ensureUserProfile(user){
     currentProfile.roleLabel = service?.roleLabel ? service.roleLabel(currentProfile.role) : currentProfile.role;
     currentProfile.permissionLevel = service?.normalizePermission ? service.normalizePermission(currentProfile.permissionLevel, {...currentProfile, legacyRole}) : (currentProfile.permissionLevel || 'LECTEUR');
     currentProfile.permissionLabel = service?.permissionLabel ? service.permissionLabel(currentProfile.permissionLevel) : currentProfile.permissionLevel;
-    if(service?.normalizePermission && currentProfile.permissionLevel === 'EDITEUR' && (!Array.isArray(currentProfile.allowedModules) || !currentProfile.allowedModules.length) && String(legacyRole).toUpperCase() === 'ADMIN'){
+    if(service?.normalizePermission && currentProfile.permissionLevel === 'ADMIN' && (!Array.isArray(currentProfile.allowedModules) || !currentProfile.allowedModules.length)){
       currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
     }
     if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(currentProfile.status || '').toUpperCase())) throw new Error('Compte inactif. Contacte un administrateur.');
@@ -328,7 +328,7 @@ async function ensureUserProfile(user){
   const email = (user.email || '').toLowerCase();
   const isSeedAdmin = email.includes('maxence.boisdron') || email.endsWith('@asse.fr');
   const role = isSeedAdmin ? 'DIRIGEANT' : 'ENTRAINEUR';
-  const permissionLevel = isSeedAdmin ? 'EDITEUR' : 'LECTEUR';
+  const permissionLevel = isSeedAdmin ? 'ADMIN' : 'LECTEUR';
   currentProfile = service?.defaultProfile ? service.defaultProfile(user, role, permissionLevel) : {uid:user.uid, email:user.email, name:user.displayName || user.email, role, permissionLevel, scope:'CoachPulse', status:'ACTIVE'};
   if(isSeedAdmin) currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
   await firebaseFns.setDoc(ref, {...currentProfile, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp(), lastLoginAt:firebaseFns.serverTimestamp()}, {merge:true});
@@ -2272,7 +2272,7 @@ function roleOptions(selected='ENTRAINEUR'){
 }
 function permissionOptions(selected='LECTEUR'){
   const service = permissionsService();
-  const labels = service?.PERMISSION_LABELS || {LECTEUR:'Lecteur',SAISIE:'Saisie',EDITEUR:'Éditeur'};
+  const labels = service?.PERMISSION_LABELS || {LECTEUR:'Lecteur',SAISIE:'Saisie',EDITEUR:'Éditeur',ADMIN:'Admin'};
   const current = service?.normalizePermission ? service.normalizePermission(selected) : selected;
   return Object.entries(labels).map(([permission,label]) => `<option value="${permission}" ${permission===current?'selected':''}>${escapeHtml(label)}</option>`).join('');
 }
@@ -2392,7 +2392,7 @@ function ensureUserAdminFields(){
   }
   const roleList = document.querySelector('.role-list');
   if(roleList && !roleList.dataset.extendedRoles){
-    roleList.innerHTML = `<div><b>Rôle métier</b><span>Fonction dans le club : responsable de pôle, entraîneur, adjoint, préparateur, kiné, médecin ou dirigeant.</span></div><div><b>Équipes</b><span>Périmètre sportif accessible. Plusieurs équipes peuvent être sélectionnées.</span></div><div><b>Modules</b><span>Périmètre fonctionnel visible dans CoachPulse.</span></div><div><b>Lecteur</b><span>Consultation uniquement sur les modules autorisés.</span></div><div><b>Saisie</b><span>Consultation et ajout/modification courante sur les modules autorisés.</span></div><div><b>Éditeur</b><span>Droits avancés sur les modules autorisés, avec accès aux actions d’administration si le module est autorisé.</span></div>`;
+    roleList.innerHTML = `<div><b>Rôle métier</b><span>Fonction dans le club : responsable de pôle, entraîneur, adjoint, préparateur, kiné, médecin ou dirigeant.</span></div><div><b>Équipes</b><span>Périmètre sportif accessible. Plusieurs équipes peuvent être sélectionnées.</span></div><div><b>Modules</b><span>Périmètre fonctionnel visible dans CoachPulse.</span></div><div><b>Lecteur</b><span>Consultation uniquement sur les modules autorisés.</span></div><div><b>Saisie</b><span>Consultation et ajout/modification courante sur les modules autorisés.</span></div><div><b>Éditeur</b><span>Droits avancés sur les modules autorisés, avec accès aux actions d’administration si le module est autorisé.</span></div><div><b>Admin</b><span>Tous les droits, toutes les équipes et tous les modules.</span></div>`;
     roleList.dataset.extendedRoles = '1';
   }
 }
