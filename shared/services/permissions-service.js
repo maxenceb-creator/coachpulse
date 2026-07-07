@@ -1,87 +1,139 @@
 // CoachPulse shared permissions service.
-// Central role and permission helpers. Kept framework-free for legacy pages.
+// Separates club role, team/module scope and actual permission level.
 
 (function(global){
   const ROLES = {
-    ADMIN:'ADMIN',
-    RESPONSABLE_CATEGORIE:'RESPONSABLE_CATEGORIE',
-    COACH:'COACH',
-    PREPARATEUR_ATHLETIQUE:'PREPARATEUR_ATHLETIQUE',
-    MEDICAL:'MEDICAL',
-    OBSERVATEUR_STAFF:'OBSERVATEUR_STAFF',
-    LECTURE:'LECTURE',
-    JOUEUSE_PARENT:'JOUEUSE_PARENT'
+    RESPONSABLE_POLE:'RESPONSABLE_POLE',
+    ENTRAINEUR:'ENTRAINEUR',
+    ENTRAINEUR_ADJOINT:'ENTRAINEUR_ADJOINT',
+    PREPARATEUR_PHYSIQUE:'PREPARATEUR_PHYSIQUE',
+    KINE:'KINE',
+    MEDECIN:'MEDECIN',
+    DIRIGEANT:'DIRIGEANT'
   };
 
   const ROLE_ALIASES = {
-    RESPONSABLE:'RESPONSABLE_CATEGORIE',
-    RESPONSABLE_CATEGORIE:'RESPONSABLE_CATEGORIE',
-    RESPONSABLE_CATEGORY:'RESPONSABLE_CATEGORIE',
-    EDUCATEUR:'COACH',
-    EDUCATEUR_SPORTIF:'COACH',
-    STAFF:'OBSERVATEUR_STAFF',
-    KINE:'MEDICAL',
-    KINÉ:'MEDICAL',
-    MEDICAL_KINE:'MEDICAL',
-    PREPARATEUR:'PREPARATEUR_ATHLETIQUE',
-    PREPARATEUR_PHYSIQUE:'PREPARATEUR_ATHLETIQUE',
-    OBSERVATEUR:'OBSERVATEUR_STAFF',
-    LECTURE_SEULE:'LECTURE',
-    PARENT:'JOUEUSE_PARENT',
-    JOUEUSE:'JOUEUSE_PARENT'
+    ADMIN:'DIRIGEANT',
+    RESPONSABLE:'RESPONSABLE_POLE',
+    RESPONSABLE_CATEGORIE:'RESPONSABLE_POLE',
+    RESPONSABLE_CATEGORY:'RESPONSABLE_POLE',
+    COACH:'ENTRAINEUR',
+    EDUCATEUR:'ENTRAINEUR',
+    EDUCATEUR_SPORTIF:'ENTRAINEUR',
+    ADJOINT:'ENTRAINEUR_ADJOINT',
+    ENTRAINEUR_ADJOINT:'ENTRAINEUR_ADJOINT',
+    ENTRAINEUR_ADJOINT_E:'ENTRAINEUR_ADJOINT',
+    PREPARATEUR:'PREPARATEUR_PHYSIQUE',
+    PREPARATEUR_ATHLETIQUE:'PREPARATEUR_PHYSIQUE',
+    PREPARATEUR_PHYSIQUE:'PREPARATEUR_PHYSIQUE',
+    MEDICAL:'KINE',
+    KINE:'KINE',
+    KINÉ:'KINE',
+    MEDECIN:'MEDECIN',
+    MÉDECIN:'MEDECIN',
+    STAFF:'DIRIGEANT',
+    OBSERVATEUR:'DIRIGEANT',
+    OBSERVATEUR_STAFF:'DIRIGEANT',
+    LECTURE:'DIRIGEANT',
+    LECTURE_SEULE:'DIRIGEANT',
+    PARENT:'DIRIGEANT',
+    JOUEUSE:'DIRIGEANT',
+    JOUEUSE_PARENT:'DIRIGEANT'
   };
 
   const ROLE_LABELS = {
-    ADMIN:'Admin',
-    RESPONSABLE_CATEGORIE:'Responsable catégorie',
-    COACH:'Coach',
-    PREPARATEUR_ATHLETIQUE:'Préparateur athlétique',
-    MEDICAL:'Médical / Kiné',
-    OBSERVATEUR_STAFF:'Observateur staff',
-    LECTURE:'Lecture seule',
-    JOUEUSE_PARENT:'Joueuse / Parent'
+    RESPONSABLE_POLE:'Responsable de pôle',
+    ENTRAINEUR:'Entraîneur',
+    ENTRAINEUR_ADJOINT:'Entraîneur adjoint',
+    PREPARATEUR_PHYSIQUE:'Préparateur physique',
+    KINE:'Kiné',
+    MEDECIN:'Médecin',
+    DIRIGEANT:'Dirigeant'
   };
 
-  const ADMIN_ROLES = ['ADMIN'];
-  const CORE_DATA_ROLES = ['ADMIN', 'RESPONSABLE_CATEGORIE'];
-  const READ_ONLY_ROLES = ['LECTURE', 'OBSERVATEUR_STAFF', 'JOUEUSE_PARENT'];
-  const ALL_STAFF_ROLES = [
-    'ADMIN',
-    'RESPONSABLE_CATEGORIE',
-    'COACH',
-    'PREPARATEUR_ATHLETIQUE',
-    'MEDICAL',
-    'OBSERVATEUR_STAFF',
-    'LECTURE'
-  ];
+  const PERMISSIONS = {
+    LECTEUR:'LECTEUR',
+    SAISIE:'SAISIE',
+    EDITEUR:'EDITEUR'
+  };
+
+  const PERMISSION_LABELS = {
+    LECTEUR:'Lecteur',
+    SAISIE:'Saisie',
+    EDITEUR:'Éditeur'
+  };
+
+  const PERMISSION_RANK = {
+    LECTEUR:1,
+    SAISIE:2,
+    EDITEUR:3
+  };
 
   const MODULE_PERMISSIONS = {
-    home:{read:ALL_STAFF_ROLES},
-    stats:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','OBSERVATEUR_STAFF','LECTURE'], write:['ADMIN','RESPONSABLE_CATEGORIE','COACH'], importExport:['ADMIN','RESPONSABLE_CATEGORIE']},
-    presences:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','OBSERVATEUR_STAFF','LECTURE'], write:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE'], importExport:['ADMIN','RESPONSABLE_CATEGORIE']},
-    tests:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','OBSERVATEUR_STAFF','LECTURE'], write:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE'], importExport:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE']},
-    methodologie:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','OBSERVATEUR_STAFF','LECTURE'], write:['ADMIN','RESPONSABLE_CATEGORIE','COACH'], importExport:['ADMIN','RESPONSABLE_CATEGORIE']},
-    database:{read:['ADMIN','RESPONSABLE_CATEGORIE'], write:['ADMIN','RESPONSABLE_CATEGORIE'], importExport:['ADMIN','RESPONSABLE_CATEGORIE']},
-    dataHub:{read:['ADMIN','RESPONSABLE_CATEGORIE'], write:['ADMIN','RESPONSABLE_CATEGORIE'], importExport:['ADMIN','RESPONSABLE_CATEGORIE']},
-    admin:{read:['ADMIN'], write:['ADMIN'], importExport:['ADMIN']},
-    medical:{read:['ADMIN','RESPONSABLE_CATEGORIE','MEDICAL'], write:['ADMIN','MEDICAL'], importExport:['ADMIN','MEDICAL']},
-    injuries:{read:['ADMIN','RESPONSABLE_CATEGORIE','MEDICAL'], write:['ADMIN','MEDICAL'], importExport:['ADMIN','MEDICAL']},
-    workload:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','OBSERVATEUR_STAFF','LECTURE'], write:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE']},
-    convocations:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','OBSERVATEUR_STAFF','LECTURE'], write:['ADMIN','RESPONSABLE_CATEGORIE','COACH']},
-    individualReports:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','OBSERVATEUR_STAFF','LECTURE'], write:['ADMIN','RESPONSABLE_CATEGORIE','COACH']},
-    'tests-athletiques':{read:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE','COACH','OBSERVATEUR_STAFF','LECTURE'], write:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE']},
-    'tests-techniques':{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','OBSERVATEUR_STAFF','LECTURE'], write:['ADMIN','RESPONSABLE_CATEGORIE','COACH']}
+    home:{read:true},
+    stats:{read:true, write:true, importExport:true},
+    presences:{read:true, write:true, importExport:true},
+    tests:{read:true, write:true, importExport:true},
+    methodologie:{read:true, write:true, importExport:true},
+    database:{read:true, write:true, importExport:true},
+    dataHub:{read:true, write:true, importExport:true},
+    admin:{read:true, write:true, importExport:true},
+    medical:{read:true, write:true, importExport:true},
+    injuries:{read:true, write:true, importExport:true},
+    workload:{read:true, write:true, importExport:true},
+    convocations:{read:true, write:true, importExport:true},
+    individualReports:{read:true, write:true, importExport:true},
+    'tests-athletiques':{read:true, write:true, importExport:true},
+    'tests-techniques':{read:true, write:true}
+  };
+
+  const LEGACY_ROLE_MODULES = {
+    ADMIN:'*',
+    RESPONSABLE:['stats','presences','tests','methodologie','database','dataHub','admin','medical','injuries','workload','convocations','individualReports'],
+    RESPONSABLE_CATEGORIE:['stats','presences','tests','methodologie','database','dataHub','medical','injuries','workload','convocations','individualReports'],
+    EDUCATEUR:['stats','presences','tests','methodologie','workload','convocations','individualReports'],
+    COACH:['stats','presences','tests','methodologie','workload','convocations','individualReports'],
+    PREPARATEUR_ATHLETIQUE:['presences','tests','workload'],
+    PREPARATEUR_PHYSIQUE:['presences','tests','workload'],
+    MEDICAL:['medical','injuries'],
+    KINE:['medical','injuries'],
+    MEDECIN:['medical','injuries'],
+    OBSERVATEUR_STAFF:['stats','presences','tests','methodologie','individualReports'],
+    LECTURE:['stats','presences','tests','methodologie','individualReports']
   };
 
   function asText(value){ return String(value ?? '').trim(); }
-  function normalizeRole(role){
-    const raw = asText(role || 'OBSERVATEUR_STAFF').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-    return ROLES[raw] ? raw : (ROLE_ALIASES[raw] || raw || 'OBSERVATEUR_STAFF');
+  function normalizeKey(value, fallback=''){
+    const raw = asText(value || fallback).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return raw || fallback;
   }
-  function roleLabel(role){ return ROLE_LABELS[normalizeRole(role)] || asText(role) || 'Staff'; }
 
-  function getRole(profile={}, fallback='OBSERVATEUR_STAFF'){
-    return normalizeRole(profile?.role || profile?.userRole || fallback);
+  function normalizeRole(role){
+    const raw = normalizeKey(role, 'DIRIGEANT');
+    return ROLES[raw] ? raw : (ROLE_ALIASES[raw] || 'DIRIGEANT');
+  }
+  function roleLabel(role){ return ROLE_LABELS[normalizeRole(role)] || asText(role) || 'Dirigeant'; }
+  function getRole(profile={}, fallback='DIRIGEANT'){
+    return normalizeRole(profile?.businessRole || profile?.role || profile?.userRole || fallback);
+  }
+
+  function legacyPermissionFromRole(role){
+    const raw = normalizeKey(role, '');
+    if(raw === 'ADMIN' || raw === 'RESPONSABLE' || raw === 'RESPONSABLE_CATEGORIE') return 'EDITEUR';
+    if(['LECTURE','LECTURE_SEULE','OBSERVATEUR','OBSERVATEUR_STAFF','JOUEUSE','PARENT','JOUEUSE_PARENT'].includes(raw)) return 'LECTEUR';
+    return 'SAISIE';
+  }
+
+  function normalizePermission(permission, profile={}){
+    const explicit = permission ?? profile?.permissionLevel ?? profile?.permission ?? profile?.accessLevel;
+    const raw = normalizeKey(explicit || '', '');
+    if(PERMISSIONS[raw]) return raw;
+    return legacyPermissionFromRole(profile?.legacyRole || profile?.role || profile?.userRole);
+  }
+  function permissionLabel(permission, profile){ return PERMISSION_LABELS[normalizePermission(permission, profile)] || 'Lecteur'; }
+  function hasPermission(profile={}, minimum='LECTEUR'){
+    if(!isActive(profile)) return false;
+    return (PERMISSION_RANK[normalizePermission(null, profile)] || 0) >= (PERMISSION_RANK[normalizePermission(minimum)] || 1);
   }
 
   function isActive(profile={}){
@@ -117,16 +169,24 @@
     return out;
   }
 
-  function roleAllowed(role, allowedRoles=[]){
-    const current = normalizeRole(role);
-    return (allowedRoles || []).map(normalizeRole).includes(current);
+  function hasExplicitModuleScope(profile={}){
+    return list(profile?.allowedModules || profile?.modulesAutorises).length > 0
+      || Object.keys(profile?.modulePermissions || profile?.permissionsSpecifiques || {}).length > 0;
   }
 
-  function modulePermission(moduleOrId, action='read'){
-    const id = typeof moduleOrId === 'string' ? moduleOrId : moduleOrId?.id;
-    const fromRegistry = typeof moduleOrId === 'object' ? moduleOrId?.permissions || {} : {};
-    const fromMatrix = MODULE_PERMISSIONS[id] || {};
-    return fromMatrix[action] || fromRegistry[action] || fromMatrix.read || fromRegistry.read || [];
+  function legacyRoleModules(profile={}){
+    const raw = normalizeKey(profile?.legacyRole || profile?.role || profile?.userRole || '', '');
+    return LEGACY_ROLE_MODULES[raw] || LEGACY_ROLE_MODULES[normalizeRole(raw)] || [];
+  }
+
+  function moduleAllowedByScope(profile={}, moduleId=''){
+    if(moduleId === 'home') return true;
+    if(!hasExplicitModuleScope(profile)){
+      const legacy = legacyRoleModules(profile);
+      return legacy === '*' || legacy.includes(moduleId);
+    }
+    const overrides = moduleOverrides(profile)[moduleId] || {};
+    return overrides.read === true;
   }
 
   function canUseModule(profileOrModule, maybeModuleOrRole, action='read'){
@@ -134,38 +194,37 @@
     const profile = legacyCall ? {role:maybeModuleOrRole, status:'ACTIVE'} : profileOrModule;
     const module = legacyCall ? profileOrModule : maybeModuleOrRole;
     if(!module || module.active === false || !isActive(profile)) return false;
-    const role = getRole(profile);
-    if(role === 'ADMIN') return true;
-    const overrides = moduleOverrides(profile)[module.id] || {};
-    if(overrides[action] === true || (action === 'read' && overrides.read === true)) return true;
-    if(overrides[action] === false || (action === 'read' && overrides.read === false)) return false;
-    if(action !== 'read' && READ_ONLY_ROLES.includes(role)) return false;
-    return roleAllowed(role, modulePermission(module, action));
+    const moduleId = module.id || String(module || '');
+    if(!moduleAllowedByScope(profile, moduleId)) return false;
+    if(action === 'read') return hasPermission(profile, 'LECTEUR');
+    if(action === 'write') return hasPermission(profile, 'SAISIE');
+    if(action === 'importExport') return hasPermission(profile, 'EDITEUR');
+    if(action === 'delete') return hasPermission(profile, 'EDITEUR');
+    return hasPermission(profile, 'LECTEUR');
   }
 
   function canViewModule(profile, module){ return canUseModule(profile, module, 'read'); }
   function canEditModule(profile, module){ return canUseModule(profile, module, 'write'); }
-  function canDeleteData(profile){ return getRole(profile) === 'ADMIN' && isActive(profile); }
-  function canManageUsers(profile){ return getRole(profile) === 'ADMIN' && isActive(profile); }
-  function canManageCoreData(profile){ return CORE_DATA_ROLES.includes(getRole(profile)) && isActive(profile); }
+  function canDeleteData(profile){ return hasPermission(profile, 'EDITEUR'); }
+  function canManageUsers(profile){ return hasPermission(profile, 'EDITEUR') && (moduleAllowedByScope(profile, 'admin') || !hasExplicitModuleScope(profile)); }
+  function canManageCoreData(profile){
+    return hasPermission(profile, 'EDITEUR')
+      && (moduleAllowedByScope(profile, 'database') || moduleAllowedByScope(profile, 'dataHub') || !hasExplicitModuleScope(profile));
+  }
 
   function canAccessTeam(profile={}, teamId=''){
     if(!isActive(profile)) return false;
-    const role = getRole(profile);
-    if(role === 'ADMIN') return true;
     const allowed = teamIds(profile);
-    if(!allowed.length) return role !== 'JOUEUSE_PARENT';
+    if(!allowed.length) return true;
     const target = asText(teamId).toLowerCase();
     return Boolean(target) && allowed.includes(target);
   }
 
   function canAccessPlayer(profile={}, player={}){
     if(!isActive(profile)) return false;
-    const role = getRole(profile);
-    if(role === 'ADMIN') return true;
     const ownPlayerIds = list(profile?.playerIds || profile?.allowedPlayerIds).map(v => v.toLowerCase());
     const playerId = asText(player?.playerId || player?.id || player).toLowerCase();
-    if(role === 'JOUEUSE_PARENT') return Boolean(playerId) && ownPlayerIds.includes(playerId);
+    if(ownPlayerIds.length) return Boolean(playerId) && ownPlayerIds.includes(playerId);
     return canAccessTeam(profile, player?.teamId || player?.team || player?.categorie || player?.subCategory || '');
   }
 
@@ -180,29 +239,31 @@
     );
   }
 
-  function defaultProfile(user={}, role='COACH'){
+  function defaultProfile(user={}, role='ENTRAINEUR', permissionLevel='LECTEUR'){
     return {
       uid:user.uid || '',
       email:user.email || '',
       name:user.displayName || user.email || '',
       role:normalizeRole(role),
       roleLabel:roleLabel(role),
+      permissionLevel:normalizePermission(permissionLevel),
+      permissionLabel:permissionLabel(permissionLevel),
       status:'ACTIVE',
       teamIds:[],
       allowedTeamIds:[],
       allowedModules:[],
       modulePermissions:{},
-      userType:normalizeRole(role) === 'JOUEUSE_PARENT' ? 'external' : 'staff'
+      userType:'staff'
     };
   }
 
   const service = {
-    ROLES, ROLE_ALIASES, ROLE_LABELS, ADMIN_ROLES, CORE_DATA_ROLES, READ_ONLY_ROLES,
-    ALL_STAFF_ROLES, MODULE_PERMISSIONS,
-    normalizeRole, roleLabel, getRole, isActive,
-    roleAllowed, canUseModule, canViewModule, canEditModule, canDeleteData,
+    ROLES, ROLE_ALIASES, ROLE_LABELS, PERMISSIONS, PERMISSION_LABELS, PERMISSION_RANK,
+    MODULE_PERMISSIONS, LEGACY_ROLE_MODULES,
+    normalizeRole, roleLabel, getRole, normalizePermission, permissionLabel, hasPermission, isActive,
+    canUseModule, canViewModule, canEditModule, canDeleteData,
     canManageUsers, canManageCoreData, canAccessTeam, canAccessPlayer,
-    visibleModules, teamIds, moduleOverrides, defaultProfile
+    visibleModules, teamIds, moduleOverrides, hasExplicitModuleScope, defaultProfile
   };
 
   global.CoachPulsePermissionsService = service;

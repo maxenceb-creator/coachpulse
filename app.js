@@ -90,6 +90,11 @@ function getCurrentUserRole(){
   if(service?.getRole) return service.getRole(currentProfile, currentUserRole);
   return (currentProfile?.role || currentUserRole || 'STAFF').toUpperCase();
 }
+function getCurrentPermissionLevel(){
+  const service = permissionsService();
+  if(service?.normalizePermission) return service.normalizePermission(null, currentProfile || {role:currentUserRole,status:'ACTIVE'});
+  return currentProfile?.permissionLevel || 'LECTEUR';
+}
 function isAdmin(){
   const service = permissionsService();
   return service?.canManageCoreData ? service.canManageCoreData(currentProfile || {role:currentUserRole,status:'ACTIVE'}) : ['ADMIN','RESPONSABLE','RESPONSABLE_CATEGORIE'].includes(getCurrentUserRole());
@@ -134,6 +139,8 @@ function accessContext(){
       name:profile.name || currentUser?.displayName || currentUser?.email || '',
       role:getCurrentUserRole(),
       roleLabel:profile.roleLabel || permissionsService()?.roleLabel?.(getCurrentUserRole()) || getCurrentUserRole(),
+      permissionLevel:getCurrentPermissionLevel(),
+      permissionLabel:permissionsService()?.permissionLabel?.(getCurrentPermissionLevel()) || getCurrentPermissionLevel(),
       status:profile.status || 'ACTIVE',
       teamIds:profile.teamIds || [],
       allowedTeamIds:profile.allowedTeamIds || [],
@@ -146,7 +153,7 @@ function accessContext(){
 function notifyFramesAccessUpdated(){
   try{ frame?.contentWindow?.postMessage(accessContext(), '*'); }catch(_e){}
 }
-function guardAdminAction(label='Action réservée aux administrateurs'){
+function guardAdminAction(label='Action réservée aux éditeurs autorisés'){
   if(isAdmin()) return true;
   alert(label);
   return false;
@@ -218,10 +225,11 @@ function updateRoleUi(){
   $$('.admin-only,.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
   const service = permissionsService();
   const roleLabel = service?.roleLabel ? service.roleLabel(currentUserRole) : (isAdmin() ? 'Admin' : 'Staff');
+  const permissionLabel = service?.permissionLabel ? service.permissionLabel(getCurrentPermissionLevel()) : getCurrentPermissionLevel();
   const dashRole = $('#dashboardRole');
   const dashAccess = $('#dashboardAccess');
-  if(dashRole) dashRole.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${currentUserRole}`;
-  if(dashAccess) dashAccess.textContent = roleLabel;
+  if(dashRole) dashRole.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${roleLabel}`;
+  if(dashAccess) dashAccess.textContent = permissionLabel;
 }
 
 function setLocked(locked){
@@ -238,7 +246,7 @@ function setLocked(locked){
     shell.classList.remove('locked');
     authGate.classList.add('hidden');
     topUser.classList.remove('hidden');
-    topUser.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${currentProfile?.role || 'STAFF'}`;
+    topUser.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${currentProfile?.roleLabel || currentProfile?.role || 'Staff'} · ${currentProfile?.permissionLabel || getCurrentPermissionLevel()}`;
     updateRoleUi();
     notifyFramesAccessUpdated();
     updateDashboard();
@@ -252,7 +260,7 @@ function showHome(){
   if(adminView) adminView.classList.add('hidden');
 }
 function showAdmin(){
-  if(!isSuperAdmin()) { alert('Accès non autorisé : gestion utilisateurs réservée aux Admins.'); return showHome(); }
+  if(!isSuperAdmin()) { alert('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.'); return showHome(); }
   ensureUserAdminFields();
   refreshAdminAccessPickers();
   frame.classList.add('hidden');
@@ -304,15 +312,25 @@ async function ensureUserProfile(user){
   const service = permissionsService();
   if(snap.exists()){
     currentProfile = {uid:user.uid, ...snap.data()};
-    currentProfile.role = service?.normalizeRole ? service.normalizeRole(currentProfile.role) : currentProfile.role;
+    const legacyRole = currentProfile.legacyRole || currentProfile.role || currentUserRole;
+    currentProfile.legacyRole = legacyRole;
+    currentProfile.role = service?.normalizeRole ? service.normalizeRole(currentProfile.businessRole || currentProfile.role) : currentProfile.role;
     currentProfile.roleLabel = service?.roleLabel ? service.roleLabel(currentProfile.role) : currentProfile.role;
+    currentProfile.permissionLevel = service?.normalizePermission ? service.normalizePermission(currentProfile.permissionLevel, {...currentProfile, legacyRole}) : (currentProfile.permissionLevel || 'LECTEUR');
+    currentProfile.permissionLabel = service?.permissionLabel ? service.permissionLabel(currentProfile.permissionLevel) : currentProfile.permissionLevel;
+    if(service?.normalizePermission && currentProfile.permissionLevel === 'EDITEUR' && (!Array.isArray(currentProfile.allowedModules) || !currentProfile.allowedModules.length) && String(legacyRole).toUpperCase() === 'ADMIN'){
+      currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
+    }
     if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(currentProfile.status || '').toUpperCase())) throw new Error('Compte inactif. Contacte un administrateur.');
-    await firebaseFns.setDoc(ref, {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email, role:currentProfile.role, roleLabel:currentProfile.roleLabel}, {merge:true});
+    await firebaseFns.setDoc(ref, {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email, legacyRole, role:currentProfile.role, roleLabel:currentProfile.roleLabel, permissionLevel:currentProfile.permissionLevel, permissionLabel:currentProfile.permissionLabel, allowedModules:currentProfile.allowedModules || []}, {merge:true});
     return currentProfile;
   }
   const email = (user.email || '').toLowerCase();
-  const role = (email.includes('maxence.boisdron') || email.endsWith('@asse.fr')) ? 'ADMIN' : 'COACH';
-  currentProfile = service?.defaultProfile ? service.defaultProfile(user, role) : {uid:user.uid, email:user.email, name:user.displayName || user.email, role, scope:'CoachPulse', status:'ACTIVE'};
+  const isSeedAdmin = email.includes('maxence.boisdron') || email.endsWith('@asse.fr');
+  const role = isSeedAdmin ? 'DIRIGEANT' : 'ENTRAINEUR';
+  const permissionLevel = isSeedAdmin ? 'EDITEUR' : 'LECTEUR';
+  currentProfile = service?.defaultProfile ? service.defaultProfile(user, role, permissionLevel) : {uid:user.uid, email:user.email, name:user.displayName || user.email, role, permissionLevel, scope:'CoachPulse', status:'ACTIVE'};
+  if(isSeedAdmin) currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
   await firebaseFns.setDoc(ref, {...currentProfile, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp(), lastLoginAt:firebaseFns.serverTimestamp()}, {merge:true});
   return currentProfile;
 }
@@ -646,7 +664,7 @@ function collectCentralFirestoreDocs(){
     });
   });
   if(currentProfile){
-    addDoc(docs,'staff',currentUser.uid,{staffId:currentUser.uid, uid:currentUser.uid, email:currentUser.email || currentProfile.email || '', name:currentProfile.name || '', role:currentProfile.role || '', scope:currentProfile.scope || '', status:currentProfile.status || 'ACTIVE'});
+    addDoc(docs,'staff',currentUser.uid,{staffId:currentUser.uid, uid:currentUser.uid, email:currentUser.email || currentProfile.email || '', name:currentProfile.name || '', role:currentProfile.role || '', roleLabel:currentProfile.roleLabel || '', permissionLevel:currentProfile.permissionLevel || '', permissionLabel:currentProfile.permissionLabel || '', scope:currentProfile.scope || '', status:currentProfile.status || 'ACTIVE'});
   }
   addDoc(docs,'settings','coachpulse-schema',{settingsId:'coachpulse-schema',version:'firestore-v1',legacyCloudCollection:'coachpulse_common_base',migratedAtIso:new Date().toISOString(),collections:FIRESTORE_COLLECTIONS,modules:moduleRegistry().map(module => ({id:module.id,name:module.name,active:module.active,section:module.section,collection:module.collection,relatedCollections:module.relatedCollections||[],permissions:module.permissions,screen:module.screen,settings:module.settings}))});
   return docs;
@@ -1610,7 +1628,7 @@ function canUseMedical(action='read'){
 }
 function guardMedical(action='read'){
   if(canUseMedical(action)) return true;
-  alert(action === 'importExport' ? 'Export médical réservé aux administrateurs.' : 'Accès médical non autorisé pour ce rôle.');
+  alert(action === 'importExport' ? 'Export médical réservé aux éditeurs autorisés.' : 'Accès médical non autorisé.');
   return false;
 }
 function medicalCapabilities(){
@@ -1842,13 +1860,15 @@ async function logout(){
 
 async function createMember(){
   const msg = $('#adminMsg'); msg.textContent=''; msg.classList.remove('bad');
-  if(!isSuperAdmin()){ msg.textContent='Accès non autorisé : gestion utilisateurs réservée aux Admins.'; msg.classList.add('bad'); return; }
+  if(!isSuperAdmin()){ msg.textContent='Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.'; msg.classList.add('bad'); return; }
   const name = $('#newStaffName').value.trim();
   const email = $('#newStaffEmail').value.trim().toLowerCase();
   const password = $('#newStaffPassword').value;
   const service = permissionsService();
   const role = service?.normalizeRole ? service.normalizeRole($('#newStaffRole').value) : $('#newStaffRole').value;
   const roleLabel = service?.roleLabel ? service.roleLabel(role) : role;
+  const permissionLevel = service?.normalizePermission ? service.normalizePermission($('#newStaffPermission')?.value || 'LECTEUR') : ($('#newStaffPermission')?.value || 'LECTEUR');
+  const permissionLabel = service?.permissionLabel ? service.permissionLabel(permissionLevel) : permissionLevel;
   const scope = $('#newStaffScope').value.trim();
   const teamIds = readCsvField('newStaffTeams');
   const allowedModules = readCsvField('newStaffModules');
@@ -1866,8 +1886,8 @@ async function createMember(){
     await firebaseFns.updateProfile(cred.user, {displayName:name || email});
 
     await firebaseFns.setDoc(firebaseFns.doc(db, 'staff_members', cred.user.uid), {
-      uid:cred.user.uid, name:name || email, email, role, roleLabel, scope:scope || teamIds.join(', ') || 'CoachPulse', teamIds, allowedTeamIds:teamIds, allowedModules, modulePermissions:{}, status,
-      userType:role === 'JOUEUSE_PARENT' ? 'external' : 'staff',
+      uid:cred.user.uid, name:name || email, email, role, roleLabel, permissionLevel, permissionLabel, scope:scope || teamIds.join(', ') || 'CoachPulse', teamIds, allowedTeamIds:teamIds, allowedModules, modulePermissions:{}, status,
+      userType:'staff',
       createdBy:currentUser.uid, createdByEmail:currentUser.email, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp()
     }, {merge:true});
 
@@ -1891,16 +1911,23 @@ async function createMember(){
 }
 function resetMemberForm(clearMsg=true){
   ['newStaffName','newStaffEmail','newStaffPassword','newStaffScope','newStaffTeams','newStaffModules'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
-  $('#newStaffRole').value='COACH';
+  $('#newStaffRole').value='ENTRAINEUR';
+  if($('#newStaffPermission')) $('#newStaffPermission').value='LECTEUR';
   if($('#newStaffStatus')) $('#newStaffStatus').value='ACTIVE';
   refreshAdminAccessPickers();
   if(clearMsg){ $('#adminMsg').textContent=''; $('#adminMsg').classList.remove('bad'); }
 }
-function roleOptions(selected='COACH'){
+function roleOptions(selected='ENTRAINEUR'){
   const service = permissionsService();
-  const labels = service?.ROLE_LABELS || {ADMIN:'Admin',RESPONSABLE_CATEGORIE:'Responsable catégorie',COACH:'Coach',PREPARATEUR_ATHLETIQUE:'Préparateur athlétique',MEDICAL:'Médical / Kiné',OBSERVATEUR_STAFF:'Observateur staff',LECTURE:'Lecture seule',JOUEUSE_PARENT:'Joueuse / Parent'};
+  const labels = service?.ROLE_LABELS || {RESPONSABLE_POLE:'Responsable de pôle',ENTRAINEUR:'Entraîneur',ENTRAINEUR_ADJOINT:'Entraîneur adjoint',PREPARATEUR_PHYSIQUE:'Préparateur physique',KINE:'Kiné',MEDECIN:'Médecin',DIRIGEANT:'Dirigeant'};
   const current = service?.normalizeRole ? service.normalizeRole(selected) : selected;
   return Object.entries(labels).map(([role,label]) => `<option value="${role}" ${role===current?'selected':''}>${escapeHtml(label)}</option>`).join('');
+}
+function permissionOptions(selected='LECTEUR'){
+  const service = permissionsService();
+  const labels = service?.PERMISSION_LABELS || {LECTEUR:'Lecteur',SAISIE:'Saisie',EDITEUR:'Éditeur'};
+  const current = service?.normalizePermission ? service.normalizePermission(selected) : selected;
+  return Object.entries(labels).map(([permission,label]) => `<option value="${permission}" ${permission===current?'selected':''}>${escapeHtml(label)}</option>`).join('');
 }
 function readCsvField(id){
   return parseAccessList($('#'+id)?.value || '');
@@ -2006,8 +2033,11 @@ function ensureUserAdminFields(){
   ensureAccessPickerStyles();
   const roleSelect = $('#newStaffRole');
   if(roleSelect && !roleSelect.dataset.extendedRoles){
-    roleSelect.innerHTML = roleOptions('COACH');
+    const roleLabel = roleSelect.closest('.field')?.querySelector('label');
+    if(roleLabel) roleLabel.textContent = 'Rôle métier';
+    roleSelect.innerHTML = roleOptions('ENTRAINEUR');
     roleSelect.dataset.extendedRoles = '1';
+    roleSelect.closest('.field')?.insertAdjacentHTML('afterend', `<div class="field"><label>Permission</label><select id="newStaffPermission">${permissionOptions('LECTEUR')}</select></div>`);
   }
   const scope = $('#newStaffScope');
   if(scope && !$('#newStaffTeams')){
@@ -2015,7 +2045,7 @@ function ensureUserAdminFields(){
   }
   const roleList = document.querySelector('.role-list');
   if(roleList && !roleList.dataset.extendedRoles){
-    roleList.innerHTML = `<div><b>ADMIN</b><span>Accès complet, comptes, rôles, équipes, modules et données.</span></div><div><b>Responsable catégorie</b><span>Accès aux équipes attribuées, modification sport/base sur son périmètre.</span></div><div><b>Coach</b><span>Matchs, présences, compositions et bilans de son équipe.</span></div><div><b>Préparateur athlétique</b><span>Tests et bilans physiques, sans médical détaillé par défaut.</span></div><div><b>Médical / Kiné</b><span>Blessures, douleurs, rendez-vous, prescriptions et retour au jeu.</span></div><div><b>Observateur staff</b><span>Lecture des données sportives, sans modification.</span></div><div><b>Lecture seule</b><span>Consultation uniquement.</span></div><div><b>Joueuse / Parent</b><span>Accès limité aux informations explicitement autorisées.</span></div>`;
+    roleList.innerHTML = `<div><b>Rôle métier</b><span>Fonction dans le club : responsable de pôle, entraîneur, adjoint, préparateur, kiné, médecin ou dirigeant.</span></div><div><b>Équipes</b><span>Périmètre sportif accessible. Plusieurs équipes peuvent être sélectionnées.</span></div><div><b>Modules</b><span>Périmètre fonctionnel visible dans CoachPulse.</span></div><div><b>Lecteur</b><span>Consultation uniquement sur les modules autorisés.</span></div><div><b>Saisie</b><span>Consultation et ajout/modification courante sur les modules autorisés.</span></div><div><b>Éditeur</b><span>Droits avancés sur les modules autorisés, avec accès aux actions d’administration si le module est autorisé.</span></div>`;
     roleList.dataset.extendedRoles = '1';
   }
 }
@@ -2037,7 +2067,7 @@ async function loadMembers(){
       const modules = m.allowedModules || [];
       const teamPicker = renderAccessPicker('teams', teams, choices.teams, `data-teams="${escapeHtml(m.uid)}"`);
       const modulePicker = renderAccessPicker('modules', modules, choices.modules, `data-modules="${escapeHtml(m.uid)}"`);
-      tr.innerHTML = `<td><b>${escapeHtml(m.name||'-')}</b></td><td>${escapeHtml(m.email||'-')}</td><td><select data-role="${m.uid}">${roleOptions(m.role)}</select></td><td><label class="admin-note">Équipes</label>${teamPicker}<label class="admin-note" style="display:block;margin-top:8px">Modules</label>${modulePicker}</td><td><select data-status="${m.uid}"><option value="ACTIVE" ${String(m.status||'ACTIVE').toUpperCase()==='ACTIVE'?'selected':''}>Actif</option><option value="INACTIVE" ${String(m.status||'').toUpperCase()==='INACTIVE'?'selected':''}>Inactif</option><option value="ARCHIVED" ${String(m.status||'').toUpperCase()==='ARCHIVED'?'selected':''}>Archivé</option></select></td><td><div class="staff-actions"><button data-reset="${m.email||''}">Reset MDP</button><button data-save="${m.uid}">Sauver accès</button><button class="danger" data-archive="${m.uid}">${String(m.status||'ACTIVE').toUpperCase()==='ARCHIVED'?'Réactiver':'Archiver'}</button></div></td>`;
+      tr.innerHTML = `<td><b>${escapeHtml(m.name||'-')}</b></td><td>${escapeHtml(m.email||'-')}</td><td><label class="admin-note">Rôle métier</label><select data-role="${m.uid}">${roleOptions(m.role)}</select><label class="admin-note" style="display:block;margin-top:8px">Permission</label><select data-permission="${m.uid}">${permissionOptions(m.permissionLevel || m.permission || m.role)}</select></td><td><label class="admin-note">Équipes</label>${teamPicker}<label class="admin-note" style="display:block;margin-top:8px">Modules</label>${modulePicker}</td><td><select data-status="${m.uid}"><option value="ACTIVE" ${String(m.status||'ACTIVE').toUpperCase()==='ACTIVE'?'selected':''}>Actif</option><option value="INACTIVE" ${String(m.status||'').toUpperCase()==='INACTIVE'?'selected':''}>Inactif</option><option value="ARCHIVED" ${String(m.status||'').toUpperCase()==='ARCHIVED'?'selected':''}>Archivé</option></select></td><td><div class="staff-actions"><button data-reset="${m.email||''}">Reset MDP</button><button data-save="${m.uid}">Sauver accès</button><button class="danger" data-archive="${m.uid}">${String(m.status||'ACTIVE').toUpperCase()==='ARCHIVED'?'Réactiver':'Archiver'}</button></div></td>`;
       tbody.appendChild(tr);
     });
   }catch(e){ tbody.innerHTML = `<tr><td colspan="6">Erreur : ${escapeHtml(cleanError(e))}</td></tr>`; }
@@ -2143,25 +2173,28 @@ async function adminTableClick(e){
   const saveUid = e.target?.dataset?.save;
   const archiveUid = e.target?.dataset?.archive;
   if((resetEmail || saveUid || archiveUid) && !isSuperAdmin()){
-    alert('Accès non autorisé : gestion utilisateurs réservée aux Admins.');
+    alert('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.');
     return;
   }
   try{
     if(resetEmail){ await firebaseFns.sendPasswordResetEmail(auth, resetEmail); alert('Email de réinitialisation envoyé à '+resetEmail); }
     if(saveUid){
       const service = permissionsService();
-      const role = service?.normalizeRole ? service.normalizeRole(document.querySelector(`[data-role="${saveUid}"]`)?.value || 'COACH') : (document.querySelector(`[data-role="${saveUid}"]`)?.value || 'COACH');
+      const role = service?.normalizeRole ? service.normalizeRole(document.querySelector(`[data-role="${saveUid}"]`)?.value || 'ENTRAINEUR') : (document.querySelector(`[data-role="${saveUid}"]`)?.value || 'ENTRAINEUR');
+      const permissionLevel = service?.normalizePermission ? service.normalizePermission(document.querySelector(`[data-permission="${saveUid}"]`)?.value || 'LECTEUR') : (document.querySelector(`[data-permission="${saveUid}"]`)?.value || 'LECTEUR');
       const teamIds = parseAccessList(document.querySelector(`[data-teams="${saveUid}"]`)?.value || '');
       const allowedModules = parseAccessList(document.querySelector(`[data-modules="${saveUid}"]`)?.value || '');
       const status = String(document.querySelector(`[data-status="${saveUid}"]`)?.value || 'ACTIVE').toUpperCase();
       await firebaseFns.setDoc(firebaseFns.doc(db,'staff_members',saveUid), {
         role,
         roleLabel:service?.roleLabel ? service.roleLabel(role) : role,
+        permissionLevel,
+        permissionLabel:service?.permissionLabel ? service.permissionLabel(permissionLevel) : permissionLevel,
         teamIds,
         allowedTeamIds:teamIds,
         allowedModules,
         status,
-        userType:role === 'JOUEUSE_PARENT' ? 'external' : 'staff',
+        userType:'staff',
         updatedAt:firebaseFns.serverTimestamp(),
         updatedAtIso:new Date().toISOString(),
         updatedBy:currentUser.uid,

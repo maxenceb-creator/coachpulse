@@ -1,5 +1,16 @@
 # CoachPulse user access model
 
+## Principle
+
+User access is split into four independent parts:
+
+- `role`: club function, used for identification only.
+- `teamIds` / `allowedTeamIds`: sport scope.
+- `allowedModules`: functional scope.
+- `permissionLevel`: real action level in the app.
+
+The role must not grant permissions by itself.
+
 ## Firestore collection
 
 Users live in `staff_members/{uid}`.
@@ -11,6 +22,8 @@ Core fields:
 - `email`
 - `role`
 - `roleLabel`
+- `permissionLevel`
+- `permissionLabel`
 - `teamIds`
 - `allowedTeamIds`
 - `allowedModules`
@@ -22,22 +35,35 @@ Core fields:
 
 Valid `status` values are `ACTIVE`, `INACTIVE`, and `ARCHIVED`.
 
-## Roles
+## Club roles
 
-- `ADMIN`
-- `RESPONSABLE_CATEGORIE`
-- `COACH`
-- `PREPARATEUR_ATHLETIQUE`
-- `MEDICAL`
-- `OBSERVATEUR_STAFF`
-- `LECTURE`
-- `JOUEUSE_PARENT`
+- `RESPONSABLE_POLE`
+- `ENTRAINEUR`
+- `ENTRAINEUR_ADJOINT`
+- `PREPARATEUR_PHYSIQUE`
+- `KINE`
+- `MEDECIN`
+- `DIRIGEANT`
 
-Legacy roles are still accepted during transition:
+Legacy roles are normalized during transition:
 
-- `RESPONSABLE` -> `RESPONSABLE_CATEGORIE`
-- `EDUCATEUR` -> `COACH`
-- `STAFF` -> `OBSERVATEUR_STAFF`
+- `ADMIN` -> `DIRIGEANT`
+- `RESPONSABLE` / `RESPONSABLE_CATEGORIE` -> `RESPONSABLE_POLE`
+- `EDUCATEUR` / `COACH` -> `ENTRAINEUR`
+- `PREPARATEUR_ATHLETIQUE` -> `PREPARATEUR_PHYSIQUE`
+- `MEDICAL` -> `KINE`
+
+## Permission levels
+
+- `LECTEUR`: can read allowed modules.
+- `SAISIE`: can read and write allowed modules.
+- `EDITEUR`: can read, write and use advanced actions on allowed modules.
+
+Legacy permission migration:
+
+- old `ADMIN`, `RESPONSABLE`, `RESPONSABLE_CATEGORIE` -> `EDITEUR`
+- old `LECTURE`, `OBSERVATEUR_STAFF`, `JOUEUSE_PARENT` -> `LECTEUR`
+- other old staff roles -> `SAISIE`
 
 ## Shared helpers
 
@@ -67,7 +93,7 @@ Iframes receive a `postMessage` with `type: "coachpulse-access-context"` when ac
 
 ## Progressive rollout
 
-1. Keep module visibility controlled by the main app.
-2. Add `canEditModule()` checks inside each page before showing create/edit buttons.
-3. Add `canAccessTeam()` and `canAccessPlayer()` filters when reading lists.
+1. Keep module visibility controlled by `allowedModules`.
+2. Use `permissionLevel` for read/write/editor behavior.
+3. Keep team/player filtering through `teamIds`, `allowedTeamIds`, `playerIds`, and `allowedPlayerIds`.
 4. Keep Firestore rules as the final protection layer.
