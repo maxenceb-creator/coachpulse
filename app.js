@@ -49,7 +49,7 @@ function buildTools(){ return Object.fromEntries(moduleRegistry().filter(module 
 let tools = buildTools();
 
 let deferredPrompt = null;
-let firebaseFns = null, fbApp = null, auth = null, db = null, currentUser = null, currentProfile = null, authReady = false;
+let firebaseFns = null, fbApp = null, auth = null, db = null, currentUser = null, currentProfile = null, authReady = false, signingIn = false;
 // Prévu pour évoluer avec Firebase Auth custom claims. Aujourd'hui, le rôle vient du document staff_members.
 let currentUserRole = 'STAFF';
 let syncTimer = null;
@@ -377,15 +377,35 @@ async function initFirebase(){
 
 async function signInStaff(){
   $('#authError').textContent = '';
+  if(signingIn) return;
+  signingIn = true;
+  const btn = $('#loginBtn');
+  if(btn) btn.disabled = true;
   try{
     if(!auth) await initFirebase();
     await firebaseFns.signInWithEmailAndPassword(auth, $('#loginEmail').value.trim(), $('#loginPassword').value);
   }catch(e){
     $('#authError').textContent = 'Connexion impossible : ' + cleanError(e);
+  }finally{
+    signingIn = false;
+    if(btn) btn.disabled = false;
   }
 }
 
 function cleanError(e){
+  const raw = String(e?.code || e?.message || e || '');
+  if(raw.includes('auth/quota-exceeded') || raw.includes('quota has been exceeded')){
+    return 'Quota Firebase dépassé. Attends quelques minutes puis réessaie. Si le message reste présent, vérifie dans Firebase / Google Cloud que le quota Identity Toolkit ou Authentication n’est pas bloqué.';
+  }
+  if(raw.includes('auth/too-many-requests')){
+    return 'Trop de tentatives de connexion. Attends quelques minutes avant de réessayer, puis vérifie le mot de passe.';
+  }
+  if(raw.includes('auth/invalid-credential') || raw.includes('auth/wrong-password') || raw.includes('auth/user-not-found')){
+    return 'Email ou mot de passe incorrect.';
+  }
+  if(raw.includes('auth/network-request-failed')){
+    return 'Connexion réseau impossible. Vérifie Internet puis réessaie.';
+  }
   const msg = (e && e.message) ? e.message : String(e || 'Erreur inconnue');
   return msg.replace('Firebase: ', '').replace(/\s*\([^)]*\)\.?/g, '').trim();
 }
@@ -572,6 +592,8 @@ function normalizeTeamFromCategory(category){
   return 'U19';
 }
 function normalizePlayer(raw={}){
+  const service = playersService();
+  if(service?.normalizePlayer) return service.normalizePlayer(raw);
   const full = String(raw.joueuse || raw.name || raw.fullName || '').trim();
   let prenom = String(raw.prenom || raw.firstName || '').trim();
   let nom = String(raw.nom || raw.lastName || '').trim();
@@ -590,11 +612,12 @@ function normalizePlayer(raw={}){
   const subCategory = String(raw.subCategory || raw.sousCategorie || categorie || '').trim();
   const team = String(raw.team || raw.equipe || normalizeTeamFromCategory(subCategory || categorie)).trim();
   const importedId = raw.id && !String(raw.id).startsWith('manual-') ? raw.id : '';
-  const playerId = raw.playerId || importedId || stableFirestoreId('player', nom, prenom, categorie, subCategory);
+  const birth = raw.birth || raw.dateNaissance || raw.birthDate || raw.annee || raw.age || '';
+  const playerId = raw.playerId || importedId || stableFirestoreId('player', nom, prenom, birth || 'no-birth');
   return {
-    playerId, id:playerId, prenom, nom:String(nom || '').toUpperCase(), displayName:[String(nom || '').toUpperCase(), prenom].filter(Boolean).join(' ').trim(),
+    playerId, id:playerId, prenom:String(prenom || '').toUpperCase(), nom:String(nom || '').toUpperCase(), displayName:[prenom, String(nom || '').toUpperCase()].filter(Boolean).join(' ').trim().toUpperCase(),
     categorie, subCategory, team, teamId:stableFirestoreId('team', team || categorie || 'global'),
-    foot:raw.foot || raw.pied || '', birth:raw.birth || raw.annee || raw.age || '', photo:raw.photo || '',
+    foot:raw.foot || raw.pied || '', birth, dateNaissance:raw.dateNaissance || birth, photo:raw.photo || '',
     source:raw.source || 'Migration CoachPulse', status:raw.status || 'ACTIVE'
   };
 }
@@ -1009,30 +1032,44 @@ function buildImportPlan(rows, options={}){
   return plan;
 }
 async function existingPlayersIndex(){
-  const byId = new Map(), byKey = new Map();
+  const byId = new Map(), byKey = new Map(), byPerson = new Map();
+  const indexPlayer = player => {
+    const id = player.playerId || player.id;
+    if(!id) return;
+    const p = {...player, playerId:id};
+    byId.set(id, p);
+    byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory, p.birth || p.dateNaissance || ''), p);
+    byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory), p);
+    byPerson.set(stableFirestoreId('person', p.nom, p.prenom, p.birth || p.dateNaissance || ''), p);
+    byPerson.set(stableFirestoreId('person', p.nom, p.prenom), p);
+  };
   if(db && currentUser){
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
     snap.forEach(docSnap => {
-      const p = {id:docSnap.id, playerId:docSnap.id, ...docSnap.data()};
-      byId.set(docSnap.id, p);
-      byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory, p.birth || ''), p);
-      byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory), p);
+      indexPlayer({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()});
     });
   }
   parseStoredJson('coachpulse:centralPlayers', []).forEach(p => {
-    if(!p?.playerId && !p?.id) return;
-    const id = p.playerId || p.id;
-    byId.set(id, {...p, playerId:id});
-    byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory, p.birth || ''), {...p, playerId:id});
-    byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory), {...p, playerId:id});
+    indexPlayer(p);
   });
-  return {byId, byKey};
+  return {byId, byKey, byPerson};
 }
-function mergePlayerWithoutOverwrite(existing, incoming){
+function findExistingPlayerForImport(existing, player){
+  const keyBirth = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory, player.birth || player.dateNaissance || '');
+  const key = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory);
+  const personBirth = stableFirestoreId('person', player.nom, player.prenom, player.birth || player.dateNaissance || '');
+  const person = stableFirestoreId('person', player.nom, player.prenom);
+  return existing.byId.get(player.playerId) || existing.byKey.get(keyBirth) || existing.byKey.get(key) || existing.byPerson.get(personBirth) || existing.byPerson.get(person);
+}
+const PLAYER_IMPORT_AUTHORITATIVE_FIELDS = new Set(['categorie','subCategory','team','teamId','birth','dateNaissance','photo','foot','poste']);
+function mergePlayerForImport(existing, incoming){
   const out = {}, changes = {};
   Object.entries(incoming).forEach(([k,v]) => {
     if(v === '' || v == null || ['id','playerId','updatedAt','updatedBy','updatedByEmail'].includes(k)) return;
-    if(existing[k] == null || existing[k] === '' || (Array.isArray(existing[k]) && !existing[k].length)){
+    const current = existing[k];
+    const isEmpty = current == null || current === '' || (Array.isArray(current) && !current.length);
+    const isAuthoritative = PLAYER_IMPORT_AUTHORITATIVE_FIELDS.has(k);
+    if((isAuthoritative || isEmpty) && String(current ?? '') !== String(v ?? '')){
       out[k] = v; changes[k] = v;
     }
   });
@@ -1042,11 +1079,9 @@ async function analyzeImportAgainstFirestore(plan){
   const existing = await existingPlayersIndex();
   const report = {created:0, updated:0, unchanged:0, potentialDuplicates:0, ignored:plan.ignored.length, details:[]};
   plan.players.forEach(player => {
-    const keyBirth = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory, player.birth || '');
-    const key = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory);
-    const found = existing.byId.get(player.playerId) || existing.byKey.get(keyBirth) || existing.byKey.get(key);
+    const found = findExistingPlayerForImport(existing, player);
     if(found){
-      const merged = mergePlayerWithoutOverwrite(found, player);
+      const merged = mergePlayerForImport(found, player);
       if(Object.keys(merged.changes).length){ report.updated++; report.details.push({type:'mise à jour', player:player.displayName, fields:Object.keys(merged.changes)}); }
       else { report.unchanged++; report.details.push({type:'inchangé', player:player.displayName}); }
       if((found.playerId || found.id) !== player.playerId) report.potentialDuplicates++;
@@ -1061,12 +1096,10 @@ async function commitImportPlan(plan){
   const existing = await existingPlayersIndex();
   const docs = Object.fromEntries(FIRESTORE_COLLECTIONS.map(c => [c,new Map()]));
   plan.players.forEach(player => {
-    const keyBirth = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory, player.birth || '');
-    const key = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory);
-    const found = existing.byId.get(player.playerId) || existing.byKey.get(keyBirth) || existing.byKey.get(key);
+    const found = findExistingPlayerForImport(existing, player);
     if(found){
       const foundId = found.playerId || found.id;
-      const merged = mergePlayerWithoutOverwrite(found, player);
+      const merged = mergePlayerForImport(found, player);
       if(Object.keys(merged.out).length) addDoc(docs,'players',foundId,{...merged.out, playerId:foundId, lastImportSource:plan.source});
     }else addDoc(docs,'players',player.playerId,{...player, createdFromImport:true});
   });
@@ -1091,6 +1124,51 @@ function openImportModal(){
   renderImportSummary();
 }
 function closeImportModal(){ $('#importModal')?.classList.remove('open'); }
+const IMPORT_COLLECTION_LABELS = {
+  players:'Joueuses',
+  sessions:'Séances',
+  attendance:'Présences',
+  technicalTests:'Tests techniques',
+  physicalTests:'Tests physiques',
+  ignored:'Lignes ignorées'
+};
+const IMPORT_FIELD_LABELS = {
+  fullName:'Nom complet',
+  nom:'Nom',
+  prenom:'Prénom',
+  categorie:'Catégorie',
+  subCategory:'Sous-catégorie',
+  team:'Équipe',
+  poste:'Poste',
+  birth:'Date de naissance',
+  photo:'Photo',
+  date:'Date',
+  status:'Statut',
+  minutes:'Minutes',
+  sessionType:'Type de séance',
+  theme:'Thème',
+  testType:'Type de test',
+  value:'Valeur',
+  season:'Saison',
+  dateColumn:'Date de présence',
+  'non reconnu':'Non reconnu'
+};
+const IMPORT_HEADER_LABELS = {
+  nom:'Nom',
+  prenom:'Prénom',
+  categorie:'Catégorie',
+  subCategory:'Sous-catégorie',
+  team:'Équipe',
+  birth:'Date de naissance',
+  photo:'Photo',
+  poste:'Poste',
+  season:'Saison'
+};
+function importLabel(map, key){ return map[key] || key; }
+function importPreviewValue(header, value){
+  if(header === 'photo') return value ? 'Photo intégrée' : 'Aucune photo';
+  return value ?? '';
+}
 function renderImportSummary(){
   const box = $('#importSummary'), preview = $('#importPreview'), report = $('#importReport');
   if(!box || !preview || !report) return;
@@ -1102,11 +1180,11 @@ function renderImportSummary(){
     return;
   }
   const counts = {players:plan.players.size,sessions:plan.sessions.size,attendance:plan.attendance.size,technicalTests:plan.technicalTests.size,physicalTests:plan.physicalTests.size,ignored:plan.ignored.length};
-  box.innerHTML = Object.entries(counts).map(([k,v]) => `<div><b>${v}</b><span>${escapeHtml(k)}</span></div>`).join('');
-  const cols = plan.columns.map(c => `<span class="${c.field==='non reconnu'?'bad':''}">${escapeHtml(c.header)} → ${escapeHtml(c.field)}</span>`).join('');
+  box.innerHTML = Object.entries(counts).map(([k,v]) => `<div><b>${v}</b><span>${escapeHtml(importLabel(IMPORT_COLLECTION_LABELS,k))}</span></div>`).join('');
+  const cols = plan.columns.map(c => `<span class="${c.field==='non reconnu'?'bad':''}">${escapeHtml(importLabel(IMPORT_HEADER_LABELS,c.header))} → ${escapeHtml(importLabel(IMPORT_FIELD_LABELS,c.field))}</span>`).join('');
   const sample = importUiState.rows.slice(0,8);
   const headers = Object.keys(sample[0] || {}).filter(k => !k.startsWith('__')).slice(0,8);
-  preview.innerHTML = `<h3>Colonnes détectées</h3><div class="import-columns">${cols || 'Aucune colonne'}</div><h3>Aperçu</h3><div class="table-wrap"><table class="staff-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>${sample.map(r=>`<tr>${headers.map(h=>`<td>${escapeHtml(r[h] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  preview.innerHTML = `<h3>Colonnes détectées</h3><div class="import-columns">${cols || 'Aucune colonne'}</div><h3>Aperçu</h3><div class="table-wrap"><table class="staff-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(importLabel(IMPORT_HEADER_LABELS,h))}</th>`).join('')}</tr></thead><tbody>${sample.map(r=>`<tr>${headers.map(h=>`<td>${escapeHtml(importPreviewValue(h,r[h]))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   const r = importUiState.report;
   report.innerHTML = r ? `<h3>Simulation</h3><p><b>${r.created}</b> créations · <b>${r.updated}</b> mises à jour · <b>${r.unchanged}</b> inchangées · <b>${r.potentialDuplicates}</b> doublons potentiels · <b>${r.ignored}</b> lignes ignorées</p>` : '<p class="admin-note">Lance une simulation avant import réel.</p>';
 }
@@ -1331,16 +1409,24 @@ async function readSyncLogs(limit=20){
   snap.forEach(docSnap => { if(logs.length < limit) logs.push({id:docSnap.id, ...docSnap.data()}); });
   return logs;
 }
-async function adminListPlayers(){
+async function adminListPlayers(filters={}){
   if(!guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = playersService();
-  if(service?.listPlayers) return service.listPlayers(firestoreServiceContext());
-  if(service?.readFirestorePlayers) return service.readFirestorePlayers(firestoreServiceContext());
+  if(service?.listPlayers) return service.listPlayers(firestoreServiceContext(), filters);
+  if(service?.readFirestorePlayers) return service.readFirestorePlayers(firestoreServiceContext(), filters);
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
   const players = [];
   snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
-  return sortPlayersForApp(players);
+  return sortPlayersForApp(players).filter(p => filters.includeArchived || filters.status || String(p.status || 'active').toLowerCase() !== 'archived');
+}
+async function adminListRawPlayers(){
+  if(!guardAdminAction()) return [];
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
+  const players = [];
+  snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
+  return players.sort((a,b) => String(a.nom||a.displayName||'').localeCompare(String(b.nom||b.displayName||''), 'fr'));
 }
 function playerAdminDiff(before={}, after={}){
   const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','photo','status','commentaireInterne'];
@@ -1374,9 +1460,10 @@ async function writeChangeLog({collectionName, documentId, action, before, after
 async function adminCreatePlayer(data={}){
   if(!guardAdminAction()) return {created:false};
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
-  const clean = {...data};
+  const service = playersService();
+  const clean = service?.normalizePlayer ? service.normalizePlayer(data) : {...data};
   clean.nom = String(clean.nom || '').trim().toUpperCase();
-  clean.prenom = String(clean.prenom || '').trim();
+  clean.prenom = String(clean.prenom || '').trim().toUpperCase();
   if(!clean.nom || !clean.prenom) throw new Error('Nom et prénom obligatoires.');
   clean.categorie = String(clean.categorie || '').trim();
   clean.subCategory = String(clean.subCategory || clean.categorie || '').trim();
@@ -1389,9 +1476,12 @@ async function adminCreatePlayer(data={}){
   clean.photo = String(clean.photo || '').trim();
   clean.status = String(clean.status || 'active').trim() || 'active';
   clean.commentaireInterne = String(clean.commentaireInterne || '').trim();
-  clean.playerId = clean.playerId || stableFirestoreId('player', clean.nom, clean.prenom, clean.categorie, clean.subCategory, clean.birth);
+  clean.currentSeason = clean.currentSeason || service?.seasonFromDate?.() || '2026-2027';
+  clean.seasonStart = clean.seasonStart || `${clean.currentSeason.slice(0,4)}-07-01`;
+  clean.seasonEnd = clean.seasonEnd || `${clean.currentSeason.slice(5)}-06-30`;
+  clean.playerId = clean.playerId || stableFirestoreId('player', clean.nom, clean.prenom, clean.birth || 'no-birth');
   clean.id = clean.playerId;
-  clean.displayName = [clean.nom, clean.prenom].filter(Boolean).join(' ').trim();
+  clean.displayName = [clean.prenom, clean.nom].filter(Boolean).join(' ').trim().toUpperCase();
   clean.createdAt = firebaseFns.serverTimestamp();
   clean.createdAtIso = new Date().toISOString();
   clean.updatedAt = firebaseFns.serverTimestamp();
@@ -1405,8 +1495,7 @@ async function adminCreatePlayer(data={}){
     const sameId = (p.playerId || p.id) === clean.playerId;
     const sameIdentity = String(p.nom || '').toUpperCase() === clean.nom
       && String(p.prenom || '').trim().toLowerCase() === clean.prenom.toLowerCase()
-      && String(p.categorie || '') === clean.categorie
-      && String(p.subCategory || '') === clean.subCategory;
+      && String(p.birth || p.dateNaissance || '') === String(clean.birth || clean.dateNaissance || '');
     return sameId || sameIdentity;
   });
   if(duplicate) throw new Error(`Joueuse déjà présente : ${duplicate.displayName || `${duplicate.nom || ''} ${duplicate.prenom || ''}`.trim()}`);
@@ -1480,8 +1569,8 @@ async function adminExportPlayers(format='json'){
   return players.length;
 }
 const DEFAULT_DB_OPTIONS = {
-  categories:['U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'],
-  subCategories:['U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U19','R1']
+  categories:['U6-U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'],
+  subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','R1']
 };
 async function adminListTeamsAndSettings(){
   if(!guardAdminAction()) return {teams:[], settings:DEFAULT_DB_OPTIONS};
@@ -1582,6 +1671,120 @@ async function updatePlayerRefsInCollection(collectionName, fromPlayerId, toPlay
   await Promise.all(writes);
   return count;
 }
+function adminPlayerRefCollections(){
+  const service = playersService();
+  return service?.PLAYER_REF_COLLECTIONS || ['matchEvents', 'attendance', 'technicalTests', 'physicalTests', 'injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines'];
+}
+function adminIdentityText(value){
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+function adminIdentityDate(value){
+  const parsed = parseImportDate(value);
+  return parsed || String(value || '').trim();
+}
+function adminPlayerIdentity(player={}){
+  const nom = adminIdentityText(player.nom || player.lastName);
+  const prenom = adminIdentityText(player.prenom || player.firstName);
+  const birth = adminIdentityDate(player.birth || player.dateNaissance || player.birthDate);
+  return {nom, prenom, birth};
+}
+function adminPlayerNameLabel(player={}){
+  const identity = adminPlayerIdentity(player);
+  return [identity.prenom, identity.nom].filter(Boolean).join(' ');
+}
+function adminPlayerMergeScore(player={}){
+  const source = String(player.source || player.importSource || '').toLowerCase();
+  let score = 0;
+  if(source.includes('coachpulse-joueuses-import') || source.includes('reference')) score += 80;
+  if(player.photo) score += 20;
+  if(player.birth || player.dateNaissance) score += 12;
+  if(player.categorie) score += 6;
+  if(player.subCategory) score += 6;
+  if(player.team) score += 4;
+  if(source.includes('test') || /^U20\d{2}$/i.test(String(player.subCategory || ''))) score -= 30;
+  return score;
+}
+function chooseAdminMergePrimary(group=[]){
+  return [...group].sort((a,b) => {
+    const score = adminPlayerMergeScore(b) - adminPlayerMergeScore(a);
+    if(score) return score;
+    return String(b.updatedAtIso || '').localeCompare(String(a.updatedAtIso || ''));
+  })[0];
+}
+function compactAdminMergePlayer(player={}){
+  return {
+    playerId:player.playerId || player.id || '',
+    label:adminPlayerNameLabel(player),
+    nom:player.nom || '',
+    prenom:player.prenom || '',
+    birth:player.birth || player.dateNaissance || '',
+    categorie:player.categorie || '',
+    subCategory:player.subCategory || '',
+    team:player.team || '',
+    source:player.source || player.importSource || '',
+    status:player.status || 'active'
+  };
+}
+function buildAdminDuplicateMergePlan(players=[]){
+  const active = players.filter(p => String(p.status || 'active').toLowerCase() !== 'archived');
+  const strictMap = new Map();
+  const nameMap = new Map();
+  active.forEach(player => {
+    const id = player.playerId || player.id;
+    if(!id) return;
+    const identity = adminPlayerIdentity(player);
+    const nameKey = [identity.nom, identity.prenom].join('|');
+    if(identity.nom && identity.prenom) nameMap.set(nameKey, [...(nameMap.get(nameKey) || []), player]);
+    if(identity.nom && identity.prenom && identity.birth){
+      const strictKey = [identity.nom, identity.prenom, identity.birth].join('|');
+      strictMap.set(strictKey, [...(strictMap.get(strictKey) || []), player]);
+    }
+  });
+  const strictGroups = [];
+  const strictPlayerIds = new Set();
+  strictMap.forEach(group => {
+    const unique = [...new Map(group.map(player => [player.playerId || player.id, player])).values()];
+    if(unique.length < 2) return;
+    const primary = chooseAdminMergePrimary(unique);
+    const keepId = primary.playerId || primary.id;
+    const duplicates = unique.filter(player => (player.playerId || player.id) !== keepId);
+    unique.forEach(player => strictPlayerIds.add(player.playerId || player.id));
+    strictGroups.push({
+      key:[adminPlayerIdentity(primary).nom, adminPlayerIdentity(primary).prenom, adminPlayerIdentity(primary).birth].join('|'),
+      keepId,
+      keep:compactAdminMergePlayer(primary),
+      duplicates:duplicates.map(compactAdminMergePlayer),
+      duplicateIds:duplicates.map(player => player.playerId || player.id),
+      count:unique.length
+    });
+  });
+  const manualCandidates = [];
+  nameMap.forEach(group => {
+    const unique = [...new Map(group.map(player => [player.playerId || player.id, player])).values()].filter(player => !strictPlayerIds.has(player.playerId || player.id));
+    if(unique.length < 2) return;
+    manualCandidates.push({
+      name:adminPlayerNameLabel(unique[0]),
+      reason:'Même nom/prénom, date de naissance absente ou différente',
+      players:unique.map(compactAdminMergePlayer)
+    });
+  });
+  strictGroups.sort((a,b) => a.keep.label.localeCompare(b.keep.label, 'fr'));
+  manualCandidates.sort((a,b) => a.name.localeCompare(b.name, 'fr'));
+  return {
+    generatedAtIso:new Date().toISOString(),
+    rule:'Fusion automatique seulement si nom + prénom + date de naissance identiques.',
+    refCollections:adminPlayerRefCollections(),
+    strictGroups,
+    manualCandidates,
+    groupsToMerge:strictGroups.length,
+    duplicatePlayersToArchive:strictGroups.reduce((sum, group) => sum + group.duplicateIds.length, 0)
+  };
+}
+async function adminBuildDuplicateMergePlan(){
+  if(!guardAdminAction()) return buildAdminDuplicateMergePlan([]);
+  const players = await adminListRawPlayers();
+  return buildAdminDuplicateMergePlan(players);
+}
 async function adminMergePlayers({primaryPlayerId, duplicatePlayerId}={}){
   if(!guardAdminAction()) return;
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
@@ -1593,7 +1796,7 @@ async function adminMergePlayers({primaryPlayerId, duplicatePlayerId}={}){
   const primary = {playerId:primaryPlayerId, ...primarySnap.data()};
   const duplicate = {playerId:duplicatePlayerId, ...duplicateSnap.data()};
   const refCounts = {};
-  for(const collectionName of ['matchEvents','attendance','technicalTests','physicalTests']){
+  for(const collectionName of adminPlayerRefCollections()){
     refCounts[collectionName] = await updatePlayerRefsInCollection(collectionName, duplicatePlayerId, primaryPlayerId);
   }
   const fill = {};
@@ -1622,6 +1825,121 @@ async function adminMergePlayers({primaryPlayerId, duplicatePlayerId}={}){
   await pullCentralPlayersToLocal(false).catch(()=>{});
   notifyFramesPlayersUpdated();
   return {primaryPlayerId, duplicatePlayerId, refCounts, filledFields:Object.keys(fill)};
+}
+async function adminMergeDuplicatePlan(){
+  if(!guardAdminAction()) return {mergedPlayers:0, groupsMerged:0, results:[]};
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const plan = await adminBuildDuplicateMergePlan();
+  const results = [];
+  for(const group of plan.strictGroups){
+    for(const duplicatePlayerId of group.duplicateIds){
+      results.push(await adminMergePlayers({primaryPlayerId:group.keepId, duplicatePlayerId}));
+    }
+  }
+  await writeChangeLog({
+    collectionName:'players',
+    documentId:'duplicate-merge-plan',
+    action:'merge-plan',
+    before:{},
+    after:{groupsMerged:plan.strictGroups.length, mergedPlayers:results.length, rule:plan.rule},
+    changes:{mergedPlayers:{before:0, after:results.length}},
+    summary:`Fusion stricte doublons : ${results.length} fiches archivées sur ${plan.strictGroups.length} groupes.`
+  });
+  return {groupsMerged:plan.strictGroups.length, mergedPlayers:results.length, results};
+}
+function buildCleanPlayersReference(rows=[], options={}){
+  const service = playersService();
+  const sourceSeason = options.sourceSeason || '2025-2026';
+  const source = options.source || 'Migration propre CoachPulse';
+  const normalized = rows.map(row => service?.normalizePlayer ? service.normalizePlayer({...row, season:row.season || row.saison || sourceSeason, source, status:'active'}) : normalizePlayer({...row, season:row.season || row.saison || sourceSeason, source, status:'active'}));
+  const players = service?.dedupePlayers ? service.dedupePlayers(normalized) : sortPlayersForApp(normalized);
+  const ids = new Set();
+  const duplicates = [];
+  players.forEach(player => {
+    const id = player.playerId || player.id;
+    if(ids.has(id)) duplicates.push(id);
+    ids.add(id);
+  });
+  const categories = {};
+  players.forEach(player => {
+    const key = `${player.categorie || '-'} / ${player.subCategory || '-'}`;
+    categories[key] = (categories[key] || 0) + 1;
+  });
+  return {
+    players,
+    report:{
+      sourceRows:rows.length,
+      cleanPlayers:players.length,
+      duplicates,
+      withPhoto:players.filter(player => player.photo).length,
+      categories
+    }
+  };
+}
+async function adminAnalyzeCleanPlayersReference(rows=[], options={}){
+  if(!guardAdminAction()) return {players:[], report:{}};
+  return buildCleanPlayersReference(rows, options);
+}
+async function adminApplyCleanPlayersReference(rows=[], options={}){
+  if(!guardAdminAction()) return {written:0, archived:0};
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const {players, report} = buildCleanPlayersReference(rows, options);
+  if(players.length !== 127) throw new Error(`Migration bloquée : ${players.length} joueuses détectées au lieu de 127.`);
+  if(report.duplicates.length) throw new Error(`Migration bloquée : ${report.duplicates.length} doublons playerId dans la source.`);
+  await exportCentralFirestore('json');
+  const existing = await adminListRawPlayers();
+  const cleanIds = new Set(players.map(player => player.playerId || player.id));
+  const writes = [];
+  const now = new Date().toISOString();
+  players.forEach(player => {
+    writes.push(firebaseFns.setDoc(firebaseFns.doc(db, 'players', player.playerId), {
+      ...player,
+      status:'active',
+      migrationBatch:'clean-reference-2026-2027',
+      updatedAt:firebaseFns.serverTimestamp(),
+      updatedAtIso:now,
+      updatedBy:currentUser.uid,
+      updatedByEmail:currentUser.email || ''
+    }, {merge:true}));
+    if(player.teamId && player.team){
+      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, 'teams', player.teamId), {
+        teamId:player.teamId,
+        name:player.team,
+        category:player.categorie || '',
+        source:'Migration propre CoachPulse',
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:now
+      }, {merge:true}));
+    }
+  });
+  let archived = 0;
+  existing.forEach(player => {
+    const id = player.playerId || player.id;
+    if(!id || cleanIds.has(id) || String(player.status || '').toLowerCase() === 'archived') return;
+    archived++;
+    writes.push(firebaseFns.setDoc(firebaseFns.doc(db, 'players', id), {
+      status:'archived',
+      archivedReason:'Migration propre vers référentiel 127 joueuses',
+      migrationBatch:'clean-reference-2026-2027',
+      updatedAt:firebaseFns.serverTimestamp(),
+      updatedAtIso:now,
+      updatedBy:currentUser.uid,
+      updatedByEmail:currentUser.email || ''
+    }, {merge:true}));
+  });
+  await Promise.all(writes);
+  await writeChangeLog({
+    collectionName:'players',
+    documentId:'clean-reference-2026-2027',
+    action:'clean-migration',
+    before:{existingPlayers:existing.length},
+    after:{cleanPlayers:players.length, archivedPlayers:archived, categories:report.categories},
+    changes:{players:{before:existing.length, after:players.length}, archived:{before:0, after:archived}},
+    summary:`Migration base joueuses propre : ${players.length} fiches actives, ${archived} anciennes fiches archivées.`
+  });
+  await pullCentralPlayersToLocal(false).catch(()=>{});
+  notifyFramesPlayersUpdated();
+  return {written:players.length, archived, report};
 }
 function canUseMedical(action='read'){
   return hasModulePermission(getModule('medical'), action);
@@ -1654,9 +1972,28 @@ async function moduleListPlayers(){
   }
   return sortPlayersForApp([...byId.values()]);
 }
+async function listPlayers(filters={}){
+  const players = await moduleListPlayers();
+  const service = playersService();
+  return service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
+}
+function seasonFromDate(date=new Date()){
+  const service = playersService();
+  if(service?.seasonFromDate) return service.seasonFromDate(date);
+  const d = date instanceof Date ? date : new Date(date);
+  const safe = Number.isNaN(d.getTime()) ? new Date() : d;
+  const year = safe.getFullYear();
+  return safe.getMonth() >= 6 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+}
+function currentSeason(){ return seasonFromDate(new Date()); }
+async function getPlayer(playerId){
+  if(!playerId) return null;
+  const players = await listPlayers();
+  return players.find(player => (player.playerId || player.id) === playerId) || null;
+}
 async function medicalListPlayers(){
   if(!guardMedical('read')) return [];
-  return moduleListPlayers();
+  return listPlayers();
 }
 async function medicalListData(){
   if(!guardMedical('read')) return localMedicalPayload();
@@ -1681,6 +2018,7 @@ async function medicalSaveInjury(injury={}){
     id:injuryId,
     injuryId,
     playerId:injury.playerId,
+    season:injury.season || seasonFromDate(injury.declaredAt || now),
     status:injury.status || injury.availability || 'active',
     bodyZone:injury.bodyZone || '',
     painLevel:Number(injury.painLevel || 0),
@@ -2124,14 +2462,14 @@ function resetPlayerForm(){
   updatePlayerPreview();
 }
 function playerDisplayName(p){
-  return `${String(p.nom||'').toUpperCase()} ${String(p.prenom||'').trim()}`.trim();
+  return `${String(p.prenom||'').trim()} ${String(p.nom||'').toUpperCase()}`.trim().toUpperCase();
 }
 function updatePlayerPreview(){
   const first=$('#playerFirstName')?.value.trim() || '';
   const last=$('#playerLastName')?.value.trim() || '';
   const cat=$('#playerCategory')?.value || '';
   const team=$('#playerTeam')?.value || '';
-  const name=`${last.toUpperCase()} ${first}`.trim() || 'Nouvelle joueuse';
+  const name=`${first} ${last.toUpperCase()}`.trim().toUpperCase() || 'Nouvelle joueuse';
   const initials=(first||last||'?').split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase() || '?';
   const box=$('#playerPreview'); if(!box) return;
   box.innerHTML=`<div class="player-avatar-preview">${escapeHtml(initials)}</div><div><b>${escapeHtml(name)}</b><br><span>${escapeHtml([team,cat].filter(Boolean).join(' · ') || 'Complète le formulaire.')}</span></div>`;
@@ -2149,19 +2487,21 @@ async function saveManualPlayer(){
   const categorie=$('#playerCategory')?.value || '';
   const team=$('#playerTeam')?.value || '';
   const birth=$('#playerBirth')?.value.trim() || '';
-  const baseId=stableFirestoreId('player', nom, prenom, categorie, categorie);
+  const service=playersService();
+  const baseId=stableFirestoreId('player', nom, prenom, birth || 'no-birth');
   const players=customPlayers();
-  const duplicate=players.find(p => slugify(playerDisplayName(p)) === slugify(`${nom} ${prenom}`));
+  const duplicate=players.find(p => slugify(playerDisplayName(p)) === slugify(`${prenom} ${nom}`) && String(p.birth || p.dateNaissance || '') === birth);
   if(duplicate){
     if(msg){ msg.textContent='Cette joueuse existe déjà dans la base manuelle.'; msg.classList.add('bad'); }
     return;
   }
-  const player={
+  const rawPlayer={
     id:baseId, playerId:baseId,
-    prenom, nom:nom.toUpperCase(), categorie, subCategory:categorie, team,
+    prenom:prenom.toUpperCase(), nom:nom.toUpperCase(), categorie, subCategory:categorie, team,
     foot:$('#playerFoot')?.value || '', birth, age:/^\d{1,2}$/.test(birth)?birth:'',
     photo, source:'Saisie manuelle CoachPulse', createdAt:new Date().toISOString()
   };
+  const player=service?.normalizePlayer ? service.normalizePlayer(rawPlayer) : rawPlayer;
   players.push(player);
   setCustomPlayers(players);
   resetPlayerForm();

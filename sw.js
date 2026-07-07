@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-25-20260702-player-dedupe-admin-create';
+const CACHE_NAME = 'coachpulse-v6-4-39-20260706-presence-category-filter';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',
