@@ -1,7 +1,7 @@
 {
   "id": "tests-athletiques",
-  "name": "Tests athletiques",
-  "status": "planned",
+  "name": "Tests athlétiques",
+  "status": "active",
   "firebase": {
     "collection": "physicalTests",
     "relatedCollections": [
@@ -22,12 +22,12 @@
     "adminOnly": false
   },
   "routing": {
-    "currentScreen": "pages/tests-techniques.html",
-    "targetEntry": "modules/tests-athletiques/index.html"
+    "currentScreen": "pages/tests-athletiques.html",
+    "targetEntry": "pages/tests-athletiques.html"
   },
   "migration": {
-    "phase": 1,
-    "strategy": "legacy-page-kept-as-fallback"
+    "phase": 2,
+    "strategy": "coachpulse-page-connected-to-player-reference"
   },
-  "description": "Futurs tests physiques et athletiques."
+  "description": "Tests physiques et athlétiques reliés à la base joueuses unique."
 }
