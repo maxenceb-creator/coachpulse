@@ -1,0 +1,48 @@
+{
+  "id": "playerProfile",
+  "name": "Fiche individuelle",
+  "status": "active",
+  "firebase": {
+    "collection": "players",
+    "relatedCollections": [
+      "attendance",
+      "sessions",
+      "matches",
+      "matchEvents",
+      "technicalTests",
+      "physicalTests",
+      "injuries",
+      "injuryUpdates",
+      "medicalAppointments",
+      "rehabRoutines",
+      "workloads",
+      "medicalFollowUps"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE_CATEGORIE",
+      "COACH",
+      "PREPARATEUR_ATHLETIQUE",
+      "MEDICAL",
+      "OBSERVATEUR_STAFF",
+      "LECTURE"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE_CATEGORIE",
+      "COACH"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "pages/player-profile.html",
+    "targetEntry": "pages/player-profile.html"
+  },
+  "migration": {
+    "phase": 3,
+    "strategy": "dynamic-player-dashboard-linked-by-player-id"
+  },
+  "description": "Tableau de bord individuel dynamique d'une joueuse, agregeant les donnees CoachPulse par playerId."
+}

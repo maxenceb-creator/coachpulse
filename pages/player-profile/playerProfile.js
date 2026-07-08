@@ -1,0 +1,79 @@
+(function(global){
+  const Data = global.PlayerProfileData;
+  const Filters = global.PlayerProfileFilters;
+  const Stats = global.PlayerProfileStats;
+  const Compare = global.PlayerProfileCompare;
+  const Render = global.PlayerProfileRender;
+  const root = document.getElementById('profileShell');
+  const state = {
+    players:[],
+    selectedPlayerId:'',
+    payload:null,
+    collections:null,
+    seasons:[Data.currentSeason()],
+    view:'overview',
+    filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]}
+  };
+  function player(){ return state.players.find(p => p.playerId === state.selectedPlayerId) || state.players[0] || {}; }
+  async function loadAll(){
+    const payload = await Data.loadProfileData('');
+    state.payload = payload;
+    state.collections = Data.normalizeCollections(payload);
+    state.seasons = Filters.seasonsFromCollections(state.collections);
+    if(!state.filters.compareSeasonA) state.filters.compareSeasonA = state.seasons[0] || Data.currentSeason();
+    if(!state.filters.compareSeasonB) state.filters.compareSeasonB = Data.currentSeason();
+  }
+  async function init(){
+    try{
+      state.players = await Data.listPlayers();
+      state.selectedPlayerId = state.players[0]?.playerId || '';
+      await loadAll();
+      render();
+    }catch(error){
+      root.innerHTML = `<div class="empty-state">Chargement impossible : ${Render.esc(error.message || error)}</div>`;
+    }
+  }
+  function bind(){
+    document.getElementById('playerSelect')?.addEventListener('change', event => { state.selectedPlayerId = event.target.value; render(); });
+    document.getElementById('periodMode')?.addEventListener('change', event => { state.filters.periodMode = event.target.value; render(); });
+    document.getElementById('seasonSelect')?.addEventListener('change', event => { state.filters.season = event.target.value; render(); });
+    document.getElementById('startDate')?.addEventListener('change', event => { state.filters.startDate = event.target.value; render(); });
+    document.getElementById('endDate')?.addEventListener('change', event => { state.filters.endDate = event.target.value; render(); });
+    document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => { state.view = btn.dataset.view; render(); }));
+    document.getElementById('compareSeasonA')?.addEventListener('change', event => { state.filters.compareSeasonA = event.target.value; render(); });
+    document.getElementById('compareSeasonB')?.addEventListener('change', event => { state.filters.compareSeasonB = event.target.value; render(); });
+    document.getElementById('comparePlayers')?.addEventListener('change', async event => {
+      state.filters.comparePlayerIds = [...event.target.selectedOptions].map(option => option.value);
+      render();
+    });
+  }
+  function collectionsForPlayer(playerId){
+    const base = state.collections || {};
+    const out = {};
+    Object.entries(base).forEach(([name, rows]) => {
+      out[name] = name === 'players' ? rows.filter(row => (row.playerId || row.id) === playerId) : rows.filter(row => !row.playerId || row.playerId === playerId);
+    });
+    return out;
+  }
+  function render(){
+    if(!state.players.length){ root.innerHTML = '<div class="empty-state">Aucune joueuse disponible dans la base commune.</div>'; return; }
+    const selectedPlayer = player();
+    const period = Filters.periodFromState(state);
+    const selectedCollections = collectionsForPlayer(state.selectedPlayerId);
+    const summary = Stats.summarize(selectedPlayer, selectedCollections, state);
+    let body = Render.renderOverview(summary);
+    if(state.view === 'timeline') body = `<section class="grid"><article class="panel"><h2>Présences et charge</h2>${summary.attendance.length ? Render.renderEvents(summary.attendance,'status','minutes') : '<div class="empty-state">Aucune présence sur cette période.</div>'}</article><article class="panel"><h2>Evolution saison</h2>${Render.renderEvents([...summary.physicalTests,...summary.technicalTests,...summary.matchEvents,...summary.injuries],'source','value')}</article></section>`;
+    if(state.view === 'seasonCompare') body = Render.renderSeasonCompare(Compare.compareSeasons(selectedPlayer, selectedCollections, state), state);
+    if(state.view === 'playerCompare'){
+      const selectedIds = state.filters.comparePlayerIds.length ? state.filters.comparePlayerIds : [state.selectedPlayerId];
+      const comparePlayers = state.players.filter(p => selectedIds.includes(p.playerId));
+      const collectionMap = Object.fromEntries(comparePlayers.map(p => [p.playerId, collectionsForPlayer(p.playerId)]));
+      body = Render.renderPlayerCompare(Compare.comparePlayers(comparePlayers, collectionMap, state), state);
+    }
+    root.innerHTML = Render.renderControls(state) + Render.renderKpis(summary) + body;
+    document.getElementById('identityCard').innerHTML = Render.renderIdentity(selectedPlayer, period);
+    document.querySelectorAll('[data-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.view === state.view));
+    bind();
+  }
+  init();
+})(window);
