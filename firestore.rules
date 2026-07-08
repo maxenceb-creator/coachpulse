@@ -86,6 +86,10 @@ service cloud.firestore {
       return canReadData() && canAccessModule('medical');
     }
 
+    function canReadPlayerProfileData(data) {
+      return canReadData() && canAccessModule('playerProfile') && canAccessScopedData(data);
+    }
+
     function canWriteMedicalData() {
       return canWriteData() && canAccessModule('medical');
     }
@@ -184,7 +188,7 @@ service cloud.firestore {
     }
 
     match /players/{playerId} {
-      allow read: if canReadPlayerDoc(playerId, resource.data) && canAccessModule('database');
+      allow read: if canReadPlayerDoc(playerId, resource.data) && (canAccessModule('database') || canAccessModule('playerProfile'));
       allow create, update: if canManageCoreData()
         && canAccessModule('database')
         && request.resource.data.playerId == playerId
@@ -220,67 +224,73 @@ service cloud.firestore {
     }
 
     match /matches/{matchId} {
-      allow read: if canReadData() && canAccessModule('stats') && canAccessScopedData(resource.data);
+      allow read: if (canReadData() && canAccessModule('stats') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteSportData() && canAccessModule('stats') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /matchEvents/{eventId} {
-      allow read: if canReadData() && canAccessModule('stats') && canAccessScopedData(resource.data);
+      allow read: if (canReadData() && canAccessModule('stats') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteSportData() && canAccessModule('stats') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /sessions/{sessionId} {
-      allow read: if canReadData() && canAccessModule('methodologie') && canAccessScopedData(resource.data);
+      allow read: if (canReadData() && canAccessModule('methodologie') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteSportData() && canAccessModule('methodologie') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /attendance/{attendanceId} {
-      allow read: if canReadData() && canAccessModule('presences') && canAccessScopedData(resource.data);
+      allow read: if (canReadData() && canAccessModule('presences') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteSportData() && canAccessModule('presences') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /technicalTests/{testId} {
-      allow read: if canReadData() && canAccessModule('tests') && canAccessScopedData(resource.data);
+      allow read: if (canReadData() && canAccessModule('tests') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteSportData() && canAccessModule('tests') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /physicalTests/{testId} {
-      allow read: if canReadData() && canAccessModule('tests') && canAccessScopedData(resource.data);
+      allow read: if (canReadData() && canAccessModule('tests') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWritePhysicalData() && canAccessModule('tests') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /injuries/{injuryId} {
-      allow read: if canReadMedicalData() && canAccessScopedData(resource.data);
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /injuryUpdates/{updateId} {
-      allow read: if canReadMedicalData() && canAccessScopedData(resource.data);
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /medicalAppointments/{appointmentId} {
-      allow read: if canReadMedicalData() && canAccessScopedData(resource.data);
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /rehabRoutines/{routineId} {
-      allow read: if canReadMedicalData() && canAccessScopedData(resource.data);
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
+      allow delete: if noDelete();
+    }
+
+    match /medicalFollowUps/{followUpId} {
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /workloads/{workloadId} {
-      allow read: if canReadData() && canAccessModule('workload') && canAccessScopedData(resource.data);
+      allow read: if (canReadData() && canAccessModule('workload') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWritePhysicalData() && canAccessModule('workload') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }

@@ -33,6 +33,7 @@ const DEFAULT_MODULE_REGISTRY = [
   {id:'workload', name:'Charge de travail', icon:'📈', section:'future', active:false, collection:'workloads', relatedCollections:['players','teams','sessions'], screen:{type:'iframe', src:'pages/charge-travail.html'}, permissions:{read:ROLES.sportRead, write:ROLES.physicalWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Charge, volumes et ressentis.'}},
   {id:'convocations', name:'Convocations', icon:'📣', section:'future', active:false, collection:'convocations', relatedCollections:['players','teams','matches'], screen:{type:'iframe', src:'pages/convocations.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Groupes, convocations et disponibilités.'}},
   {id:'medical', name:'Suivi médical', icon:'🩺', section:'staff', active:true, collection:'injuries', relatedCollections:['players','teams','injuryUpdates','medicalAppointments','rehabRoutines','settings'], screen:{type:'iframe', src:'pages/suivi-medical.html'}, permissions:{read:ROLES.medicalRead, write:ROLES.medicalWrite, importExport:ROLES.medicalWrite}, settings:{showInNav:true, showOnDashboard:true, description:'Blessures, douleurs, rendez-vous et reprise.'}},
+  {id:'playerProfile', name:'Fiche individuelle', icon:'👤', section:'staff', active:true, collection:'players', relatedCollections:['attendance','sessions','matches','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps'], screen:{type:'iframe', src:'pages/player-profile.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Tableau de bord joueuse par playerId, saisons et comparaisons.'}},
   {id:'individualReports', name:'Bilans individuels', icon:'📝', section:'future', active:false, collection:'individualReports', relatedCollections:['players','teams','matches','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/bilans-individuels.html'}, permissions:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','OBSERVATEUR_STAFF','LECTURE'], write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Bilans individuels staff.'}}
 ];
 
@@ -795,6 +796,29 @@ async function readCentralFirestoreExport(){
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, name));
     payload.collections[name] = [];
     snap.forEach(docSnap => payload.collections[name].push({id:docSnap.id, ...docSnap.data()}));
+  }
+  return payload;
+}
+async function playerProfileLoadData(options={}){
+  if(!canViewModule('playerProfile')) throw new Error('Accès non autorisé.');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const playerId = String(options.playerId || '').trim();
+  const collections = ['players','sessions','attendance','matches','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps'];
+  const payload = {app:'CoachPulse', module:'playerProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), collections:{}};
+  for(const name of collections){
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, name));
+    payload.collections[name] = [];
+    snap.forEach(docSnap => payload.collections[name].push({id:docSnap.id, ...docSnap.data()}));
+  }
+  if(playerId){
+    payload.collections.players = payload.collections.players.filter(row => (row.playerId || row.id) === playerId);
+    ['attendance','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps'].forEach(name => {
+      payload.collections[name] = (payload.collections[name] || []).filter(row => row.playerId === playerId);
+    });
+    const sessionIds = new Set((payload.collections.attendance || []).map(row => row.sessionId).filter(Boolean));
+    payload.collections.sessions = (payload.collections.sessions || []).filter(row => sessionIds.has(row.sessionId || row.id));
+    const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
+    payload.collections.matches = (payload.collections.matches || []).filter(row => matchIds.has(row.matchId || row.id));
   }
   return payload;
 }
@@ -2277,7 +2301,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, listPlayers, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, listPlayers, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
