@@ -307,10 +307,16 @@ async function loadFirebaseFns(){
   return firebaseFns;
 }
 
+function isSeedAdminEmail(email=''){
+  const value = String(email || '').toLowerCase();
+  return value.includes('maxence.boisdron') || value.endsWith('@asse.fr');
+}
+
 async function ensureUserProfile(user){
   const ref = firebaseFns.doc(db, 'staff_members', user.uid);
   const snap = await firebaseFns.getDoc(ref);
   const service = permissionsService();
+  const seedAdmin = isSeedAdminEmail(user.email);
   if(snap.exists()){
     currentProfile = {uid:user.uid, ...snap.data()};
     const legacyRole = currentProfile.legacyRole || currentProfile.role || currentUserRole;
@@ -319,6 +325,12 @@ async function ensureUserProfile(user){
     currentProfile.roleLabel = service?.roleLabel ? service.roleLabel(currentProfile.role) : currentProfile.role;
     currentProfile.permissionLevel = service?.normalizePermission ? service.normalizePermission(currentProfile.permissionLevel, {...currentProfile, legacyRole}) : (currentProfile.permissionLevel || 'LECTEUR');
     currentProfile.permissionLabel = service?.permissionLabel ? service.permissionLabel(currentProfile.permissionLevel) : currentProfile.permissionLevel;
+    if(seedAdmin && currentProfile.permissionLevel !== 'ADMIN'){
+      currentProfile.role = 'DIRIGEANT';
+      currentProfile.roleLabel = service?.roleLabel ? service.roleLabel(currentProfile.role) : 'Dirigeant';
+      currentProfile.permissionLevel = 'ADMIN';
+      currentProfile.permissionLabel = service?.permissionLabel ? service.permissionLabel('ADMIN') : 'Admin';
+    }
     if(service?.normalizePermission && currentProfile.permissionLevel === 'ADMIN' && (!Array.isArray(currentProfile.allowedModules) || !currentProfile.allowedModules.length)){
       currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
     }
@@ -327,7 +339,7 @@ async function ensureUserProfile(user){
     return currentProfile;
   }
   const email = (user.email || '').toLowerCase();
-  const isSeedAdmin = email.includes('maxence.boisdron') || email.endsWith('@asse.fr');
+  const isSeedAdmin = isSeedAdminEmail(email);
   const role = isSeedAdmin ? 'DIRIGEANT' : 'ENTRAINEUR';
   const permissionLevel = isSeedAdmin ? 'ADMIN' : 'LECTEUR';
   currentProfile = service?.defaultProfile ? service.defaultProfile(user, role, permissionLevel) : {uid:user.uid, email:user.email, name:user.displayName || user.email, role, permissionLevel, scope:'CoachPulse', status:'ACTIVE'};
