@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-48-20260708-player-profile';
+const CACHE_NAME = 'coachpulse-v6-4-49-20260708-player-profile-fast-linked-data';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',
