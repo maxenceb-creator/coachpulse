@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-45-20260707-tests-athletiques-logo-paths';
+const CACHE_NAME = 'coachpulse-v6-4-46-20260708-admin-access-repair';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',
