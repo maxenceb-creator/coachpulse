@@ -2091,6 +2091,31 @@ function athleticNumber(value){
   const n = Number(clean);
   return Number.isFinite(n) ? n : '';
 }
+function athleticDateValue(row={}){
+  return row.date || row.testDate || row.test_date || row.dateTest || row.createdAtIso?.slice?.(0, 10) || '';
+}
+function normalizeAthleticDate(value){
+  const text = String(value || '').trim();
+  if(!text) return '';
+  const iso = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if(iso){
+    const [, y, m, d] = iso;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  const fr = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if(fr){
+    const [, d, m, y] = fr;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+}
+function normalizeAthleticSeason(value, dateValue){
+  const text = String(value || '').trim();
+  if(/^\d{4}-\d{4}$/.test(text)) return text;
+  const date = normalizeAthleticDate(dateValue);
+  return date ? seasonFromDate(date) : seasonFromDate(new Date());
+}
 function athleticMetricKey(label='', row={}){
   const key = normalizeAthleticToken(label || row.testName || row.testType || row.type || row.metric);
   const unit = normalizeAthleticToken(row.unit || row.unite);
@@ -2124,6 +2149,31 @@ function athleticTestsFromRow(row={}){
 function playerSearchKey(value){
   return normalizeAthleticToken(value);
 }
+function athleticNameVariants(value){
+  const text = String(value || '').trim();
+  const tokens = text.split(/\s+/).filter(Boolean);
+  const variants = new Set([playerSearchKey(text)]);
+  if(tokens.length > 1){
+    variants.add(playerSearchKey([...tokens].reverse().join(' ')));
+    variants.add(playerSearchKey(tokens.filter(token => token.length > 1).join(' ')));
+    variants.add(playerSearchKey(tokens.filter(token => token.length > 1).reverse().join(' ')));
+  }
+  return [...variants].filter(Boolean);
+}
+function athleticRowNameCandidates(row={}){
+  const lastName = row.nom || row.lastName || row.lastname || row.playerLastName || row.playerSnapshot?.nom;
+  const firstName = row.prenom || row.prénom || row.firstName || row.firstname || row.playerFirstName || row.playerSnapshot?.prenom;
+  return [
+    row.playerName,
+    row.joueuse,
+    row.name,
+    row.fullName,
+    row.displayName,
+    row.playerSnapshot?.displayName,
+    `${firstName || ''} ${lastName || ''}`,
+    `${lastName || ''} ${firstName || ''}`
+  ];
+}
 function athleticPlayerLookup(players=[]){
   const byId = new Map();
   const byName = new Map();
@@ -2135,7 +2185,7 @@ function athleticPlayerLookup(players=[]){
       player.playerName,
       `${player.prenom || ''} ${player.nom || ''}`,
       `${player.nom || ''} ${player.prenom || ''}`
-    ].map(playerSearchKey).filter(Boolean);
+    ].flatMap(athleticNameVariants).filter(Boolean);
     names.forEach(name => { if(!byName.has(name)) byName.set(name, player); });
   });
   return {byId, byName};
@@ -2143,8 +2193,8 @@ function athleticPlayerLookup(players=[]){
 function resolveAthleticPlayer(row={}, lookup={}){
   const id = row.playerId || row.idPlayer || row.player?.playerId || row.playerSnapshot?.playerId;
   if(id && lookup.byId?.has(id)) return lookup.byId.get(id);
-  const names = [row.playerName, row.joueuse, row.name, row.fullName, row.playerSnapshot?.displayName]
-    .map(playerSearchKey)
+  const names = athleticRowNameCandidates(row)
+    .flatMap(athleticNameVariants)
     .filter(Boolean);
   return names.map(name => lookup.byName?.get(name)).find(Boolean) || null;
 }
@@ -2155,14 +2205,13 @@ function normalizeAthleticRows(rawRows=[], players=[]){
   rawRows.forEach((raw, idx) => {
     const tests = athleticTestsFromRow(raw);
     if(!Object.keys(tests).length) return;
-    const rawSeason = raw.season || raw.saison || seasonFromDate(raw.date || new Date());
+    const date = normalizeAthleticDate(athleticDateValue(raw));
+    const season = normalizeAthleticSeason(raw.season || raw.saison, date);
     const rawPlayer = resolveAthleticPlayer(raw, lookup);
     const playerId = rawPlayer?.playerId || rawPlayer?.id || raw.playerId || raw.playerSnapshot?.playerId || '';
     if(!playerId) return;
-    const seasonPlayer = rawPlayer && service?.playerForSeason ? service.playerForSeason(rawPlayer, rawSeason) : (rawPlayer || raw.playerSnapshot || {});
+    const seasonPlayer = rawPlayer && service?.playerForSeason ? service.playerForSeason(rawPlayer, season) : (rawPlayer || raw.playerSnapshot || {});
     const canonicalId = seasonPlayer.playerId || seasonPlayer.id || playerId;
-    const date = raw.date || raw.testDate || raw.createdAtIso?.slice?.(0, 10) || '';
-    const season = rawSeason || seasonFromDate(date || new Date());
     const groupId = stableFirestoreId('physicalTest', canonicalId, date || 'date-inconnue', season);
     const previous = grouped.get(groupId) || {
       id:groupId,
