@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-39-20260706-presence-category-filter';
+const CACHE_NAME = 'coachpulse-v6-4-45-20260707-tests-athletiques-logo-paths';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',
@@ -6,7 +6,7 @@ const CORE_ASSETS = [
   './shared/services/permissions-service.js',
   './assets/coachpulse-logo-transparent.png', './assets/coachpulse-logo-clean.png', './assets/asse-logo-officiel.png', './assets/asse-logo.svg',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-1024.png',
-  './pages/coach-stats.html', './pages/methodologie.html', './pages/presences.html', './pages/tests-techniques.html', './pages/data-hub.html', './pages/admin-database.html', './pages/suivi-medical.html',
+  './pages/coach-stats.html', './pages/methodologie.html', './pages/presences.html', './pages/tests-techniques.html', './pages/tests-athletiques.html', './pages/data-hub.html', './pages/admin-database.html', './pages/suivi-medical.html',
   './connectors/fichesJoueusesConnector.js', './connectors/presencesConnector.js',
   './connectors/testsConnectorCore.js', './connectors/testsTechniquesConnector.js', './connectors/testsPhysiquesConnector.js'
 ];
