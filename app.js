@@ -810,33 +810,52 @@ async function playerProfileLoadData(options={}){
   const chunks = [];
   for(let i = 0; i < aliases.length; i += 10) chunks.push(aliases.slice(i, i + 10));
   async function readWhereIn(collectionName, field='playerId'){
-    const rows = [];
-    for(const chunk of chunks){
-      if(!chunk.length) continue;
+    const snaps = await Promise.all(chunks.filter(chunk => chunk.length).map(chunk => {
       const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
-      const snap = await firebaseFns.getDocs(q);
-      snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
-    }
+      return firebaseFns.getDocs(q);
+    }));
+    const rows = [];
+    snaps.forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
+    return [...new Map(rows.map(row => [row.id, row])).values()];
+  }
+  async function readArrayContainsAny(collectionName, field){
+    const snaps = await Promise.all(chunks.filter(chunk => chunk.length).map(chunk => {
+      const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'array-contains-any', chunk));
+      return firebaseFns.getDocs(q);
+    }));
+    const rows = [];
+    snaps.forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
+    return [...new Map(rows.map(row => [row.id, row])).values()];
+  }
+  async function readPlayerLinkedCollection(collectionName){
+    const primary = await readWhereIn(collectionName, 'playerId');
+    if(primary.length) return primary;
+    const fallbackCollections = new Set(['attendance','matchEvents','technicalTests','physicalTests','injuries','medicalFollowUps']);
+    if(!fallbackCollections.has(collectionName)) return primary;
+    const idFields = ['playerID','player_id','legacyPlayerId','oldPlayerId','playerKey'];
+    const arrayFields = ['playerIds','legacyPlayerIds','previousPlayerIds','aliases','aliasIds'];
+    const results = await Promise.allSettled([
+      ...idFields.map(field => readWhereIn(collectionName, field)),
+      ...arrayFields.map(field => readArrayContainsAny(collectionName, field))
+    ]);
+    const rows = [...primary, ...results.flatMap(result => result.status === 'fulfilled' ? result.value : [])];
     return [...new Map(rows.map(row => [row.id, row])).values()];
   }
   async function readDocsByIds(collectionName, ids){
-    const rows = [];
-    for(const id of [...new Set([...ids].filter(Boolean))]){
-      const snap = await firebaseFns.getDoc(firebaseFns.doc(db, collectionName, id));
-      if(snap.exists()) rows.push({id:snap.id, ...snap.data()});
-    }
-    return rows;
+    const uniqueIds = [...new Set([...ids].filter(Boolean))];
+    const snaps = await Promise.all(uniqueIds.map(id => firebaseFns.getDoc(firebaseFns.doc(db, collectionName, id))));
+    return snaps.filter(snap => snap.exists()).map(snap => ({id:snap.id, ...snap.data()}));
   }
   async function readDocsByIdsOrField(collectionName, ids, field){
     const rows = await readDocsByIds(collectionName, ids);
     const values = [...new Set([...ids].filter(Boolean))];
-    for(let i = 0; i < values.length; i += 10){
-      const chunk = values.slice(i, i + 10);
-      if(!chunk.length) continue;
+    const valueChunks = [];
+    for(let i = 0; i < values.length; i += 10) valueChunks.push(values.slice(i, i + 10));
+    const snaps = await Promise.all(valueChunks.filter(chunk => chunk.length).map(chunk => {
       const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
-      const snap = await firebaseFns.getDocs(q);
-      snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
-    }
+      return firebaseFns.getDocs(q);
+    }));
+    snaps.forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
     return [...new Map(rows.map(row => [row.id, row])).values()];
   }
   if(!aliases.length){
@@ -844,16 +863,20 @@ async function playerProfileLoadData(options={}){
     snap.forEach(docSnap => payload.collections.players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
     return payload;
   }
-  payload.collections.players = await readDocsByIds('players', aliases);
-  const playerRows = await readWhereIn('players');
+  const [playersById, playerRows] = await Promise.all([readDocsByIds('players', aliases), readWhereIn('players')]);
+  payload.collections.players = playersById;
   playerRows.forEach(row => {
     if(!payload.collections.players.some(player => player.id === row.id)) payload.collections.players.push(row);
   });
-  for(const name of directCollections) payload.collections[name] = await readWhereIn(name);
+  await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
   const sessionIds = new Set((payload.collections.attendance || []).map(row => row.sessionId).filter(Boolean));
   const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
-  payload.collections.sessions = await readDocsByIdsOrField('sessions', sessionIds, 'sessionId');
-  payload.collections.matches = await readDocsByIdsOrField('matches', matchIds, 'matchId');
+  const [sessions, matches] = await Promise.all([
+    readDocsByIdsOrField('sessions', sessionIds, 'sessionId'),
+    readDocsByIdsOrField('matches', matchIds, 'matchId')
+  ]);
+  payload.collections.sessions = sessions;
+  payload.collections.matches = matches;
   return payload;
 }
 function csvEscape(v){

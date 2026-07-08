@@ -19,6 +19,9 @@
   function displayName(player={}){
     return text(player.displayName || player.name || player.playerName || [player.prenom || player.firstName, player.nom || player.lastName].filter(Boolean).join(' ')).toUpperCase();
   }
+  function teamLabel(player={}){
+    return text(player.team || player.equipe || player.teamName || player.categorie || player.category || player.subCategory || player.sousCategorie || 'Sans équipe');
+  }
   function list(value){
     if(Array.isArray(value)) return value;
     if(value == null || value === '') return [];
@@ -66,6 +69,13 @@
       row.player?.playerId,
       row.player?.id
     ].forEach(value => { if(text(value)) out.push(text(value)); });
+    ['playerIds','playersIds','players','selectedPlayers','calledPlayers','absentPlayers','presentPlayers'].forEach(key => {
+      list(row[key]).forEach(value => {
+        if(typeof value === 'object' && value){
+          [value.playerId, value.id, value.playerID, value.player_id].forEach(inner => { if(text(inner)) out.push(text(inner)); });
+        }else if(text(value)) out.push(text(value));
+      });
+    });
     return out;
   }
   function rowMatchesPlayer(row={}, aliases=[]){
@@ -122,5 +132,5 @@
       individualReports:c.individualReports || []
     };
   }
-  global.PlayerProfileData = {api, text, seasonFromDate, currentSeason, idOf, slug, stableId, displayName, listPlayers, loadProfileData, normalizeCollections, playerAliases, rowPlayerIds, rowMatchesPlayer};
+  global.PlayerProfileData = {api, text, seasonFromDate, currentSeason, idOf, slug, stableId, displayName, teamLabel, listPlayers, loadProfileData, normalizeCollections, playerAliases, rowPlayerIds, rowMatchesPlayer};
 })(window);

@@ -3,8 +3,16 @@
   const Filters = global.PlayerProfileFilters;
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function option(value, label, selected){ return `<option value="${esc(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${esc(label || value)}</option>`; }
+  function filteredPlayers(state){
+    const team = state.filters.team || '';
+    return state.players
+      .filter(player => !team || Data.teamLabel(player) === team)
+      .slice()
+      .sort((a,b) => Data.displayName(a).localeCompare(Data.displayName(b), 'fr'));
+  }
   function renderControls(state){
-    const players = state.players.slice().sort((a,b) => Data.displayName(a).localeCompare(Data.displayName(b)));
+    const teams = [...new Set(state.players.map(Data.teamLabel).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'fr'));
+    const players = filteredPlayers(state);
     const seasons = state.seasons;
     const selected = state.selectedPlayerId || players[0]?.playerId || '';
     return `<section class="hero">
@@ -12,6 +20,7 @@
       <div class="filters">
         <h2>Filtres de fiche</h2>
         <div class="filter-grid">
+          <div class="field"><label>Équipe</label><select id="teamFilter">${option('','Toutes',state.filters.team || '')}${teams.map(team => option(team, team, state.filters.team || '')).join('')}</select></div>
           <div class="field"><label>Joueuse</label><select id="playerSelect">${players.map(p => option(p.playerId, Data.displayName(p), selected)).join('')}</select></div>
           <div class="field"><label>Période</label><select id="periodMode">${option('season','Saison',state.filters.periodMode)}${option('all','Toutes saisons',state.filters.periodMode)}${option('custom','Période personnalisée',state.filters.periodMode)}</select></div>
           <div class="field"><label>Saison</label><select id="seasonSelect">${seasons.map(s => option(s,s,state.filters.season)).join('')}</select></div>
@@ -55,8 +64,20 @@
   }
   function renderOverview(summary){
     const actionMax = Math.max(1, ...Object.values(summary.actions));
+    const linkedLabels = {
+      presences:'Présences',
+      seances:'Séances',
+      matchs:'Actions match',
+      testsTechniques:'Tests techniques',
+      testsAthletiques:'Tests athlétiques',
+      blessures:'Blessures',
+      suiviMedical:'Suivi médical',
+      convocations:'Convocations',
+      bilansIndividuels:'Bilans'
+    };
     return `<section class="grid">
       <article class="panel"><h2>Informations générales</h2><div class="chips"><span class="chip">Dernière VMI ${esc(summary.latest.vmi || '-')}</span><span class="chip">Dernier CMJ ${esc(summary.latest.cmj || '-')}</span><span class="chip">Tests techniques ${esc(summary.technicalTests.length)}</span><span class="chip">Tests athlétiques ${esc(summary.physicalTests.length)}</span></div></article>
+      <article class="panel"><h2>Données reliées au playerId</h2><div class="chips">${Object.entries(summary.linkedCounts || {}).map(([key,value]) => `<span class="chip">${esc(linkedLabels[key] || key)} ${esc(value)}</span>`).join('')}</div></article>
       <article class="panel"><h2>Statistiques de match</h2><div class="bar-list">${Object.keys(summary.actions).length ? Object.entries(summary.actions).map(([k,v]) => bar(k,v,actionMax)).join('') : '<div class="empty-state">Aucune statistique match sur cette période.</div>'}</div></article>
       <article class="panel"><h2>Tests techniques</h2>${summary.technicalTests.length ? renderEvents(summary.technicalTests,'testType','value') : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
       <article class="panel"><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderEvents(summary.physicalTests,'source','tests') : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
@@ -74,7 +95,8 @@
   }
   function renderPlayerCompare(rows, state){
     const selected = new Set(state.filters.comparePlayerIds || []);
-    return `<section class="panel"><h2>Comparaison entre joueuses</h2><div class="notice">Période utilisée : ${esc(Filters.periodFromState(state).label)}</div><div class="field"><label>Joueuses à comparer</label><select id="comparePlayers" multiple>${state.players.map(p => `<option value="${esc(p.playerId)}" ${selected.has(p.playerId) ? 'selected' : ''}>${esc(Data.displayName(p))}</option>`).join('')}</select></div><table class="compare-table"><thead><tr><th>Joueuse</th><th>Présence</th><th>Charge</th><th>Matchs</th><th>Tests athlétiques</th><th>Blessures</th></tr></thead><tbody>${rows.length ? rows.map(row => `<tr><td>${esc(Data.displayName(row.player))}</td><td>${row.summary.kpis.presenceRate}%</td><td>${row.summary.kpis.minutes} min</td><td>${row.summary.kpis.matches}</td><td>${row.summary.physicalTests.length}</td><td>${row.summary.kpis.injuries}</td></tr>`).join('') : '<tr><td colspan="6">Aucune joueuse sélectionnée.</td></tr>'}</tbody></table></section>`;
+    const candidates = filteredPlayers(state);
+    return `<section class="panel"><h2>Comparaison entre joueuses</h2><div class="notice">Période utilisée : ${esc(Filters.periodFromState(state).label)}</div><div class="compare-picker">${candidates.map(p => `<label class="compare-choice"><input type="checkbox" data-compare-player value="${esc(p.playerId)}" ${selected.has(p.playerId) ? 'checked' : ''}> <span>${esc(Data.displayName(p))}</span></label>`).join('')}</div><table class="compare-table"><thead><tr><th>Joueuse</th><th>Présence</th><th>Charge</th><th>Matchs</th><th>Tests athlétiques</th><th>Blessures</th></tr></thead><tbody>${rows.length ? rows.map(row => `<tr><td>${esc(Data.displayName(row.player))}</td><td>${row.summary.kpis.presenceRate}%</td><td>${row.summary.kpis.minutes} min</td><td>${row.summary.kpis.matches}</td><td>${row.summary.physicalTests.length}</td><td>${row.summary.kpis.injuries}</td></tr>`).join('') : '<tr><td colspan="6">Sélectionne une ou plusieurs joueuses.</td></tr>'}</tbody></table></section>`;
   }
   global.PlayerProfileRender = {esc, renderControls, renderIdentity, renderKpis, renderOverview, renderEvents, renderSeasonCompare, renderPlayerCompare};
 })(window);
