@@ -6,7 +6,7 @@
   const CUSTOM_CACHE_KEY = 'coachpulse:customPlayers';
   const COLLECTION = 'players';
   const ACTIVE_STATUSES = ['active', 'injured', 'left', 'archived'];
-  const PLAYER_REF_COLLECTIONS = ['matchEvents', 'attendance', 'technicalTests', 'physicalTests', 'injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines'];
+  const PLAYER_REF_COLLECTIONS = ['matchEvents', 'attendance', 'technicalTests', 'physicalTests', 'injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines', 'workloads', 'medicalFollowUps', 'convocations', 'individualReports'];
 
   function asText(value){ return String(value ?? '').trim(); }
   function normalizeUpper(value){ return asText(value).toUpperCase(); }
@@ -60,7 +60,7 @@
     const computedSub = subCategoryForSeason(player, selectedSeason);
     const subCategory = computedSub || asText(fromHistory.subCategory || player.subCategory || player.sousCategorie);
     const categorie = normalizeTeamFromCategory(subCategory || fromHistory.categorie || player.categorie || player.category);
-    const team = asText(fromHistory.team || player.team || player.equipe || categorie);
+    const team = asText(fromHistory.team || (computedSub ? categorie : '') || player.team || player.equipe || categorie);
     return {season:selectedSeason, categorie, subCategory, team};
   }
 
@@ -101,6 +101,12 @@
     const names = splitName(player || {});
     const key = [names.nom, names.prenom].map(keyPart).join('|');
     return key.replace(/\|/g, '') ? key : '';
+  }
+  function canonicalPlayerId(raw={}){
+    const names = splitName(raw);
+    const birth = asText(raw.birth || raw.dateNaissance || raw.birthDate);
+    if(!names.nom || !names.prenom || !birth) return '';
+    return stableId('player', names.prenom, names.nom, birth);
   }
 
   function isOfficialCategory(value){
@@ -150,8 +156,16 @@
     const categorie = isOfficialCategory(storedCategorie) ? storedCategorie : sourceCategory;
     const subCategory = isOfficialSubCategory(sourceSubCategory) ? sourceSubCategory : storedSubCategory;
     const team = asText(raw.team || raw.equipe || sourceCategory || normalizeTeamFromCategory(subCategory || categorie));
-    const importedId = raw.id && !String(raw.id).startsWith('manual-') ? raw.id : '';
-    const playerId = asText(raw.playerId || importedId) || stableId('player', names.nom, names.prenom, birth || 'no-birth');
+    const importedId = raw.id && !String(raw.id).startsWith('manual-') ? asText(raw.id) : '';
+    const previousId = asText(raw.playerId || importedId);
+    const generatedId = canonicalPlayerId({...raw, ...names, birth}) || stableId('player', names.prenom, names.nom, birth || 'no-birth');
+    const playerId = generatedId || previousId;
+    const legacyPlayerIds = [...new Set([
+      ...(Array.isArray(raw.legacyPlayerIds) ? raw.legacyPlayerIds : []),
+      raw.legacyPlayerId,
+      raw.oldPlayerId,
+      previousId && previousId !== playerId ? previousId : ''
+    ].map(asText).filter(Boolean))];
     const status = asText(raw.status || 'active').toLowerCase();
     const seasonHistory = raw.seasonHistory && typeof raw.seasonHistory === 'object' ? {...raw.seasonHistory} : {};
     if(sourceSeason) seasonHistory[sourceSeason] = {
@@ -166,6 +180,8 @@
       ...raw,
       id: playerId,
       playerId,
+      legacyPlayerId: legacyPlayerIds[0] || raw.legacyPlayerId || '',
+      legacyPlayerIds,
       nom: names.nom,
       prenom: names.prenom,
       displayName: displayName({...raw, nom:names.nom, prenom:names.prenom}),
@@ -345,15 +361,23 @@
       let count = 0;
       snap.forEach(docSnap => {
         const data = docSnap.data() || {};
-        if(data.playerId === fromPlayerId){
+        const directMatch = data.playerId === fromPlayerId;
+        const arrayMatch = Array.isArray(data.playerIds) && data.playerIds.includes(fromPlayerId);
+        const snapshotMatch = data.playerSnapshot && typeof data.playerSnapshot === 'object' && data.playerSnapshot.playerId === fromPlayerId;
+        if(directMatch || arrayMatch || snapshotMatch){
           count++;
-          writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
-            playerId:toPlayerId,
+          const patch = {
             mergedFromPlayerId:fromPlayerId,
             updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined,
             updatedAtIso:nowIso(),
             updatedBy:ctx.user?.uid || '',
             updatedByEmail:ctx.user?.email || ''
+          };
+          if(directMatch) patch.playerId = toPlayerId;
+          if(snapshotMatch) patch.playerSnapshot = {...data.playerSnapshot, playerId:toPlayerId};
+          if(Array.isArray(data.playerIds)) patch.playerIds = data.playerIds.map(id => id === fromPlayerId ? toPlayerId : id);
+          writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
+            ...patch
           }, {merge:true}));
         }
       });
@@ -400,7 +424,7 @@
 
   const service = {
     CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
-    stableId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
+    stableId, canonicalPlayerId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
     categorySnapshotForSeason, playerForSeason, normalizeTeamFromCategory, displayName, splitName,
     normalizePlayer, normalizePlayerForWrite, identityKey, personKey, dedupePlayers,
     readCachedPlayers, writeCache, filterPlayers,

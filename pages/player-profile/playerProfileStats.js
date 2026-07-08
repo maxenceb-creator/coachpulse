@@ -33,9 +33,21 @@
     const latestPhysical = latest(physicalTests);
     const latestTechnical = latest(technicalTests);
     const actions = countActions(matchEvents);
+    const linkedCounts = {
+      presences:attendance.length,
+      seances:sessions.length,
+      matchs:matchEvents.length,
+      testsTechniques:technicalTests.length,
+      testsAthletiques:physicalTests.length,
+      blessures:injuries.length,
+      suiviMedical:medical.length,
+      convocations:convocations.length,
+      bilansIndividuels:individualReports.length
+    };
     return {
       player,
       attendance, sessions, matchEvents, technicalTests, physicalTests, injuries, medical, convocations, individualReports,
+      linkedCounts,
       kpis:{
         presenceRate:attendance.length ? Math.round((present / attendance.length) * 100) : 0,
         sessions:attendance.length || sessions.length,

@@ -13,9 +13,26 @@
     collectionCache:{},
     seasons:[Data.currentSeason()],
     view:'overview',
-    filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]}
+    filters:{team:'', periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]}
   };
-  function player(){ return state.players.find(p => p.playerId === state.selectedPlayerId) || state.players[0] || {}; }
+  function displaySeason(){
+    return state.filters.periodMode === 'season' ? state.filters.season : Data.currentSeason();
+  }
+  function player(){
+    const selected = state.players.find(p => p.playerId === state.selectedPlayerId) || state.players[0] || {};
+    return Data.playerForSeason(selected, displaySeason());
+  }
+  function playersForTeam(){
+    return state.players.filter(p => !state.filters.team || Data.teamLabel(Data.playerForSeason(p, displaySeason())) === state.filters.team);
+  }
+  async function ensureSelectedPlayer(){
+    const visible = playersForTeam();
+    if(!visible.length) return;
+    if(!visible.some(p => p.playerId === state.selectedPlayerId)){
+      state.selectedPlayerId = visible[0].playerId;
+      await loadSelected();
+    }
+  }
   async function loadPlayerData(playerId){
     const selected = state.players.find(p => p.playerId === playerId) || {playerId};
     if(state.collectionCache[playerId]) return state.collectionCache[playerId];
@@ -44,6 +61,12 @@
     }
   }
   function bind(){
+    document.getElementById('teamFilter')?.addEventListener('change', async event => {
+      state.filters.team = event.target.value;
+      state.filters.comparePlayerIds = state.filters.comparePlayerIds.filter(id => playersForTeam().some(p => p.playerId === id));
+      await ensureSelectedPlayer();
+      await render();
+    });
     document.getElementById('playerSelect')?.addEventListener('change', async event => { state.selectedPlayerId = event.target.value; await loadSelected(); await render(); });
     document.getElementById('periodMode')?.addEventListener('change', async event => { state.filters.periodMode = event.target.value; await render(); });
     document.getElementById('seasonSelect')?.addEventListener('change', async event => { state.filters.season = event.target.value; await render(); });
@@ -52,10 +75,10 @@
     document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', async () => { state.view = btn.dataset.view; await render(); }));
     document.getElementById('compareSeasonA')?.addEventListener('change', async event => { state.filters.compareSeasonA = event.target.value; await render(); });
     document.getElementById('compareSeasonB')?.addEventListener('change', async event => { state.filters.compareSeasonB = event.target.value; await render(); });
-    document.getElementById('comparePlayers')?.addEventListener('change', async event => {
-      state.filters.comparePlayerIds = [...event.target.selectedOptions].map(option => option.value);
+    document.querySelectorAll('[data-compare-player]').forEach(input => input.addEventListener('change', async () => {
+      state.filters.comparePlayerIds = [...document.querySelectorAll('[data-compare-player]:checked')].map(option => option.value);
       await render();
-    });
+    }));
   }
   function collectionsForPlayer(playerId){
     const base = state.collectionCache[playerId]?.collections || state.collections || {};
@@ -84,6 +107,7 @@
   }
   async function render(){
     if(!state.players.length){ root.innerHTML = '<div class="empty-state">Aucune joueuse disponible dans la base commune.</div>'; return; }
+    await ensureSelectedPlayer();
     const selectedPlayer = player();
     const period = Filters.periodFromState(state);
     const selectedCollections = collectionsForPlayer(state.selectedPlayerId);
@@ -92,7 +116,9 @@
     if(state.view === 'timeline') body = `<section class="grid"><article class="panel"><h2>Présences et charge</h2>${summary.attendance.length ? Render.renderEvents(summary.attendance,'status','minutes') : '<div class="empty-state">Aucune présence sur cette période.</div>'}</article><article class="panel"><h2>Evolution saison</h2>${Render.renderEvents([...summary.physicalTests,...summary.technicalTests,...summary.matchEvents,...summary.injuries],'source','value')}</article></section>`;
     if(state.view === 'seasonCompare') body = Render.renderSeasonCompare(Compare.compareSeasons(selectedPlayer, selectedCollections, state), state);
     if(state.view === 'playerCompare'){
-      const selectedIds = state.filters.comparePlayerIds.length ? state.filters.comparePlayerIds : [state.selectedPlayerId];
+      if(!state.filters.comparePlayerIds.length) state.filters.comparePlayerIds = [state.selectedPlayerId];
+      const teamIds = new Set(playersForTeam().map(p => p.playerId));
+      const selectedIds = state.filters.comparePlayerIds.filter(id => teamIds.has(id) || id === state.selectedPlayerId);
       const comparePlayers = state.players.filter(p => selectedIds.includes(p.playerId));
       await Promise.all(comparePlayers.map(p => loadPlayerData(p.playerId)));
       const collectionMap = Object.fromEntries(comparePlayers.map(p => [p.playerId, collectionsForPlayer(p.playerId)]));

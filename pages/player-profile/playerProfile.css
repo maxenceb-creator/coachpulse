@@ -52,6 +52,9 @@ button.primary{background:linear-gradient(135deg,var(--green),var(--deep));color
 .compare-table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden}
 .compare-table th,.compare-table td{padding:9px;border-bottom:1px solid var(--line);text-align:left;font-size:12px}
 .compare-table th{background:var(--deep);color:#fff;text-transform:uppercase;font-size:10px}
+.compare-picker{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin:12px 0}
+.compare-choice{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:9px;font-size:12px;letter-spacing:0;text-transform:none;color:var(--deep)}
+.compare-choice input{width:auto}
 .trend-up{color:var(--green);font-weight:1000}.trend-down{color:var(--red);font-weight:1000}.trend-flat{color:var(--muted);font-weight:1000}
 .empty-state{padding:26px;border:1px dashed #b9c8c1;border-radius:16px;background:#fff;color:var(--muted);font-weight:900;text-align:center}
 .notice{border:1px solid rgba(37,99,235,.18);background:#eff6ff;color:#17356f;border-radius:12px;padding:10px;font-weight:900;margin-bottom:10px}
