@@ -49,10 +49,25 @@
   }
   function collectionsForPlayer(playerId){
     const base = state.collections || {};
-    const out = {};
-    Object.entries(base).forEach(([name, rows]) => {
-      out[name] = name === 'players' ? rows.filter(row => (row.playerId || row.id) === playerId) : rows.filter(row => !row.playerId || row.playerId === playerId);
-    });
+    const selected = state.players.find(p => p.playerId === playerId) || {};
+    const aliases = Data.playerAliases(selected);
+    const out = {
+      players:(base.players || []).filter(row => Data.rowMatchesPlayer(row, aliases) || aliases.includes(row.playerId || row.id)),
+      attendance:(base.attendance || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      matchEvents:(base.matchEvents || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      technicalTests:(base.technicalTests || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      physicalTests:(base.physicalTests || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      injuries:(base.injuries || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      injuryUpdates:(base.injuryUpdates || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      medicalAppointments:(base.medicalAppointments || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      rehabRoutines:(base.rehabRoutines || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      workloads:(base.workloads || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      medicalFollowUps:(base.medicalFollowUps || []).filter(row => Data.rowMatchesPlayer(row, aliases))
+    };
+    const sessionIds = new Set(out.attendance.map(row => row.sessionId).filter(Boolean));
+    out.sessions = (base.sessions || []).filter(row => sessionIds.has(row.sessionId || row.id));
+    const matchIds = new Set(out.matchEvents.map(row => row.matchId).filter(Boolean));
+    out.matches = (base.matches || []).filter(row => matchIds.has(row.matchId || row.id));
     return out;
   }
   function render(){
