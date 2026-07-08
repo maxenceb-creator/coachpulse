@@ -60,8 +60,9 @@
     const computedSub = subCategoryForSeason(player, selectedSeason);
     const subCategory = computedSub || asText(fromHistory.subCategory || player.subCategory || player.sousCategorie);
     const categorie = normalizeTeamFromCategory(subCategory || fromHistory.categorie || player.categorie || player.category);
-    const team = asText(fromHistory.team || (computedSub ? categorie : '') || player.team || player.equipe || categorie);
-    return {season:selectedSeason, categorie, subCategory, team};
+    const team = asText(fromHistory.team || (computedSub ? defaultClubTeamFromSubCategory(subCategory) : '') || player.team || player.equipe || defaultClubTeamFromSubCategory(subCategory) || categorie);
+    const teamId = canonicalTeamId(team || categorie);
+    return {season:selectedSeason, categorie, subCategory, team, teamId};
   }
 
   function normalizeTeamFromCategory(category){
@@ -76,6 +77,23 @@
     if(n <= 14) return 'U12-U13-U14';
     if(n <= 16) return 'U14-U15-U16';
     return 'U19';
+  }
+
+  function defaultClubTeamFromSubCategory(value){
+    const c = normalizeUpper(value);
+    if(c.includes('R1') || c.includes('SENIOR') || c.includes('SÉNIOR')) return 'R1';
+    const n = Number((c.match(/\d+/) || [])[0] || 0);
+    if(!n) return '';
+    if(n <= 7) return 'U7 A';
+    if(n <= 9) return 'U9 A';
+    if(n <= 11) return 'U11 A';
+    if(n <= 13) return 'U13 A';
+    if(n <= 16) return 'U16 A';
+    return 'U19';
+  }
+
+  function canonicalTeamId(value){
+    return stableId('team', asText(value).toUpperCase().replace(/\s+/g, ' ') || 'global');
   }
 
   function displayName(player){
@@ -155,7 +173,7 @@
     const sourceCategory = normalizeTeamFromCategory(sourceSubCategory || storedCategorie);
     const categorie = isOfficialCategory(storedCategorie) ? storedCategorie : sourceCategory;
     const subCategory = isOfficialSubCategory(sourceSubCategory) ? sourceSubCategory : storedSubCategory;
-    const team = asText(raw.team || raw.equipe || sourceCategory || normalizeTeamFromCategory(subCategory || categorie));
+    const team = asText(raw.team || raw.equipe || defaultClubTeamFromSubCategory(subCategory || categorie) || sourceCategory || normalizeTeamFromCategory(subCategory || categorie));
     const importedId = raw.id && !String(raw.id).startsWith('manual-') ? asText(raw.id) : '';
     const previousId = asText(raw.playerId || importedId);
     const generatedId = canonicalPlayerId({...raw, ...names, birth}) || stableId('player', names.prenom, names.nom, birth || 'no-birth');
@@ -188,7 +206,7 @@
       categorie: currentSnapshot.categorie || categorie,
       subCategory: currentSnapshot.subCategory || subCategory,
       team: currentSnapshot.team || team,
-      teamId: asText(raw.teamId) || stableId('team', currentSnapshot.team || team || categorie || 'global'),
+      teamId: asText(raw.teamId) || currentSnapshot.teamId || canonicalTeamId(currentSnapshot.team || team || categorie || 'global'),
       poste: asText(raw.poste || raw.position),
       numero: asText(raw.numero || raw.number),
       photo: asText(raw.photo || raw.avatar),
@@ -257,7 +275,7 @@
       categorie:snapshot.categorie || normalized.categorie,
       subCategory:snapshot.subCategory || normalized.subCategory,
       team:snapshot.team || normalized.team,
-      teamId:stableId('team', snapshot.team || normalized.team || snapshot.categorie || normalized.categorie || 'global'),
+      teamId:snapshot.teamId || canonicalTeamId(snapshot.team || normalized.team || snapshot.categorie || normalized.categorie || 'global'),
       currentSeason:snapshot.season || normalized.currentSeason,
       seasonStart:snapshot.season ? `${snapshot.season.slice(0,4)}-07-01` : normalized.seasonStart,
       seasonEnd:snapshot.season ? `${snapshot.season.slice(5)}-06-30` : normalized.seasonEnd
@@ -424,8 +442,8 @@
 
   const service = {
     CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
-    stableId, canonicalPlayerId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
-    categorySnapshotForSeason, playerForSeason, normalizeTeamFromCategory, displayName, splitName,
+    stableId, canonicalPlayerId, canonicalTeamId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
+    categorySnapshotForSeason, playerForSeason, normalizeTeamFromCategory, defaultClubTeamFromSubCategory, displayName, splitName,
     normalizePlayer, normalizePlayerForWrite, identityKey, personKey, dedupePlayers,
     readCachedPlayers, writeCache, filterPlayers,
     listPlayers, readFirestorePlayers, getPlayer, savePlayer, archivePlayer,

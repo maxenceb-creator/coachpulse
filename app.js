@@ -634,6 +634,7 @@ function normalizeTeamFromCategory(category){
 function normalizePlayer(raw={}){
   const service = playersService();
   if(service?.normalizePlayer) return service.normalizePlayer(raw);
+  const teamService = teamsService();
   const full = String(raw.joueuse || raw.name || raw.fullName || '').trim();
   let prenom = String(raw.prenom || raw.firstName || '').trim();
   let nom = String(raw.nom || raw.lastName || '').trim();
@@ -656,7 +657,7 @@ function normalizePlayer(raw={}){
   const playerId = (nom || prenom) ? stableFirestoreId('player', prenom, nom, birth || 'no-birth') : (raw.playerId || importedId);
   return {
     playerId, id:playerId, prenom:String(prenom || '').toUpperCase(), nom:String(nom || '').toUpperCase(), displayName:[prenom, String(nom || '').toUpperCase()].filter(Boolean).join(' ').trim().toUpperCase(),
-    categorie, subCategory, team, teamId:stableFirestoreId('team', team || categorie || 'global'),
+    categorie, subCategory, team, teamId:teamService?.canonicalTeamId?.(team || categorie) || stableFirestoreId('team', team || categorie || 'global'),
     foot:raw.foot || raw.pied || '', birth, dateNaissance:raw.dateNaissance || birth, photo:raw.photo || '',
     source:raw.source || 'Migration CoachPulse', status:raw.status || 'ACTIVE'
   };
@@ -700,7 +701,8 @@ function collectCentralFirestoreDocs(){
   const methodoEvents = parseStoredJson('methodo_events_v24', []);
   methodoEvents.filter(e => String(e?.type || e?.title || e?.theme || '').toLowerCase().includes('séance') || String(e?.type || '').toLowerCase().includes('seance')).forEach(e => {
     const sessionId = e.sessionId || stableFirestoreId('methodologie', e.date || e.start || '', e.team || e.category || '', e.title || e.theme || 'seance');
-    addDoc(docs,'sessions',sessionId,{sessionId,date:e.date || e.start || '',type:'Séance',theme:e.title || e.theme || e.text || 'Séance',categories:e.categories || e.category || [],team:e.team || '',source:'Méthodologie'});
+    const teamId = teamsService()?.canonicalTeamId?.(e.team || e.category || '') || (e.team || e.category ? stableFirestoreId('team', e.team || e.category) : '');
+    addDoc(docs,'sessions',sessionId,{sessionId,date:e.date || e.start || '',type:'Séance',theme:e.title || e.theme || e.text || 'Séance',categories:e.categories || e.category || [],team:e.team || '',teamId,source:'Méthodologie'});
   });
   rows.forEach((row, idx) => {
     const player = playerByName.get(stableFirestoreId(row.joueuse, row.categorie, row.sousCategorie)) || normalizePlayer({joueuse:row.joueuse,categorie:row.categorie,subCategory:row.sousCategorie,source:'Tests techniques'});
@@ -708,31 +710,35 @@ function collectCentralFirestoreDocs(){
     addDoc(docs,'technicalTests',row.testId || stableFirestoreId('technical', player.playerId, row.date, row.saison, idx), {
       testId:row.testId || stableFirestoreId('technical', player.playerId, row.date, row.saison, idx),
       playerId:player.playerId, playerName:row.joueuse || player.displayName, date:row.date || '', season:row.saison || '',
-      categorie:row.categorie || player.categorie || '', subCategory:row.sousCategorie || player.subCategory || '',
+      categorie:row.categorie || player.categorie || '', subCategory:row.sousCategorie || player.subCategory || '', team:player.team || '', teamId:player.teamId || '',
       tests:row.tests || {}, objectifs:row.objectifs || {}, source:row.source || 'Tests techniques'
     });
   });
   parseStoredJson('coachpulse:athleticTests', []).filter(Boolean).forEach((row, idx) => {
     const testId = row.physicalTestId || row.testId || row.id || stableFirestoreId('physicalTest', row.playerId, row.date, row.season, idx);
+    const teamId = row.teamId || teamsService()?.canonicalTeamId?.(row.team || row.equipe || '') || '';
     addDoc(docs,'physicalTests',testId, {
       ...row,
       id:testId,
       physicalTestId:testId,
       testId,
+      teamId,
       source:row.source || 'Tests athlétiques'
     });
   });
   const stats = parseStoredJson('coachStatsV170', null);
   const matches = Array.isArray(stats?.matches) ? stats.matches : (Array.isArray(stats) ? stats.filter(x => x?.score || x?.events || x?.actions) : []);
   matches.forEach((m, idx) => {
-    const matchId = m.matchId || m.id || stableFirestoreId('match', m.date, m.team || m.equipe, m.opponent || m.adversaire, idx);
-    addDoc(docs,'matches',matchId,{matchId,date:m.date || '',team:m.team || m.equipe || '',opponent:m.opponent || m.adversaire || '',score:m.score || '',competition:m.competition || '',source:'Coach Stats'});
+    const matchTeam = m.team || m.equipe || '';
+    const matchTeamId = teamsService()?.canonicalTeamId?.(matchTeam) || (matchTeam ? stableFirestoreId('team', matchTeam) : '');
+    const matchId = m.matchId || m.id || stableFirestoreId('match', m.date, matchTeam, m.opponent || m.adversaire, idx);
+    addDoc(docs,'matches',matchId,{matchId,date:m.date || '',team:matchTeam,teamId:matchTeamId,opponent:m.opponent || m.adversaire || '',score:m.score || '',competition:m.competition || '',source:'Coach Stats'});
     const actions = Array.isArray(m.events) ? m.events : (Array.isArray(m.actions) ? m.actions : []);
     actions.forEach((ev, evIdx) => {
       const player = ev.playerId ? playerIndex.get(ev.playerId) : normalizePlayer({joueuse:ev.player || ev.joueuse || '', categorie:ev.categorie || '', source:'Coach Stats'});
       addDoc(docs,'matchEvents',ev.eventId || stableFirestoreId('event', matchId, ev.minute, ev.action || ev.type, evIdx), {
         eventId:ev.eventId || stableFirestoreId('event', matchId, ev.minute, ev.action || ev.type, evIdx),
-        matchId, playerId:ev.playerId || player.playerId || '', team:ev.team || m.team || '', minute:ev.minute || '', action:ev.action || ev.type || '', zone:ev.zone || '', source:'Coach Stats'
+        matchId, playerId:ev.playerId || player.playerId || '', team:ev.team || matchTeam || '', teamId:teamsService()?.canonicalTeamId?.(ev.team || matchTeam) || matchTeamId, minute:ev.minute || '', action:ev.action || ev.type || '', zone:ev.zone || '', source:'Coach Stats'
       });
     });
   });
@@ -1128,7 +1134,7 @@ function buildImportPlan(rows, options={}){
     const status = normalizeImportText(f.status).toUpperCase();
     if(IMPORT_STATUS_CODES.has(status) || f.minutes || f.theme || f.sessionType){
       const sessionId = stableFirestoreId('session', date || 'date-inconnue', f.theme || f.sessionType || 'seance', player.teamId);
-      addDoc(plan,'sessions',sessionId,{sessionId,date,type:f.sessionType || 'Séance',theme:f.theme || 'Import présence',team:player.team,categories:[player.categorie].filter(Boolean),source:plan.source});
+      addDoc(plan,'sessions',sessionId,{sessionId,date,type:f.sessionType || 'Séance',theme:f.theme || 'Import présence',team:player.team,teamId:player.teamId,categories:[player.categorie].filter(Boolean),source:plan.source});
       addDoc(plan,'attendance',stableFirestoreId('attendance',sessionId,player.playerId),{attendanceId:stableFirestoreId('attendance',sessionId,player.playerId),sessionId,playerId:player.playerId,date,status:status || 'P',minutes:Number(f.minutes || 0),note:'',source:plan.source});
     }
     Object.entries(mapped.extras).forEach(([header,value]) => {
@@ -1138,7 +1144,7 @@ function buildImportPlan(rows, options={}){
       const upper = val.toUpperCase();
       if(headerDate && IMPORT_STATUS_CODES.has(upper)){
         const sessionId = stableFirestoreId('session', headerDate, 'presence', player.teamId);
-        addDoc(plan,'sessions',sessionId,{sessionId,date:headerDate,type:'Séance',theme:'Import présence',team:player.team,categories:[player.categorie].filter(Boolean),source:plan.source});
+        addDoc(plan,'sessions',sessionId,{sessionId,date:headerDate,type:'Séance',theme:'Import présence',team:player.team,teamId:player.teamId,categories:[player.categorie].filter(Boolean),source:plan.source});
         addDoc(plan,'attendance',stableFirestoreId('attendance',sessionId,player.playerId),{attendanceId:stableFirestoreId('attendance',sessionId,player.playerId),sessionId,playerId:player.playerId,date:headerDate,status:upper,minutes:0,note:'',source:plan.source});
       }
       const num = parseImportNumber(val);
@@ -1246,7 +1252,7 @@ async function commitImportPlan(plan){
     const player = resolvedPlayers.get(doc.playerId);
     const season = doc.season || doc.saison || seasonFromDate(doc.date || new Date());
     const snap = service?.playerForSeason && player ? service.playerForSeason(player, season) : player;
-    return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || ''} : doc;
+    return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || ''} : doc;
   }
   function remapImportedDoc(collection, doc={}){
     const resolvedPlayerId = playerIdMap.get(doc.playerId) || doc.playerId || '';
@@ -1454,7 +1460,7 @@ function applyDataHubSeasonSnapshot(doc={}, playerMap){
   const player = playerMap.get(doc.playerId);
   const season = doc.season || doc.saison || seasonFromDate(doc.date || new Date());
   const snap = service?.playerForSeason && player ? service.playerForSeason(player, season) : player;
-  return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || ''} : doc;
+  return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || ''} : doc;
 }
 function remapDataHubAttendance(item, meta, playerIdMap, playerMap){
   const base = normalizeDataHubAttendance(item, meta);
@@ -1668,14 +1674,15 @@ async function adminCreatePlayer(data={}){
   if(!guardAdminAction()) return {created:false};
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = playersService();
+  const teamService = teamsService();
   const clean = service?.normalizePlayer ? service.normalizePlayer(data) : {...data};
   clean.nom = String(clean.nom || '').trim().toUpperCase();
   clean.prenom = String(clean.prenom || '').trim().toUpperCase();
   if(!clean.nom || !clean.prenom) throw new Error('Nom et prénom obligatoires.');
   clean.categorie = String(clean.categorie || '').trim();
   clean.subCategory = String(clean.subCategory || clean.categorie || '').trim();
-  clean.team = String(clean.team || normalizeTeamFromCategory(clean.categorie || clean.subCategory) || '').trim();
-  clean.teamId = clean.team ? stableFirestoreId('team', clean.team) : '';
+  clean.team = String(clean.team || service?.defaultClubTeamFromSubCategory?.(clean.subCategory || clean.categorie) || normalizeTeamFromCategory(clean.categorie || clean.subCategory) || '').trim();
+  clean.teamId = clean.team ? (teamService?.canonicalTeamId?.(clean.team) || stableFirestoreId('team', clean.team)) : '';
   clean.birth = String(clean.birth || clean.dateNaissance || '').trim();
   if(!clean.birth) throw new Error('Date de naissance obligatoire pour générer un playerId unique.');
   clean.dateNaissance = clean.birth;
@@ -1727,14 +1734,15 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   if(!playerId) throw new Error('playerId manquant.');
   const service = playersService();
+  const teamService = teamsService();
   const ref = firebaseFns.doc(db, 'players', playerId);
   const snap = service?.getPlayer ? null : await firebaseFns.getDoc(ref);
   const before = service?.getPlayer ? (await service.getPlayer(playerId, firestoreServiceContext()) || {}) : (snap.exists() ? {id:snap.id, playerId:snap.id, ...snap.data()} : {});
   const clean = {...updates};
   if(clean.nom) clean.nom = String(clean.nom).trim().toUpperCase();
   if(clean.prenom) clean.prenom = String(clean.prenom).trim();
-  if(clean.categorie && !clean.team) clean.team = normalizeTeamFromCategory(clean.categorie);
-  if(clean.team) clean.teamId = stableFirestoreId('team', clean.team);
+  if((clean.categorie || clean.subCategory) && !clean.team) clean.team = service?.defaultClubTeamFromSubCategory?.(clean.subCategory || clean.categorie) || normalizeTeamFromCategory(clean.categorie || clean.subCategory);
+  if(clean.team) clean.teamId = teamService?.canonicalTeamId?.(clean.team) || stableFirestoreId('team', clean.team);
   clean.displayName = [String(clean.nom ?? before.nom ?? '').toUpperCase(), String(clean.prenom ?? before.prenom ?? '')].filter(Boolean).join(' ').trim();
   clean.updatedAt = firebaseFns.serverTimestamp();
   clean.updatedAtIso = new Date().toISOString();
@@ -1778,7 +1786,8 @@ async function adminExportPlayers(format='json'){
 }
 const DEFAULT_DB_OPTIONS = {
   categories:['U6-U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'],
-  subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','R1']
+  subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','R1'],
+  teams:['U7 A','U9 A','U11 A','U13 A','U13 B','U16 A','U19','R1']
 };
 async function adminListTeamsAndSettings(){
   if(!guardAdminAction()) return {teams:[], settings:DEFAULT_DB_OPTIONS};
@@ -1786,7 +1795,7 @@ async function adminListTeamsAndSettings(){
   const service = teamsService();
   if(service?.listTeams && service?.readDatabaseOptions){
     return {
-      teams:await service.listTeams(firestoreServiceContext()),
+      teams:await service.listTeams(firestoreServiceContext(), {includeArchived:true}),
       settings:await service.readDatabaseOptions(firestoreServiceContext())
     };
   }
@@ -1801,21 +1810,22 @@ async function adminListTeamsAndSettings(){
     teams,
     settings:{
       categories:Array.isArray(settings.categories) && settings.categories.length ? settings.categories : DEFAULT_DB_OPTIONS.categories,
-      subCategories:Array.isArray(settings.subCategories) && settings.subCategories.length ? settings.subCategories : DEFAULT_DB_OPTIONS.subCategories
+      subCategories:Array.isArray(settings.subCategories) && settings.subCategories.length ? settings.subCategories : DEFAULT_DB_OPTIONS.subCategories,
+      teams:Array.isArray(settings.teams) && settings.teams.length ? settings.teams : DEFAULT_DB_OPTIONS.teams
     }
   };
 }
 async function adminSaveTeam(team={}){
   if(!guardAdminAction()) return;
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const service = teamsService();
   const name = String(team.name || '').trim();
   if(!name) throw new Error('Nom d’équipe obligatoire.');
-  const teamId = team.teamId || team.id || stableFirestoreId('team', name);
+  const teamId = team.teamId || team.id || service?.canonicalTeamId?.(name) || stableFirestoreId('team', name);
   const ref = firebaseFns.doc(db, 'teams', teamId);
-  const service = teamsService();
   let before = {};
   let created = false;
-  let after = {teamId, name, category:team.category || '', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''};
+  let after = {teamId, name, category:team.category || '', status:team.status || 'active', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''};
   if(service?.saveTeam){
     const result = await service.saveTeam(after, firestoreServiceContext());
     before = result.before || {};
@@ -1829,6 +1839,27 @@ async function adminSaveTeam(team={}){
   }
   await writeChangeLog({collectionName:'teams', documentId:teamId, action:created?'create':'update', before, after:{...before,...after}, changes:objectDiff(before, after, ['name','category']), summary:`Équipe ${created?'créée':'modifiée'} : ${name}`});
   return {teamId, name};
+}
+async function adminArchiveTeam(teamId, archived=true){
+  if(!guardAdminAction()) return;
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const service = teamsService();
+  if(!teamId) throw new Error('teamId obligatoire.');
+  let before = {};
+  let after = {};
+  if(service?.archiveTeam){
+    const result = await service.archiveTeam(teamId, archived, firestoreServiceContext());
+    before = result.before || {};
+    after = result.team || {};
+  }else{
+    const ref = firebaseFns.doc(db, 'teams', teamId);
+    const snap = await firebaseFns.getDoc(ref);
+    before = snap.exists() ? {id:snap.id, teamId:snap.id, ...snap.data()} : {};
+    after = {...before, teamId, status:archived ? 'archived' : 'active', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''};
+    await firebaseFns.setDoc(ref, after, {merge:true});
+  }
+  await writeChangeLog({collectionName:'teams', documentId:teamId, action:archived?'archive':'reactivate', before, after:{...before,...after}, changes:objectDiff(before, after, ['status']), summary:`Équipe ${archived?'archivée':'réactivée'} : ${after.name || before.name || teamId}`});
+  return after;
 }
 function cleanOptionList(values){
   return [...new Set((values || []).map(v => String(v || '').trim()).filter(Boolean))];
@@ -1844,13 +1875,14 @@ async function adminSaveDatabaseOptions(options={}){
     settingsId:'database-options',
     categories:cleanOptionList(options.categories),
     subCategories:cleanOptionList(options.subCategories),
+    teams:cleanOptionList(options.teams || DEFAULT_DB_OPTIONS.teams),
     updatedAt:firebaseFns.serverTimestamp(),
     updatedAtIso:new Date().toISOString(),
     updatedBy:currentUser.uid,
     updatedByEmail:currentUser.email || ''
   };
   if(!service?.saveDatabaseOptions) await firebaseFns.setDoc(ref, after, {merge:true});
-  await writeChangeLog({collectionName:'settings', documentId:'database-options', action:'update', before, after:{...before,...after}, changes:objectDiff(before, after, ['categories','subCategories']), summary:'Options catégories mises à jour'});
+  await writeChangeLog({collectionName:'settings', documentId:'database-options', action:'update', before, after:{...before,...after}, changes:objectDiff(before, after, ['categories','subCategories','teams']), summary:'Options catégories mises à jour'});
   return after;
 }
 async function updatePlayerRefsInCollection(collectionName, fromPlayerId, toPlayerId){
@@ -2265,6 +2297,11 @@ async function listPlayers(filters={}){
   const service = playersService();
   return service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
 }
+async function listTeams(filters={}){
+  const service = teamsService();
+  if(service?.listTeams && db && currentUser) return service.listTeams(firestoreServiceContext(), filters);
+  return service?.officialTeamRows ? service.officialTeamRows() : [];
+}
 function seasonFromDate(date=new Date()){
   const service = playersService();
   if(service?.seasonFromDate) return service.seasonFromDate(date);
@@ -2281,7 +2318,8 @@ function playerForSeason(player={}, season=currentSeason()){
 function categorySnapshotForSeason(player={}, season=currentSeason()){
   const service = playersService();
   if(service?.categorySnapshotForSeason) return service.categorySnapshotForSeason(player, season);
-  return {season, categorie:player.categorie || '', subCategory:player.subCategory || player.sousCategorie || '', team:player.team || player.categorie || ''};
+  const team = player.team || player.categorie || '';
+  return {season, categorie:player.categorie || '', subCategory:player.subCategory || player.sousCategorie || '', team, teamId:teamsService()?.canonicalTeamId?.(team) || (team ? stableFirestoreId('team', team) : '')};
 }
 async function getPlayer(playerId){
   if(!playerId) return null;
@@ -2320,6 +2358,7 @@ async function medicalSaveInjury(injury={}){
     categorie:seasonalPlayer.categorie || injury.playerSnapshot?.categorie || '',
     subCategory:seasonalPlayer.subCategory || seasonalPlayer.sousCategorie || injury.playerSnapshot?.subCategory || '',
     team:seasonalPlayer.team || injury.playerSnapshot?.team || '',
+    teamId:seasonalPlayer.teamId || injury.playerSnapshot?.teamId || '',
     photo:seasonalPlayer.photo || injury.playerSnapshot?.photo || '',
     poste:seasonalPlayer.poste || injury.playerSnapshot?.poste || ''
   } : (injury.playerSnapshot || {});
@@ -2443,6 +2482,7 @@ async function athleticSaveTest(test={}){
     categorie:seasonPlayer.categorie || '',
     subCategory:seasonPlayer.subCategory || '',
     team:seasonPlayer.team || '',
+    teamId:seasonPlayer.teamId || '',
     photo:seasonPlayer.photo || ''
   };
   const physicalTestId = test.physicalTestId || test.testId || stableFirestoreId('physicalTest', canonicalPlayerId, date, season);
@@ -2522,7 +2562,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, playerForSeason, categorySnapshotForSeason, listPlayers, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, playerForSeason, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord});
 async function syncCloud(manual=false){
   if(applyingCloud) return;

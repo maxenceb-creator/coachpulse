@@ -363,7 +363,7 @@ renderFilters();installFilterEvents();renderAll();renderCalendar();
   function slug(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"joueuse"}
   function personKey(p){return [p.nom||p.lastName,p.prenom||p.firstName].map(x=>slug(x)).join("|")}
   function teamCategoryFromSubCategory(value){const raw=String(value||"").toUpperCase().replace(/\s+/g,"");if(raw==="R1"||raw.includes("SENIOR")||raw.includes("SÉNIOR"))return "R1";const n=Number((raw.match(/\d+/)||[])[0]||0);if(!n)return "";if(n<=7)return "U6-U7";if(n<=9)return "U8-U9";if(n<=11)return "U10-U11";if(n<=14)return "U12-U13-U14";if(n<=16)return "U14-U15-U16";return "U19"}
-  function normalizeCategory(p){const raw=p.categorie||p.category||p.team||"";return /^U([1-9]|1[0-9])$/i.test(String(raw).trim())?teamCategoryFromSubCategory(raw):(raw||teamCategoryFromSubCategory(p.subCategory||p.sousCategorie))}
+  function normalizeCategory(p){const raw=p.categorie||p.category||"";return /^U([1-9]|1[0-9])$/i.test(String(raw).trim())?teamCategoryFromSubCategory(raw):(raw||teamCategoryFromSubCategory(p.subCategory||p.sousCategorie))}
   function normalizeSubCategory(p){return p.subCategory||p.sousCategorie||(/^U([1-9]|1[0-9])$/i.test(String(p.categorie||p.category||"").trim())?p.categorie||p.category:"")}
   function displayUpperName(p){return [p.prenom,p.nom].filter(Boolean).join(" ").toUpperCase()}
   function toPresencePlayer(p,existing){
@@ -379,6 +379,7 @@ renderFilters();installFilterEvents();renderAll();renderCalendar();
       subCategory,
       sousCategorie:subCategory,
       team:p.team||existing?.team||"",
+      teamId:p.teamId||existing?.teamId||"",
       photo:p.photo||existing?.photo||"",
       source:"players-central"
     };

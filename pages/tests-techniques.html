@@ -190,6 +190,7 @@ document.addEventListener('DOMContentLoaded',init);
       categorieListe:categoryList,
       sousCategorie:subCategory||categoryList,
       equipe:p.team||existing?.equipe||categoryList,
+      teamId:p.teamId||existing?.teamId||"",
       nationalite:p.nationalite||p.nationality||existing?.nationalite||"France",
       drapeau:existing?.drapeau||"🇫🇷",
       meilleurPiedLabel:p.foot||existing?.meilleurPiedLabel||"",

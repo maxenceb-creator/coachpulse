@@ -5,9 +5,20 @@
   const COLLECTION = 'teams';
   const SETTINGS_COLLECTION = 'settings';
   const OPTIONS_ID = 'database-options';
+  const OFFICIAL_TEAMS = [
+    {name:'U7 A', category:'U6-U7', subCategories:['U6','U7']},
+    {name:'U9 A', category:'U8-U9', subCategories:['U8','U9']},
+    {name:'U11 A', category:'U10-U11', subCategories:['U10','U11']},
+    {name:'U13 A', category:'U12-U13', subCategories:['U12','U13']},
+    {name:'U13 B', category:'U12-U13', subCategories:['U12','U13']},
+    {name:'U16 A', category:'U14-U15-U16', subCategories:['U14','U15','U16']},
+    {name:'U19', category:'U19', subCategories:['U17','U18','U19']},
+    {name:'R1', category:'R1', subCategories:['R1']}
+  ];
   const DEFAULT_DB_OPTIONS = {
-    categories:['U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'],
-    subCategories:['U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U19','R1']
+    categories:['U6-U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'],
+    subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','R1'],
+    teams:OFFICIAL_TEAMS.map(team => team.name)
   };
 
   function asText(value){ return String(value ?? '').trim(); }
@@ -24,9 +35,45 @@
     return [...new Set((values || []).map(v => asText(v)).filter(Boolean))];
   }
 
+  function normalizeTeamName(value){
+    return asText(value).toUpperCase().replace(/\s+/g, ' ');
+  }
+
+  function canonicalTeamId(name){
+    return stableId('team', normalizeTeamName(name));
+  }
+
+  function defaultTeamForSubCategory(value){
+    const raw = normalizeTeamName(value);
+    if(raw === 'R1' || raw.includes('SENIOR') || raw.includes('SÉNIOR')) return 'R1';
+    const n = Number((raw.match(/\d+/) || [])[0] || 0);
+    if(!n) return '';
+    if(n <= 7) return 'U7 A';
+    if(n <= 9) return 'U9 A';
+    if(n <= 11) return 'U11 A';
+    if(n <= 13) return 'U13 A';
+    if(n <= 16) return 'U16 A';
+    return 'U19';
+  }
+
+  function officialTeamRows(){
+    return OFFICIAL_TEAMS.map(team => normalizeTeam({
+      ...team,
+      teamId:canonicalTeamId(team.name),
+      source:'CoachPulse officiel',
+      status:'active'
+    }));
+  }
+
+  function mergeWithOfficialTeams(teams=[]){
+    const byId = new Map(officialTeamRows().map(team => [team.teamId, team]));
+    teams.map(normalizeTeam).forEach(team => byId.set(team.teamId, {...(byId.get(team.teamId) || {}), ...team}));
+    return [...byId.values()].sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr', {numeric:true}));
+  }
+
   function normalizeTeam(raw={}){
-    const name = asText(raw.name || raw.team || raw.equipe);
-    const teamId = asText(raw.teamId || raw.id) || stableId('team', name || raw.category || 'global');
+    const name = normalizeTeamName(raw.name || raw.team || raw.equipe);
+    const teamId = asText(raw.teamId || raw.id) || canonicalTeamId(name || raw.category || 'global');
     return {
       ...raw,
       id:teamId,
@@ -58,12 +105,13 @@
     return {firebaseFns, db};
   }
 
-  async function listTeams(ctx={}){
+  async function listTeams(ctx={}, options={}){
     const {firebaseFns, db} = firestoreContext(ctx);
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION));
     const teams = [];
     snap.forEach(docSnap => teams.push(normalizeTeam({id:docSnap.id, teamId:docSnap.id, ...docSnap.data()})));
-    return teams.sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
+    const merged = mergeWithOfficialTeams(teams);
+    return options.includeArchived ? merged : merged.filter(team => team.status !== 'archived');
   }
 
   async function getTeam(teamId, ctx={}){
@@ -87,6 +135,17 @@
     return {team:clean, before, created:!before};
   }
 
+  async function archiveTeam(teamId, archived=true, ctx={}){
+    const {firebaseFns, db} = firestoreContext(ctx);
+    const ref = firebaseFns.doc(db, COLLECTION, teamId);
+    const beforeSnap = await firebaseFns.getDoc(ref);
+    const before = beforeSnap.exists() ? normalizeTeam({id:beforeSnap.id, teamId:beforeSnap.id, ...beforeSnap.data()}) : officialTeamRows().find(team => team.teamId === teamId) || null;
+    if(!before) throw new Error('Équipe introuvable.');
+    const clean = normalizeTeamForWrite({...before, status:archived ? 'archived' : 'active'}, {firebaseFns, user:ctx.user});
+    await firebaseFns.setDoc(ref, clean, {merge:true});
+    return {team:clean, before};
+  }
+
   async function readDatabaseOptions(ctx={}){
     if(!ctx.firebaseFns || !ctx.db) return {...DEFAULT_DB_OPTIONS};
     const {firebaseFns, db} = firestoreContext(ctx);
@@ -94,7 +153,8 @@
     const data = snap.exists() ? snap.data() : {};
     return {
       categories:Array.isArray(data.categories) && data.categories.length ? data.categories : DEFAULT_DB_OPTIONS.categories,
-      subCategories:Array.isArray(data.subCategories) && data.subCategories.length ? data.subCategories : DEFAULT_DB_OPTIONS.subCategories
+      subCategories:Array.isArray(data.subCategories) && data.subCategories.length ? data.subCategories : DEFAULT_DB_OPTIONS.subCategories,
+      teams:Array.isArray(data.teams) && data.teams.length ? data.teams : DEFAULT_DB_OPTIONS.teams
     };
   }
 
@@ -104,6 +164,7 @@
       settingsId:OPTIONS_ID,
       categories:cleanOptionList(options.categories),
       subCategories:cleanOptionList(options.subCategories),
+      teams:cleanOptionList(options.teams || DEFAULT_DB_OPTIONS.teams),
       updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined,
       updatedAtIso:nowIso(),
       updatedBy:ctx.user?.uid || '',
@@ -114,9 +175,10 @@
   }
 
   const service = {
-    COLLECTION, SETTINGS_COLLECTION, OPTIONS_ID, DEFAULT_DB_OPTIONS,
-    stableId, cleanOptionList, normalizeTeam, normalizeTeamForWrite,
-    listTeams, getTeam, saveTeam, readDatabaseOptions, saveDatabaseOptions
+    COLLECTION, SETTINGS_COLLECTION, OPTIONS_ID, OFFICIAL_TEAMS, DEFAULT_DB_OPTIONS,
+    stableId, canonicalTeamId, defaultTeamForSubCategory, cleanOptionList,
+    officialTeamRows, mergeWithOfficialTeams, normalizeTeam, normalizeTeamForWrite,
+    listTeams, getTeam, saveTeam, archiveTeam, readDatabaseOptions, saveDatabaseOptions
   };
 
   global.CoachPulseTeamsService = service;

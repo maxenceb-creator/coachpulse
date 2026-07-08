@@ -138,7 +138,7 @@ function selectedPlayer(){return players.find(p=>playerId(p)===$('#playerFilter'
 function playerName(p){return upper([p?.prenom||p?.firstName, p?.nom||p?.lastName].filter(Boolean).join(' ')||p?.displayName||p?.playerName)}
 function playerSub(p){return p?.subCategory||p?.sousCategorie||''}
 function playerCat(p){return p?.categorie||p?.category||p?.team||''}
-function normalizePlayer(p){return {...p,displayName:playerName(p),categorie:playerCat(p),subCategory:playerSub(p),team:p.team||playerCat(p)}}
+function normalizePlayer(p){return {...p,displayName:playerName(p),categorie:playerCat(p),subCategory:playerSub(p),team:p.team||playerCat(p),teamId:p.teamId||''}}
 function num(v){const n=Number(String(v??'').replace(',','.'));return Number.isFinite(n)?n:null}
 function fmt(v,d=1){const n=num(v);return n==null?'-':n.toLocaleString('fr-FR',{maximumFractionDigits:d})}
 function hasValue(v){return num(v)!=null}
