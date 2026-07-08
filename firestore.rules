@@ -165,7 +165,7 @@ service cloud.firestore {
           && request.auth.token.email != null
           && (
             request.auth.token.email.matches('.*maxence\\.boisdron.*')
-            || request.auth.token.email.matches('.*sylvainostard.*')
+            || request.auth.token.email == 'sylvain.ostard@gmail.com'
           )
           && request.resource.data.status == 'ACTIVE'
         );

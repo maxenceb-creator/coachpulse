@@ -311,7 +311,7 @@ function isSeedAdminEmail(email=''){
   const value = String(email || '').toLowerCase();
   return [
     'maxence.boisdron',
-    'sylvainostard'
+    'sylvain.ostard@gmail.com'
   ].some(fragment => value.includes(fragment));
 }
 
