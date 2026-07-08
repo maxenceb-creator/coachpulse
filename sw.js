@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-46-20260708-admin-access-repair';
+const CACHE_NAME = 'coachpulse-v6-4-47-20260708-admin-seed-allowlist';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',

@@ -309,7 +309,10 @@ async function loadFirebaseFns(){
 
 function isSeedAdminEmail(email=''){
   const value = String(email || '').toLowerCase();
-  return value.includes('maxence.boisdron') || value.endsWith('@asse.fr');
+  return [
+    'maxence.boisdron',
+    'sylvainostard'
+  ].some(fragment => value.includes(fragment));
 }
 
 function isAdminLikeProfile(profile={}){
