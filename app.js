@@ -2375,6 +2375,16 @@ function localAthleticPayload(){
 function saveLocalAthleticPayload(payload){
   localStorage.setItem('coachpulse:athleticTests', JSON.stringify(Array.isArray(payload) ? payload : []));
 }
+async function bundledAthleticPayload(){
+  try{
+    const response = await fetch('data/tests-athletiques-2025-2026.json', {cache:'no-store'});
+    if(!response.ok) return [];
+    const rows = await response.json();
+    return Array.isArray(rows) ? rows : [];
+  }catch(_){
+    return [];
+  }
+}
 function normalizeAthleticToken(value){
   return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '');
 }
@@ -2709,6 +2719,8 @@ async function athleticListData(filters={}){
   if(!guardAthletic('read')) return [];
   const local = localAthleticPayload();
   const rawById = new Map();
+  const bundled = await bundledAthleticPayload();
+  bundled.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `bundled-${idx}`, row));
   local.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `local-${idx}`, row));
   if(db && currentUser){
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'physicalTests'));
