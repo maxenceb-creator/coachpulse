@@ -2048,6 +2048,119 @@ function localAthleticPayload(){
 function saveLocalAthleticPayload(payload){
   localStorage.setItem('coachpulse:athleticTests', JSON.stringify(Array.isArray(payload) ? payload : []));
 }
+function normalizeAthleticToken(value){
+  return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '');
+}
+function athleticNumber(value){
+  if(value === '' || value == null) return '';
+  const clean = String(value).replace(',', '.').replace(/[^\d.-]/g, '');
+  const n = Number(clean);
+  return Number.isFinite(n) ? n : '';
+}
+function athleticMetricKey(label='', row={}){
+  const key = normalizeAthleticToken(label || row.testName || row.testType || row.type || row.metric);
+  const unit = normalizeAthleticToken(row.unit || row.unite);
+  if(!key) return '';
+  if(key.includes('vmi') || key.includes('ift') || key.includes('3015')) return 'vmi';
+  if(key.includes('illinois') || key.includes('agilite')) return 'illinois';
+  if(key.includes('cmj') || key.includes('detente') || key.includes('jump') || key.includes('puissance')) return 'cmj';
+  if(key.includes('10m') || key.includes('vitesse10') || key.includes('sprint10')){
+    return key.includes('kmh') || unit.includes('kmh') ? 'v10kmh' : 'v10s';
+  }
+  if(key.includes('40m') || key.includes('vitesse40') || key.includes('sprint40')){
+    return key.includes('kmh') || unit.includes('kmh') ? 'v40kmh' : 'v40s';
+  }
+  if(['vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].includes(key)) return key;
+  return '';
+}
+function athleticTestsFromRow(row={}){
+  const tests = {};
+  const source = row.tests && typeof row.tests === 'object' ? row.tests : {};
+  ['vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].forEach(key => {
+    const value = athleticNumber(source[key] ?? row[key]);
+    if(value !== '') tests[key] = value;
+  });
+  const metricKey = athleticMetricKey(row.testName || row.testType || row.type || row.metric, row);
+  if(metricKey){
+    const value = athleticNumber(row.value ?? row.valeur ?? row.result ?? row.resultat ?? row.score);
+    if(value !== '') tests[metricKey] = value;
+  }
+  return tests;
+}
+function playerSearchKey(value){
+  return normalizeAthleticToken(value);
+}
+function athleticPlayerLookup(players=[]){
+  const byId = new Map();
+  const byName = new Map();
+  players.forEach(player => {
+    const id = player.playerId || player.id;
+    if(id) byId.set(id, player);
+    const names = [
+      player.displayName,
+      player.playerName,
+      `${player.prenom || ''} ${player.nom || ''}`,
+      `${player.nom || ''} ${player.prenom || ''}`
+    ].map(playerSearchKey).filter(Boolean);
+    names.forEach(name => { if(!byName.has(name)) byName.set(name, player); });
+  });
+  return {byId, byName};
+}
+function resolveAthleticPlayer(row={}, lookup={}){
+  const id = row.playerId || row.idPlayer || row.player?.playerId || row.playerSnapshot?.playerId;
+  if(id && lookup.byId?.has(id)) return lookup.byId.get(id);
+  const names = [row.playerName, row.joueuse, row.name, row.fullName, row.playerSnapshot?.displayName]
+    .map(playerSearchKey)
+    .filter(Boolean);
+  return names.map(name => lookup.byName?.get(name)).find(Boolean) || null;
+}
+function normalizeAthleticRows(rawRows=[], players=[]){
+  const service = playersService();
+  const lookup = athleticPlayerLookup(players);
+  const grouped = new Map();
+  rawRows.forEach((raw, idx) => {
+    const tests = athleticTestsFromRow(raw);
+    if(!Object.keys(tests).length) return;
+    const rawSeason = raw.season || raw.saison || seasonFromDate(raw.date || new Date());
+    const rawPlayer = resolveAthleticPlayer(raw, lookup);
+    const playerId = rawPlayer?.playerId || rawPlayer?.id || raw.playerId || raw.playerSnapshot?.playerId || '';
+    if(!playerId) return;
+    const seasonPlayer = rawPlayer && service?.playerForSeason ? service.playerForSeason(rawPlayer, rawSeason) : (rawPlayer || raw.playerSnapshot || {});
+    const canonicalId = seasonPlayer.playerId || seasonPlayer.id || playerId;
+    const date = raw.date || raw.testDate || raw.createdAtIso?.slice?.(0, 10) || '';
+    const season = rawSeason || seasonFromDate(date || new Date());
+    const groupId = stableFirestoreId('physicalTest', canonicalId, date || 'date-inconnue', season);
+    const previous = grouped.get(groupId) || {
+      id:groupId,
+      physicalTestId:groupId,
+      testId:groupId,
+      playerId:canonicalId,
+      playerName:seasonPlayer.displayName || `${seasonPlayer.prenom || ''} ${seasonPlayer.nom || ''}`.trim() || raw.playerName || raw.joueuse || '',
+      playerSnapshot:{
+        playerId:canonicalId,
+        nom:seasonPlayer.nom || raw.playerSnapshot?.nom || '',
+        prenom:seasonPlayer.prenom || raw.playerSnapshot?.prenom || '',
+        displayName:seasonPlayer.displayName || raw.playerSnapshot?.displayName || raw.playerName || raw.joueuse || '',
+        categorie:seasonPlayer.categorie || raw.categorie || raw.category || '',
+        subCategory:seasonPlayer.subCategory || raw.subCategory || raw.sousCategorie || '',
+        team:seasonPlayer.team || raw.team || raw.equipe || '',
+        photo:seasonPlayer.photo || raw.playerSnapshot?.photo || ''
+      },
+      date,
+      season,
+      categorie:seasonPlayer.categorie || raw.categorie || raw.category || '',
+      subCategory:seasonPlayer.subCategory || raw.subCategory || raw.sousCategorie || '',
+      tests:{},
+      source:raw.source || 'Tests athlétiques'
+    };
+    grouped.set(groupId, {
+      ...previous,
+      originalIds:[...(previous.originalIds || []), raw.physicalTestId || raw.testId || raw.id || `row-${idx}`],
+      tests:{...previous.tests, ...tests}
+    });
+  });
+  return [...grouped.values()].sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
+}
 async function moduleListPlayers(){
   if(!requireAuth()) throw new Error('Connexion Firebase requise.');
   const service = playersService();
@@ -2189,17 +2302,21 @@ async function medicalExport(format='json'){
 async function athleticListData(filters={}){
   if(!guardAthletic('read')) return [];
   const local = localAthleticPayload();
-  const rows = [];
+  const rawById = new Map();
+  local.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `local-${idx}`, row));
   if(db && currentUser){
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'physicalTests'));
-    snap.forEach(docSnap => rows.push({id:docSnap.id, physicalTestId:docSnap.id, ...docSnap.data()}));
-    saveLocalAthleticPayload(rows);
-  }else rows.push(...local);
+    snap.forEach(docSnap => rawById.set(docSnap.id, {id:docSnap.id, physicalTestId:docSnap.id, ...docSnap.data(), syncPending:false}));
+    saveLocalAthleticPayload([...rawById.values()]);
+  }
+  const rawRows = [...rawById.values()];
+  const players = await listPlayers({season:'all', includeArchived:true});
+  const rows = normalizeAthleticRows(rawRows, players);
   return rows.filter(row =>
     (!filters.playerId || row.playerId === filters.playerId)
     && (!filters.season || filters.season === 'all' || row.season === filters.season)
     && (!filters.date || row.date === filters.date)
-  ).sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
+  );
 }
 async function athleticSaveTest(test={}){
   if(!guardAthletic('write')) return null;
@@ -2239,23 +2356,38 @@ async function athleticSaveTest(test={}){
     subCategory:playerSnapshot.subCategory,
     tests:test.tests || {},
     source:test.source || 'Tests athlétiques',
+    syncPending:!!(db && currentUser),
     updatedAtIso:now,
     updatedBy:currentUser?.uid || '',
     updatedByEmail:currentUser?.email || ''
   };
   if(!clean.createdAtIso) clean.createdAtIso = now;
-  if(db && currentUser){
-    await firebaseFns.setDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId), {
-      ...clean,
-      updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined
-    }, {merge:true});
-  }
   const local = localAthleticPayload();
   const idx = local.findIndex(row => (row.physicalTestId || row.testId || row.id) === physicalTestId);
   if(idx >= 0) local[idx] = {...local[idx], ...clean};
   else local.push(clean);
   saveLocalAthleticPayload(local);
   snapshotLocalData();
+  if(db && currentUser){
+    const payload = {
+      ...clean,
+      updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined
+    };
+    const firestoreWrite = firebaseFns.setDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId), payload, {merge:true})
+      .then(() => {
+        const refreshed = localAthleticPayload();
+        const localIdx = refreshed.findIndex(row => (row.physicalTestId || row.testId || row.id) === physicalTestId);
+        if(localIdx >= 0){
+          refreshed[localIdx] = {...refreshed[localIdx], syncPending:false};
+          saveLocalAthleticPayload(refreshed);
+        }
+      })
+      .catch(error => console.warn('CoachPulse athletic Firestore sync pending', error));
+    await Promise.race([
+      firestoreWrite,
+      new Promise(resolve => setTimeout(resolve, 1800))
+    ]);
+  }
   return clean;
 }
 async function athleticExport(format='json'){
