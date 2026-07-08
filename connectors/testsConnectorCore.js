@@ -6,6 +6,7 @@ const BASE_ALIASES = {
   prenom:['prenom','prénom','first name','firstname'],
   categorie:['categorie','catégorie','category','groupe','equipe','équipe','collectif'],
   sousCategorie:['sous categorie','sous catégorie','subcategory','sub category','age','annee','année'],
+  dateNaissance:['date naissance','date de naissance','naissance','birthday','birth','dob'],
   date:['date','jour','date test','test date'],
   testName:['test','nom test','test name','atelier','exercice','mesure'],
   value:['valeur','resultat','résultat','score','performance','perf'],
@@ -52,8 +53,9 @@ function playerFromMapped(mapped, rowNumber, connector){
   if(!names.nom || !names.prenom) return {error:'nom ou prénom incomplet'};
   const sousCategorie = normalizeSousCategorie(mapped.sousCategorie || mapped.categorie || '');
   const categorie = normalizeCategorie(mapped.categorie || sousCategorie || '');
-  const playerId = stableId('player', names.nom, names.prenom, categorie, sousCategorie);
-  return {type:'player', connector, rowNumber, playerId, nom:names.nom, prenom:names.prenom, categorie, sousCategorie};
+  const dateNaissance = parseDate(mapped.dateNaissance);
+  const playerId = stableId('player', names.prenom, names.nom, dateNaissance || 'no-birth');
+  return {type:'player', connector, rowNumber, playerId, nom:names.nom, prenom:names.prenom, categorie, sousCategorie, dateNaissance, birth:dateNaissance};
 }
 
 function shouldUseWideColumn(header, value, mode){
@@ -106,6 +108,7 @@ export function createTestAnalyzer({mode, connector, itemType}){
         result.anomalies.push({row:rowNumber, level:player.error.includes('incomplet')?'error':'ignored', message:`Ligne ignorée : ${player.error}`});
         return;
       }
+      if(!player.dateNaissance) result.anomalies.push({row:rowNumber, level:'warn', message:`Date de naissance manquante : rapprochement playerId moins fiable pour ${player.nom} ${player.prenom}`});
       result.items.push(player);
 
       const date = parseDate(mapped.date);

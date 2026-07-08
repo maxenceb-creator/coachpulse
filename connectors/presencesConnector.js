@@ -7,6 +7,7 @@ const PRESENCE_ALIASES = {
   prenom:['prenom','prénom','first name','firstname'],
   categorie:['categorie','catégorie','category','groupe','equipe','équipe','collectif'],
   sousCategorie:['sous categorie','sous catégorie','subcategory','sub category','age','annee','année'],
+  dateNaissance:['date naissance','date de naissance','naissance','birthday','birth','dob'],
   date:['date','jour','date seance','date séance','session date'],
   status:['statut','presence','présence','etat','état','code','absence'],
   duration:['duree','durée','duration','minutes','temps','volume'],
@@ -52,7 +53,8 @@ function playerFromMapped(mapped, rowNumber){
   if(!names.nom || !names.prenom) return {error:'nom ou prénom incomplet'};
   const sousCategorie = normalizeSousCategorie(mapped.sousCategorie || mapped.categorie || '');
   const categorie = normalizeCategorie(mapped.categorie || sousCategorie || '');
-  const playerId = stableId('player', names.nom, names.prenom, categorie, sousCategorie);
+  const dateNaissance = parseDate(mapped.dateNaissance);
+  const playerId = stableId('player', names.prenom, names.nom, dateNaissance || 'no-birth');
   return {
     type:'player',
     connector:'presences',
@@ -61,7 +63,9 @@ function playerFromMapped(mapped, rowNumber){
     nom:names.nom,
     prenom:names.prenom,
     categorie,
-    sousCategorie
+    sousCategorie,
+    dateNaissance,
+    birth:dateNaissance
   };
 }
 
@@ -144,6 +148,7 @@ export function analyzeRows(rows, context={}){
       result.anomalies.push({row:rowNumber, level:player.error.includes('incomplet')?'error':'ignored', message:`Ligne ignorée : ${player.error}`});
       return;
     }
+    if(!player.dateNaissance) result.anomalies.push({row:rowNumber, level:'warn', message:`Date de naissance manquante : rapprochement playerId moins fiable pour ${player.nom} ${player.prenom}`});
     result.items.push(player);
 
     const directDate = parseDate(mapped.date);

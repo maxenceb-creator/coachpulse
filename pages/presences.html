@@ -367,7 +367,7 @@ renderFilters();installFilterEvents();renderAll();renderCalendar();
   function normalizeSubCategory(p){return p.subCategory||p.sousCategorie||(/^U([1-9]|1[0-9])$/i.test(String(p.categorie||p.category||"").trim())?p.categorie||p.category:"")}
   function displayUpperName(p){return [p.prenom,p.nom].filter(Boolean).join(" ").toUpperCase()}
   function toPresencePlayer(p,existing){
-    const id=(existing&&existing.id)||p.playerId||p.id||("manual-"+slug((p.prenom||p.firstName||"")+"-"+(p.nom||p.lastName||"")));
+    const id=p.playerId||p.id||(existing&&existing.id)||("manual-"+slug((p.prenom||p.firstName||"")+"-"+(p.nom||p.lastName||"")));
     const subCategory=normalizeSubCategory(p)||existing?.subCategory||existing?.sousCategorie||existing?.categorie||"";
     return {
       id,

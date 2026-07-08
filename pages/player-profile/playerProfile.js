@@ -15,9 +15,15 @@
     view:'overview',
     filters:{team:'', periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]}
   };
-  function player(){ return state.players.find(p => p.playerId === state.selectedPlayerId) || state.players[0] || {}; }
+  function displaySeason(){
+    return state.filters.periodMode === 'season' ? state.filters.season : Data.currentSeason();
+  }
+  function player(){
+    const selected = state.players.find(p => p.playerId === state.selectedPlayerId) || state.players[0] || {};
+    return Data.playerForSeason(selected, displaySeason());
+  }
   function playersForTeam(){
-    return state.players.filter(p => !state.filters.team || Data.teamLabel(p) === state.filters.team);
+    return state.players.filter(p => !state.filters.team || Data.teamLabel(Data.playerForSeason(p, displaySeason())) === state.filters.team);
   }
   async function ensureSelectedPlayer(){
     const visible = playersForTeam();

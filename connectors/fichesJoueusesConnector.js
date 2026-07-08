@@ -139,8 +139,11 @@ export function analyzeRows(rows, context={}){
     const sousCategorie = normalizeSousCategorie(mapped.sousCategorie || mapped.categorie || '');
     const categorie = normalizeCategorie(mapped.categorie || sousCategorie || '');
     const dateNaissance = parseDate(mapped.dateNaissance);
-    const playerId = stableId('player', names.nom, names.prenom, categorie, sousCategorie, dateNaissance);
-    const duplicateKey = stableId(names.nom, names.prenom, categorie, sousCategorie, dateNaissance);
+    const playerId = stableId('player', names.prenom, names.nom, dateNaissance || 'no-birth');
+    const duplicateKey = stableId(names.prenom, names.nom, dateNaissance || 'no-birth');
+    if(!dateNaissance){
+      result.anomalies.push({row:row.__rowNumber || index + 1, level:'warn', message:`Date de naissance manquante : playerId provisoire pour ${names.nom} ${names.prenom}`});
+    }
     if(seen.has(duplicateKey)){
       result.anomalies.push({row:row.__rowNumber || index + 1, level:'warn', message:`Doublon potentiel dans le fichier : ${names.nom} ${names.prenom}`});
     }

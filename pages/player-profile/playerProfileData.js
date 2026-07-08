@@ -9,6 +9,9 @@
     return d.getMonth() >= 6 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
   }
   function currentSeason(){ return api().currentSeason?.() || seasonFromDate(new Date()); }
+  function playerForSeason(player={}, season=currentSeason()){
+    return api().playerForSeason ? api().playerForSeason(player, season) : player;
+  }
   function idOf(player){ return text(player?.playerId || player?.id); }
   function slug(value){
     return text(value).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -132,5 +135,5 @@
       individualReports:c.individualReports || []
     };
   }
-  global.PlayerProfileData = {api, text, seasonFromDate, currentSeason, idOf, slug, stableId, displayName, teamLabel, listPlayers, loadProfileData, normalizeCollections, playerAliases, rowPlayerIds, rowMatchesPlayer};
+  global.PlayerProfileData = {api, text, seasonFromDate, currentSeason, playerForSeason, idOf, slug, stableId, displayName, teamLabel, listPlayers, loadProfileData, normalizeCollections, playerAliases, rowPlayerIds, rowMatchesPlayer};
 })(window);

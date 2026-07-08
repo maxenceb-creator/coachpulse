@@ -5,13 +5,16 @@
   function option(value, label, selected){ return `<option value="${esc(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${esc(label || value)}</option>`; }
   function filteredPlayers(state){
     const team = state.filters.team || '';
+    const displaySeason = state.filters.periodMode === 'season' ? state.filters.season : Data.currentSeason();
     return state.players
+      .map(player => Data.playerForSeason(player, displaySeason))
       .filter(player => !team || Data.teamLabel(player) === team)
       .slice()
       .sort((a,b) => Data.displayName(a).localeCompare(Data.displayName(b), 'fr'));
   }
   function renderControls(state){
-    const teams = [...new Set(state.players.map(Data.teamLabel).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'fr'));
+    const displaySeason = state.filters.periodMode === 'season' ? state.filters.season : Data.currentSeason();
+    const teams = [...new Set(state.players.map(player => Data.teamLabel(Data.playerForSeason(player, displaySeason))).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'fr'));
     const players = filteredPlayers(state);
     const seasons = state.seasons;
     const selected = state.selectedPlayerId || players[0]?.playerId || '';
