@@ -10,15 +10,25 @@
     selectedPlayerId:'',
     payload:null,
     collections:null,
+    collectionCache:{},
     seasons:[Data.currentSeason()],
     view:'overview',
     filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]}
   };
   function player(){ return state.players.find(p => p.playerId === state.selectedPlayerId) || state.players[0] || {}; }
-  async function loadAll(){
-    const payload = await Data.loadProfileData('');
+  async function loadPlayerData(playerId){
+    const selected = state.players.find(p => p.playerId === playerId) || {playerId};
+    if(state.collectionCache[playerId]) return state.collectionCache[playerId];
+    const payload = await Data.loadProfileData(selected);
+    const collections = Data.normalizeCollections(payload);
+    state.collectionCache[playerId] = {payload, collections};
+    return state.collectionCache[playerId];
+  }
+  async function loadSelected(){
+    const loaded = await loadPlayerData(state.selectedPlayerId);
+    const payload = loaded.payload;
     state.payload = payload;
-    state.collections = Data.normalizeCollections(payload);
+    state.collections = loaded.collections;
     state.seasons = Filters.seasonsFromCollections(state.collections);
     if(!state.filters.compareSeasonA) state.filters.compareSeasonA = state.seasons[0] || Data.currentSeason();
     if(!state.filters.compareSeasonB) state.filters.compareSeasonB = Data.currentSeason();
@@ -27,28 +37,28 @@
     try{
       state.players = await Data.listPlayers();
       state.selectedPlayerId = state.players[0]?.playerId || '';
-      await loadAll();
-      render();
+      await loadSelected();
+      await render();
     }catch(error){
       root.innerHTML = `<div class="empty-state">Chargement impossible : ${Render.esc(error.message || error)}</div>`;
     }
   }
   function bind(){
-    document.getElementById('playerSelect')?.addEventListener('change', event => { state.selectedPlayerId = event.target.value; render(); });
-    document.getElementById('periodMode')?.addEventListener('change', event => { state.filters.periodMode = event.target.value; render(); });
-    document.getElementById('seasonSelect')?.addEventListener('change', event => { state.filters.season = event.target.value; render(); });
-    document.getElementById('startDate')?.addEventListener('change', event => { state.filters.startDate = event.target.value; render(); });
-    document.getElementById('endDate')?.addEventListener('change', event => { state.filters.endDate = event.target.value; render(); });
-    document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => { state.view = btn.dataset.view; render(); }));
-    document.getElementById('compareSeasonA')?.addEventListener('change', event => { state.filters.compareSeasonA = event.target.value; render(); });
-    document.getElementById('compareSeasonB')?.addEventListener('change', event => { state.filters.compareSeasonB = event.target.value; render(); });
+    document.getElementById('playerSelect')?.addEventListener('change', async event => { state.selectedPlayerId = event.target.value; await loadSelected(); await render(); });
+    document.getElementById('periodMode')?.addEventListener('change', async event => { state.filters.periodMode = event.target.value; await render(); });
+    document.getElementById('seasonSelect')?.addEventListener('change', async event => { state.filters.season = event.target.value; await render(); });
+    document.getElementById('startDate')?.addEventListener('change', async event => { state.filters.startDate = event.target.value; await render(); });
+    document.getElementById('endDate')?.addEventListener('change', async event => { state.filters.endDate = event.target.value; await render(); });
+    document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', async () => { state.view = btn.dataset.view; await render(); }));
+    document.getElementById('compareSeasonA')?.addEventListener('change', async event => { state.filters.compareSeasonA = event.target.value; await render(); });
+    document.getElementById('compareSeasonB')?.addEventListener('change', async event => { state.filters.compareSeasonB = event.target.value; await render(); });
     document.getElementById('comparePlayers')?.addEventListener('change', async event => {
       state.filters.comparePlayerIds = [...event.target.selectedOptions].map(option => option.value);
-      render();
+      await render();
     });
   }
   function collectionsForPlayer(playerId){
-    const base = state.collections || {};
+    const base = state.collectionCache[playerId]?.collections || state.collections || {};
     const selected = state.players.find(p => p.playerId === playerId) || {};
     const aliases = Data.playerAliases(selected);
     const out = {
@@ -62,7 +72,9 @@
       medicalAppointments:(base.medicalAppointments || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
       rehabRoutines:(base.rehabRoutines || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
       workloads:(base.workloads || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
-      medicalFollowUps:(base.medicalFollowUps || []).filter(row => Data.rowMatchesPlayer(row, aliases))
+      medicalFollowUps:(base.medicalFollowUps || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      convocations:(base.convocations || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      individualReports:(base.individualReports || []).filter(row => Data.rowMatchesPlayer(row, aliases))
     };
     const sessionIds = new Set(out.attendance.map(row => row.sessionId).filter(Boolean));
     out.sessions = (base.sessions || []).filter(row => sessionIds.has(row.sessionId || row.id));
@@ -70,7 +82,7 @@
     out.matches = (base.matches || []).filter(row => matchIds.has(row.matchId || row.id));
     return out;
   }
-  function render(){
+  async function render(){
     if(!state.players.length){ root.innerHTML = '<div class="empty-state">Aucune joueuse disponible dans la base commune.</div>'; return; }
     const selectedPlayer = player();
     const period = Filters.periodFromState(state);
@@ -82,6 +94,7 @@
     if(state.view === 'playerCompare'){
       const selectedIds = state.filters.comparePlayerIds.length ? state.filters.comparePlayerIds : [state.selectedPlayerId];
       const comparePlayers = state.players.filter(p => selectedIds.includes(p.playerId));
+      await Promise.all(comparePlayers.map(p => loadPlayerData(p.playerId)));
       const collectionMap = Object.fromEntries(comparePlayers.map(p => [p.playerId, collectionsForPlayer(p.playerId)]));
       body = Render.renderPlayerCompare(Compare.comparePlayers(comparePlayers, collectionMap, state), state);
     }

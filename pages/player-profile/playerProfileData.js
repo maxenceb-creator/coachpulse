@@ -84,8 +84,11 @@
       return Array.isArray(cached) ? cached.map(row => ({...row, playerId:idOf(row), displayName:displayName(row)})).filter(row => row.playerId) : [];
     }catch(_e){ return []; }
   }
-  async function loadProfileData(playerId=''){
-    if(api().playerProfileLoadData) return api().playerProfileLoadData({playerId});
+  async function loadProfileData(playerOrId=''){
+    const player = typeof playerOrId === 'object' && playerOrId ? playerOrId : {playerId:playerOrId};
+    const playerId = idOf(player);
+    const aliases = playerAliases(player);
+    if(api().playerProfileLoadData) return api().playerProfileLoadData({playerId, aliases});
     const players = await listPlayers();
     return {
       app:'CoachPulse',
@@ -95,7 +98,7 @@
       collections:{
         players:playerId ? players.filter(player => idOf(player) === playerId) : players,
         sessions:[], attendance:[], matches:[], matchEvents:[], technicalTests:[], physicalTests:[],
-        injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], workloads:[], medicalFollowUps:[]
+        injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], workloads:[], medicalFollowUps:[], convocations:[], individualReports:[]
       }
     };
   }
@@ -114,7 +117,9 @@
       medicalAppointments:c.medicalAppointments || [],
       rehabRoutines:c.rehabRoutines || [],
       workloads:c.workloads || [],
-      medicalFollowUps:c.medicalFollowUps || []
+      medicalFollowUps:c.medicalFollowUps || [],
+      convocations:c.convocations || [],
+      individualReports:c.individualReports || []
     };
   }
   global.PlayerProfileData = {api, text, seasonFromDate, currentSeason, idOf, slug, stableId, displayName, listPlayers, loadProfileData, normalizeCollections, playerAliases, rowPlayerIds, rowMatchesPlayer};

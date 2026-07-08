@@ -62,6 +62,8 @@
       <article class="panel"><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderEvents(summary.physicalTests,'source','tests') : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
       <article class="panel"><h2>Blessures</h2>${summary.injuries.length ? renderEvents(summary.injuries,'injuryType','status') : '<div class="empty-state">Aucune blessure sur cette période.</div>'}</article>
       <article class="panel"><h2>Suivi médical</h2>${summary.medical.length ? renderEvents(summary.medical,'type','status') : '<div class="empty-state">Aucun suivi médical sur cette période.</div>'}</article>
+      <article class="panel"><h2>Convocations</h2>${summary.convocations.length ? renderEvents(summary.convocations,'type','status') : '<div class="empty-state">Aucune convocation sur cette période.</div>'}</article>
+      <article class="panel"><h2>Bilans individuels</h2>${summary.individualReports.length ? renderEvents(summary.individualReports,'title','summary') : '<div class="empty-state">Aucun bilan individuel sur cette période.</div>'}</article>
     </section>`;
   }
   function renderEvents(rows=[], titleKey='type', valueKey='status'){

@@ -803,23 +803,57 @@ async function playerProfileLoadData(options={}){
   if(!canViewModule('playerProfile')) throw new Error('Accès non autorisé.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const playerId = String(options.playerId || '').trim();
-  const collections = ['players','sessions','attendance','matches','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps'];
-  const payload = {app:'CoachPulse', module:'playerProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), collections:{}};
-  for(const name of collections){
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, name));
-    payload.collections[name] = [];
-    snap.forEach(docSnap => payload.collections[name].push({id:docSnap.id, ...docSnap.data()}));
+  const aliases = [...new Set([playerId, ...(Array.isArray(options.aliases) ? options.aliases : [])].map(value => String(value || '').trim()).filter(Boolean))];
+  const directCollections = ['attendance','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps','convocations','individualReports'];
+  const payload = {app:'CoachPulse', module:'playerProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), collections:{players:[],sessions:[],matches:[]}};
+  directCollections.forEach(name => { payload.collections[name] = []; });
+  const chunks = [];
+  for(let i = 0; i < aliases.length; i += 10) chunks.push(aliases.slice(i, i + 10));
+  async function readWhereIn(collectionName, field='playerId'){
+    const rows = [];
+    for(const chunk of chunks){
+      if(!chunk.length) continue;
+      const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
+      const snap = await firebaseFns.getDocs(q);
+      snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
+    }
+    return [...new Map(rows.map(row => [row.id, row])).values()];
   }
-  if(playerId){
-    payload.collections.players = payload.collections.players.filter(row => (row.playerId || row.id) === playerId);
-    ['attendance','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps'].forEach(name => {
-      payload.collections[name] = (payload.collections[name] || []).filter(row => row.playerId === playerId);
-    });
-    const sessionIds = new Set((payload.collections.attendance || []).map(row => row.sessionId).filter(Boolean));
-    payload.collections.sessions = (payload.collections.sessions || []).filter(row => sessionIds.has(row.sessionId || row.id));
-    const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
-    payload.collections.matches = (payload.collections.matches || []).filter(row => matchIds.has(row.matchId || row.id));
+  async function readDocsByIds(collectionName, ids){
+    const rows = [];
+    for(const id of [...new Set([...ids].filter(Boolean))]){
+      const snap = await firebaseFns.getDoc(firebaseFns.doc(db, collectionName, id));
+      if(snap.exists()) rows.push({id:snap.id, ...snap.data()});
+    }
+    return rows;
   }
+  async function readDocsByIdsOrField(collectionName, ids, field){
+    const rows = await readDocsByIds(collectionName, ids);
+    const values = [...new Set([...ids].filter(Boolean))];
+    for(let i = 0; i < values.length; i += 10){
+      const chunk = values.slice(i, i + 10);
+      if(!chunk.length) continue;
+      const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
+      const snap = await firebaseFns.getDocs(q);
+      snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
+    }
+    return [...new Map(rows.map(row => [row.id, row])).values()];
+  }
+  if(!aliases.length){
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
+    snap.forEach(docSnap => payload.collections.players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
+    return payload;
+  }
+  payload.collections.players = await readDocsByIds('players', aliases);
+  const playerRows = await readWhereIn('players');
+  playerRows.forEach(row => {
+    if(!payload.collections.players.some(player => player.id === row.id)) payload.collections.players.push(row);
+  });
+  for(const name of directCollections) payload.collections[name] = await readWhereIn(name);
+  const sessionIds = new Set((payload.collections.attendance || []).map(row => row.sessionId).filter(Boolean));
+  const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
+  payload.collections.sessions = await readDocsByIdsOrField('sessions', sessionIds, 'sessionId');
+  payload.collections.matches = await readDocsByIdsOrField('matches', matchIds, 'matchId');
   return payload;
 }
 function csvEscape(v){

@@ -296,13 +296,13 @@ service cloud.firestore {
     }
 
     match /convocations/{convocationId} {
-      allow read: if canReadData() && canAccessModule('convocations') && canAccessScopedData(resource.data);
+      allow read: if (canReadData() && canAccessModule('convocations') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteSportData() && canAccessModule('convocations') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /individualReports/{reportId} {
-      allow read: if canReadData() && canAccessModule('individualReports') && canAccessScopedData(resource.data);
+      allow read: if (canReadData() && canAccessModule('individualReports') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create, update: if canWriteSportData() && canAccessModule('individualReports') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
