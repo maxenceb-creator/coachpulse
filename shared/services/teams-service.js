@@ -39,8 +39,25 @@
     return asText(value).toUpperCase().replace(/\s+/g, ' ');
   }
 
+  function compactTeamKey(value){
+    return normalizeTeamName(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]+/g, '');
+  }
+
+  function officialTeamByName(name){
+    const key = compactTeamKey(name);
+    return OFFICIAL_TEAMS.find(team => compactTeamKey(team.name) === key) || null;
+  }
+
+  function resolveOfficialTeam(value, fallback=''){
+    const direct = officialTeamByName(value);
+    if(direct) return direct;
+    const fromSub = defaultTeamForSubCategory(value || fallback);
+    return officialTeamByName(fromSub) || null;
+  }
+
   function canonicalTeamId(name){
-    return stableId('team', normalizeTeamName(name));
+    const official = resolveOfficialTeam(name);
+    return stableId('team', official?.name || normalizeTeamName(name));
   }
 
   function defaultTeamForSubCategory(value){
@@ -67,20 +84,22 @@
 
   function mergeWithOfficialTeams(teams=[]){
     const byId = new Map(officialTeamRows().map(team => [team.teamId, team]));
-    teams.map(normalizeTeam).forEach(team => byId.set(team.teamId, {...(byId.get(team.teamId) || {}), ...team}));
+    teams.map(normalizeTeam).filter(team => byId.has(team.teamId)).forEach(team => byId.set(team.teamId, {...(byId.get(team.teamId) || {}), ...team, name:byId.get(team.teamId)?.name || team.name}));
     return [...byId.values()].sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr', {numeric:true}));
   }
 
   function normalizeTeam(raw={}){
-    const name = normalizeTeamName(raw.name || raw.team || raw.equipe);
-    const teamId = asText(raw.teamId || raw.id) || canonicalTeamId(name || raw.category || 'global');
+    const sourceName = raw.name || raw.team || raw.equipe || raw.category || raw.categorie;
+    const official = resolveOfficialTeam(sourceName, raw.category || raw.categorie);
+    const name = official ? official.name : normalizeTeamName(sourceName);
+    const teamId = official ? canonicalTeamId(official.name) : (asText(raw.teamId || raw.id) || canonicalTeamId(name || raw.category || 'global'));
     return {
       ...raw,
       id:teamId,
       teamId,
       name,
-      category:asText(raw.category || raw.categorie),
-      subCategories:Array.isArray(raw.subCategories) ? cleanOptionList(raw.subCategories) : [],
+      category:official?.category || asText(raw.category || raw.categorie),
+      subCategories:official?.subCategories || (Array.isArray(raw.subCategories) ? cleanOptionList(raw.subCategories) : []),
       status:asText(raw.status || 'active').toLowerCase(),
       source:asText(raw.source || 'CoachPulse')
     };
@@ -112,6 +131,37 @@
     snap.forEach(docSnap => teams.push(normalizeTeam({id:docSnap.id, teamId:docSnap.id, ...docSnap.data()})));
     const merged = mergeWithOfficialTeams(teams);
     return options.includeArchived ? merged : merged.filter(team => team.status !== 'archived');
+  }
+
+  async function ensureOfficialTeams(ctx={}){
+    const {firebaseFns, db} = firestoreContext(ctx);
+    const existingSnap = await firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION));
+    const existing = [];
+    existingSnap.forEach(docSnap => existing.push({id:docSnap.id, teamId:docSnap.id, ...docSnap.data()}));
+    const officialIds = new Set(officialTeamRows().map(team => team.teamId));
+    const writes = [];
+    officialTeamRows().forEach(team => {
+      const clean = normalizeTeamForWrite({...team, source:'CoachPulse officiel', status:'active'}, {firebaseFns, user:ctx.user});
+      if(firebaseFns.serverTimestamp) clean.createdAt = clean.createdAt || firebaseFns.serverTimestamp();
+      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, COLLECTION, team.teamId), clean, {merge:true}));
+    });
+    existing.forEach(raw => {
+      const normalized = normalizeTeam(raw);
+      const originalId = raw.teamId || raw.id;
+      if(!originalId || officialIds.has(originalId)) return;
+      const replacementId = officialIds.has(normalized.teamId) ? normalized.teamId : '';
+      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, COLLECTION, originalId), {
+        ...raw,
+        status:'archived',
+        replacedByTeamId:replacementId,
+        updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined,
+        updatedAtIso:nowIso(),
+        updatedBy:ctx.user?.uid || '',
+        updatedByEmail:ctx.user?.email || ''
+      }, {merge:true}));
+    });
+    await Promise.all(writes);
+    return officialTeamRows();
   }
 
   async function getTeam(teamId, ctx={}){
@@ -154,17 +204,18 @@
     return {
       categories:Array.isArray(data.categories) && data.categories.length ? data.categories : DEFAULT_DB_OPTIONS.categories,
       subCategories:Array.isArray(data.subCategories) && data.subCategories.length ? data.subCategories : DEFAULT_DB_OPTIONS.subCategories,
-      teams:Array.isArray(data.teams) && data.teams.length ? data.teams : DEFAULT_DB_OPTIONS.teams
+      teams:DEFAULT_DB_OPTIONS.teams
     };
   }
 
   async function saveDatabaseOptions(options={}, ctx={}){
     const {firebaseFns, db} = firestoreContext(ctx);
+    const officialNames = DEFAULT_DB_OPTIONS.teams;
     const clean = {
       settingsId:OPTIONS_ID,
       categories:cleanOptionList(options.categories),
       subCategories:cleanOptionList(options.subCategories),
-      teams:cleanOptionList(options.teams || DEFAULT_DB_OPTIONS.teams),
+      teams:officialNames,
       updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined,
       updatedAtIso:nowIso(),
       updatedBy:ctx.user?.uid || '',
@@ -176,9 +227,9 @@
 
   const service = {
     COLLECTION, SETTINGS_COLLECTION, OPTIONS_ID, OFFICIAL_TEAMS, DEFAULT_DB_OPTIONS,
-    stableId, canonicalTeamId, defaultTeamForSubCategory, cleanOptionList,
+    stableId, canonicalTeamId, defaultTeamForSubCategory, resolveOfficialTeam, cleanOptionList,
     officialTeamRows, mergeWithOfficialTeams, normalizeTeam, normalizeTeamForWrite,
-    listTeams, getTeam, saveTeam, archiveTeam, readDatabaseOptions, saveDatabaseOptions
+    listTeams, ensureOfficialTeams, getTeam, saveTeam, archiveTeam, readDatabaseOptions, saveDatabaseOptions
   };
 
   global.CoachPulseTeamsService = service;
