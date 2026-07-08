@@ -6,18 +6,18 @@
   const SETTINGS_COLLECTION = 'settings';
   const OPTIONS_ID = 'database-options';
   const OFFICIAL_TEAMS = [
-    {name:'U7 A', category:'U6-U7', subCategories:['U6','U7']},
-    {name:'U9 A', category:'U8-U9', subCategories:['U8','U9']},
-    {name:'U11 A', category:'U10-U11', subCategories:['U10','U11']},
-    {name:'U13 A', category:'U12-U13', subCategories:['U12','U13']},
-    {name:'U13 B', category:'U12-U13', subCategories:['U12','U13']},
-    {name:'U16 A', category:'U14-U15-U16', subCategories:['U14','U15','U16']},
+    {name:'U7 A', category:'U7', subCategories:['U6','U7']},
+    {name:'U9 A', category:'U9', subCategories:['U8','U9']},
+    {name:'U11 A', category:'U11', subCategories:['U10','U11']},
+    {name:'U13 A', category:'U13', subCategories:['U12','U13','U14']},
+    {name:'U13 B', category:'U13', subCategories:['U12','U13']},
+    {name:'U16 A', category:'U16', subCategories:['U15','U16']},
     {name:'U19', category:'U19', subCategories:['U17','U18','U19']},
-    {name:'R1', category:'R1', subCategories:['R1']}
+    {name:'R1', category:'SENIORS', subCategories:['SENIORS']}
   ];
   const DEFAULT_DB_OPTIONS = {
-    categories:['U6-U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'],
-    subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','R1'],
+    categories:['U7','U9','U11','U13','U16','U19','SENIORS'],
+    subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','SENIORS'],
     teams:OFFICIAL_TEAMS.map(team => team.name)
   };
 
@@ -68,7 +68,7 @@
     if(n <= 7) return 'U7 A';
     if(n <= 9) return 'U9 A';
     if(n <= 11) return 'U11 A';
-    if(n <= 13) return 'U13 A';
+    if(n <= 14) return 'U13 A';
     if(n <= 16) return 'U16 A';
     return 'U19';
   }

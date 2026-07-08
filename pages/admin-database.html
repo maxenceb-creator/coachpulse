@@ -107,13 +107,13 @@
 </div></div>
 <script type="module">
 const $=s=>document.querySelector(s);
-const CATEGORIES=['U6-U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'];
-const SUBS=['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','R1'];
+const CATEGORIES=['U7','U9','U11','U13','U16','U19','SENIORS'];
+const SUBS=['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','SENIORS'];
 const DEFAULT_TEAMS=['U7 A','U9 A','U11 A','U13 A','U13 B','U16 A','U19','R1'];
 const STATUSES=['active','left','injured','archived'];
 const SEASONS=['2026-2027','2025-2026','all'];
-const DEFAULT_CATEGORIES=['U6-U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'];
-const DEFAULT_SUBS=['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','R1'];
+const DEFAULT_CATEGORIES=['U7','U9','U11','U13','U16','U19','SENIORS'];
+const DEFAULT_SUBS=['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','SENIORS'];
 let players=[], filtered=[], selected=null, teams=[], dbSettings=null, drawerMode='edit', strictMergePlan=null, cleanRows=null, cleanAnalysis=null;
 function api(){return window.parent?.CoachPulseCentralData}
 function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}

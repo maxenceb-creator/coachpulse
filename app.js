@@ -622,13 +622,13 @@ function stableFirestoreId(){
 function normalizeTeamFromCategory(category){
   const c = String(category || '').toUpperCase();
   const n = Number((c.match(/\d+/)||[])[0] || 0);
-  if(c.includes('R1') || c.includes('SENIOR') || c.includes('SÉNIOR')) return 'R1';
+  if(c.includes('R1') || c.includes('SENIOR') || c.includes('SÉNIOR')) return 'SENIORS';
   if(!n) return c || 'Non renseignee';
-  if(n <= 7) return 'U6-U7';
-  if(n <= 9) return 'U8-U9';
-  if(n <= 11) return 'U10-U11';
-  if(n <= 14) return 'U12-U13-U14';
-  if(n <= 16) return 'U14-U15-U16';
+  if(n <= 7) return 'U7';
+  if(n <= 9) return 'U9';
+  if(n <= 11) return 'U11';
+  if(n <= 14) return 'U13';
+  if(n <= 16) return 'U16';
   return 'U19';
 }
 function normalizePlayer(raw={}){
@@ -949,22 +949,21 @@ function detectImportField(header){
   return '';
 }
 function normalizeSubCategory(value){
-  const txt = normalizeImportText(value).toUpperCase().replace('SENIORS','R1').replace('SÉNIORS','R1');
-  if(txt.includes('R1')) return 'R1';
+  const txt = normalizeImportText(value).toUpperCase().replace('SÉNIORS','SENIORS');
+  if(txt.includes('R1') || txt.includes('SENIORS')) return 'SENIORS';
   const n = Number((txt.match(/\d+/)||[])[0] || 0);
   return n ? `U${n}` : txt;
 }
 function normalizeImportCategory(value){
   const sub = normalizeSubCategory(value);
-  if(sub === 'R1') return 'R1';
+  if(sub === 'SENIORS' || sub === 'R1') return 'SENIORS';
   const n = Number((sub.match(/\d+/)||[])[0] || 0);
   if(!n) return normalizeImportText(value);
   if(n <= 7) return 'U7';
-  if(n <= 9) return 'U8-U9';
-  if(n <= 11) return 'U10-U11';
-  if(n <= 13) return 'U12-U13';
-  if(n <= 14) return 'U12-U13-U14';
-  if(n <= 16) return 'U14-U15-U16';
+  if(n <= 9) return 'U9';
+  if(n <= 11) return 'U11';
+  if(n <= 14) return 'U13';
+  if(n <= 16) return 'U16';
   return 'U19';
 }
 function splitImportName(row){
@@ -1785,8 +1784,8 @@ async function adminExportPlayers(format='json'){
   return players.length;
 }
 const DEFAULT_DB_OPTIONS = {
-  categories:['U6-U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'],
-  subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','R1'],
+  categories:['U7','U9','U11','U13','U16','U19','SENIORS'],
+  subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','SENIORS'],
   teams:['U7 A','U9 A','U11 A','U13 A','U13 B','U16 A','U19','R1']
 };
 function resolveOfficialTeamForApp(value, fallback=''){
@@ -2793,7 +2792,7 @@ function moduleAccessChoices(){
 async function loadAdminAccessChoices(force=false){
   if(adminAccessChoiceCache && !force) return adminAccessChoiceCache;
   const moduleChoices = moduleAccessChoices();
-  const baseTeamChoices = DEFAULT_DB_OPTIONS.categories.map(value => ({value, label:value, hint:'Catégorie'}));
+  const baseTeamChoices = DEFAULT_DB_OPTIONS.teams.map(value => ({value:teamsService()?.canonicalTeamId?.(value) || stableFirestoreId('team', value), label:value, hint:'Équipe'}));
   let teamChoices = [...baseTeamChoices];
   try{
     const data = await adminListTeamsAndSettings();
@@ -2937,7 +2936,7 @@ function closePlayerModal(){ $('#playerModal')?.classList.remove('open'); }
 function resetPlayerForm(){
   ['playerFirstName','playerLastName','playerBirth'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
   if($('#playerCategory')) $('#playerCategory').value='U12';
-  if($('#playerTeam')) $('#playerTeam').value='U12-U13';
+  if($('#playerTeam')) $('#playerTeam').value='U13 A';
   if($('#playerFoot')) $('#playerFoot').value='';
   if($('#playerPhoto')) $('#playerPhoto').value='';
   if($('#playerMsg')) $('#playerMsg').textContent='';

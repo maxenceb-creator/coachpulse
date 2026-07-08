@@ -159,14 +159,14 @@ document.addEventListener('DOMContentLoaded',init);
   function displayName(p){return `${String(p.prenom||"").trim()} ${String(p.nom||"").toUpperCase()}`.trim().toUpperCase();}
   function teamCategoryFromSubCategory(value){
     const raw=String(value||"").toUpperCase().replace(/\s+/g,"");
-    if(raw==="R1"||raw.includes("SENIOR")||raw.includes("SÉNIOR"))return "R1";
+    if(raw==="R1"||raw.includes("SENIOR")||raw.includes("SÉNIOR"))return "SENIORS";
     const n=Number((raw.match(/\d+/)||[])[0]||0);
     if(!n)return "";
-    if(n<=7)return "U6-U7";
-    if(n<=9)return "U8-U9";
-    if(n<=11)return "U10-U11";
-    if(n<=14)return "U12-U13-U14";
-    if(n<=16)return "U14-U15-U16";
+    if(n<=7)return "U7";
+    if(n<=9)return "U9";
+    if(n<=11)return "U11";
+    if(n<=14)return "U13";
+    if(n<=16)return "U16";
     return "U19";
   }
   function mainCategory(p,existing,subCategory){
