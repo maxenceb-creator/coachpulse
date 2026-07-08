@@ -10,21 +10,30 @@ const FIREBASE_CONFIG = {
   appId: "1:147021875262:web:dd0a52857a7b252295e96f"
 };
 
+const ROLES = {
+  core:['ADMIN','RESPONSABLE_CATEGORIE'],
+  sportRead:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','OBSERVATEUR_STAFF','LECTURE'],
+  sportWrite:['ADMIN','RESPONSABLE_CATEGORIE','COACH'],
+  physicalWrite:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE'],
+  medicalRead:['ADMIN','RESPONSABLE_CATEGORIE','MEDICAL'],
+  medicalWrite:['ADMIN','MEDICAL']
+};
+
 const DEFAULT_MODULE_REGISTRY = [
-  {id:'home', name:'Accueil', icon:'🏠', section:'staff', active:true, collection:'settings', screen:{type:'internal'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE']}, settings:{showInNav:true, showOnDashboard:false}},
-  {id:'stats', name:'Matchs', icon:'📊', section:'staff', active:true, collection:'matches', relatedCollections:['matchEvents','players','teams','settings'], screen:{type:'iframe', src:'pages/coach-stats.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Prise de statistiques et bilan match.'}},
-  {id:'presences', name:'Présences', icon:'✅', section:'staff', active:true, collection:'attendance', relatedCollections:['sessions','players','teams','settings'], screen:{type:'iframe', src:'pages/presences.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Suivi séances, statuts et charge.'}},
-  {id:'tests', name:'Tests', icon:'⚡', section:'staff', active:true, collection:'technicalTests', relatedCollections:['physicalTests','players','teams','settings'], screen:{type:'iframe', src:'pages/tests-techniques.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Technique, progression et évaluations.'}},
-  {id:'tests-athletiques', name:'Tests athlétiques', icon:'🏃', section:'staff', active:true, collection:'physicalTests', relatedCollections:['players','teams','settings'], screen:{type:'iframe', src:'pages/tests-athletiques.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'VMI, vitesse, agilité, CMJ et bilans physiques branchés sur playerId.'}},
-  {id:'methodologie', name:'Bilans & planning', icon:'🧭', section:'staff', active:true, collection:'sessions', relatedCollections:['settings','teams'], screen:{type:'iframe', src:'pages/methodologie.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Méthodologie, calendrier et attendus.'}},
-  {id:'database', name:'Joueuses & base', icon:'🧩', section:'admin', active:true, collection:'players', relatedCollections:['teams','settings','changeLogs'], screen:{type:'iframe', src:'pages/admin-database.html'}, permissions:{read:['ADMIN','RESPONSABLE'], write:['ADMIN','RESPONSABLE'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Corriger la base Firestore commune.'}},
-  {id:'dataHub', name:'Data Hub', icon:'🗄️', section:'admin', active:true, collection:'syncLogs', relatedCollections:['players','teams','matches','sessions','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/data-hub.html'}, permissions:{read:['ADMIN','RESPONSABLE'], write:['ADMIN','RESPONSABLE'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Importer, simuler et synchroniser.'}},
-  {id:'admin', name:'Paramètres admin', icon:'👥', section:'admin', active:true, collection:'staff', relatedCollections:['settings','changeLogs'], screen:{type:'internal'}, permissions:{read:['ADMIN','RESPONSABLE'], write:['ADMIN'], importExport:['ADMIN']}, settings:{showInNav:true, showOnDashboard:true, description:'Rôles, comptes et sécurité.'}},
-  {id:'injuries', name:'Blessures', icon:'🩹', section:'future', active:false, collection:'injuries', relatedCollections:['players','teams','settings'], screen:{type:'iframe', src:'pages/blessures.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR'], write:['ADMIN','RESPONSABLE'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:false, showOnDashboard:false, description:'Suivi blessures et indisponibilités.'}},
-  {id:'workload', name:'Charge de travail', icon:'📈', section:'future', active:false, collection:'workloads', relatedCollections:['players','teams','sessions'], screen:{type:'iframe', src:'pages/charge-travail.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:false, showOnDashboard:false, description:'Charge, volumes et ressentis.'}},
-  {id:'convocations', name:'Convocations', icon:'📣', section:'future', active:false, collection:'convocations', relatedCollections:['players','teams','matches'], screen:{type:'iframe', src:'pages/convocations.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR'], write:['ADMIN','RESPONSABLE'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:false, showOnDashboard:false, description:'Groupes, convocations et disponibilités.'}},
-  {id:'medical', name:'Suivi médical', icon:'🩺', section:'staff', active:true, collection:'injuries', relatedCollections:['players','teams','injuryUpdates','medicalAppointments','rehabRoutines','settings'], screen:{type:'iframe', src:'pages/suivi-medical.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN']}, settings:{showInNav:true, showOnDashboard:true, description:'Blessures, douleurs, rendez-vous et reprise.'}},
-  {id:'individualReports', name:'Bilans individuels', icon:'📝', section:'future', active:false, collection:'individualReports', relatedCollections:['players','teams','matches','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/bilans-individuels.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:false, showOnDashboard:false, description:'Bilans individuels staff.'}}
+  {id:'home', name:'Accueil', icon:'🏠', section:'staff', active:true, collection:'settings', screen:{type:'internal'}, permissions:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','MEDICAL','OBSERVATEUR_STAFF','LECTURE']}, settings:{showInNav:true, showOnDashboard:false}},
+  {id:'stats', name:'Matchs', icon:'📊', section:'staff', active:true, collection:'matches', relatedCollections:['matchEvents','players','teams','settings'], screen:{type:'iframe', src:'pages/coach-stats.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Prise de statistiques et bilan match.'}},
+  {id:'presences', name:'Présences', icon:'✅', section:'staff', active:true, collection:'attendance', relatedCollections:['sessions','players','teams','settings'], screen:{type:'iframe', src:'pages/presences.html'}, permissions:{read:ROLES.sportRead, write:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE'], importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Suivi séances, statuts et charge.'}},
+  {id:'tests', name:'Tests', icon:'⚡', section:'staff', active:true, collection:'technicalTests', relatedCollections:['physicalTests','players','teams','settings'], screen:{type:'iframe', src:'pages/tests-techniques.html'}, permissions:{read:ROLES.sportRead, write:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE'], importExport:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE']}, settings:{showInNav:true, showOnDashboard:true, description:'Technique, progression et évaluations.'}},
+  {id:'tests-athletiques', name:'Tests athlétiques', icon:'🏃', section:'staff', active:true, collection:'physicalTests', relatedCollections:['players','teams','settings'], screen:{type:'iframe', src:'pages/tests-athletiques.html'}, permissions:{read:ROLES.sportRead, write:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE'], importExport:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE']}, settings:{showInNav:true, showOnDashboard:true, description:'VMI, vitesse, agilité, CMJ et bilans physiques branchés sur playerId.'}},
+  {id:'methodologie', name:'Bilans & planning', icon:'🧭', section:'staff', active:true, collection:'sessions', relatedCollections:['settings','teams'], screen:{type:'iframe', src:'pages/methodologie.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Méthodologie, calendrier et attendus.'}},
+  {id:'database', name:'Joueuses & base', icon:'🧩', section:'admin', active:true, collection:'players', relatedCollections:['teams','settings','changeLogs'], screen:{type:'iframe', src:'pages/admin-database.html'}, permissions:{read:ROLES.core, write:ROLES.core, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Corriger la base Firestore commune.'}},
+  {id:'dataHub', name:'Data Hub', icon:'🗄️', section:'admin', active:true, collection:'syncLogs', relatedCollections:['players','teams','matches','sessions','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/data-hub.html'}, permissions:{read:ROLES.core, write:ROLES.core, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Importer, simuler et synchroniser.'}},
+  {id:'admin', name:'Gestion utilisateurs', icon:'👥', section:'admin', active:true, collection:'staff_members', relatedCollections:['settings','changeLogs'], screen:{type:'internal'}, permissions:{read:['ADMIN'], write:['ADMIN'], importExport:['ADMIN']}, settings:{showInNav:true, showOnDashboard:true, description:'Rôles, équipes et comptes.'}},
+  {id:'injuries', name:'Blessures', icon:'🩹', section:'future', active:false, collection:'injuries', relatedCollections:['players','teams','settings'], screen:{type:'iframe', src:'pages/blessures.html'}, permissions:{read:ROLES.medicalRead, write:ROLES.medicalWrite, importExport:ROLES.medicalWrite}, settings:{showInNav:false, showOnDashboard:false, description:'Suivi blessures et indisponibilités.'}},
+  {id:'workload', name:'Charge de travail', icon:'📈', section:'future', active:false, collection:'workloads', relatedCollections:['players','teams','sessions'], screen:{type:'iframe', src:'pages/charge-travail.html'}, permissions:{read:ROLES.sportRead, write:ROLES.physicalWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Charge, volumes et ressentis.'}},
+  {id:'convocations', name:'Convocations', icon:'📣', section:'future', active:false, collection:'convocations', relatedCollections:['players','teams','matches'], screen:{type:'iframe', src:'pages/convocations.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Groupes, convocations et disponibilités.'}},
+  {id:'medical', name:'Suivi médical', icon:'🩺', section:'staff', active:true, collection:'injuries', relatedCollections:['players','teams','injuryUpdates','medicalAppointments','rehabRoutines','settings'], screen:{type:'iframe', src:'pages/suivi-medical.html'}, permissions:{read:ROLES.medicalRead, write:ROLES.medicalWrite, importExport:ROLES.medicalWrite}, settings:{showInNav:true, showOnDashboard:true, description:'Blessures, douleurs, rendez-vous et reprise.'}},
+  {id:'individualReports', name:'Bilans individuels', icon:'📝', section:'future', active:false, collection:'individualReports', relatedCollections:['players','teams','matches','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/bilans-individuels.html'}, permissions:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','OBSERVATEUR_STAFF','LECTURE'], write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Bilans individuels staff.'}}
 ];
 
 function parseModuleOverrides(){
@@ -36,7 +45,7 @@ function moduleWithOverrides(module){
 }
 function moduleRegistry(){ return DEFAULT_MODULE_REGISTRY.map(moduleWithOverrides); }
 function getModule(id){ return moduleRegistry().find(module => module.id === id); }
-function moduleToTool(module){ return {title:module.name, emoji:module.icon, src:module.screen?.src || '', internal:module.screen?.type === 'internal', admin:module.section === 'admin' || module.permissions?.read?.every(role => ['ADMIN','RESPONSABLE'].includes(role)), module}; }
+function moduleToTool(module){ return {title:module.name, emoji:module.icon, src:module.screen?.src || '', internal:module.screen?.type === 'internal', admin:module.section === 'admin' || module.permissions?.read?.every(role => ['ADMIN','RESPONSABLE','RESPONSABLE_CATEGORIE'].includes(role)), module}; }
 function buildTools(){ return Object.fromEntries(moduleRegistry().filter(module => module.active !== false).map(module => [module.id, moduleToTool(module)])); }
 let tools = buildTools();
 
@@ -49,6 +58,7 @@ let realtimeUnsub = null;
 let cloudWriteTimer = null;
 let applyingCloud = false;
 let lastCloudItemsHash = '';
+let adminAccessChoiceCache = null;
 const CLIENT_ID = (() => {
   let id = localStorage.getItem('coachpulse:clientId');
   if(!id){ id = 'cp-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36); localStorage.setItem('coachpulse:clientId', id); }
@@ -81,23 +91,70 @@ function getCurrentUserRole(){
   if(service?.getRole) return service.getRole(currentProfile, currentUserRole);
   return (currentProfile?.role || currentUserRole || 'STAFF').toUpperCase();
 }
+function getCurrentPermissionLevel(){
+  const service = permissionsService();
+  if(service?.normalizePermission) return service.normalizePermission(null, currentProfile || {role:currentUserRole,status:'ACTIVE'});
+  return currentProfile?.permissionLevel || 'LECTEUR';
+}
 function isAdmin(){
   const service = permissionsService();
-  return service?.isAdminRole ? service.isAdminRole(getCurrentUserRole()) : ['ADMIN','RESPONSABLE'].includes(getCurrentUserRole());
+  return service?.canManageCoreData ? service.canManageCoreData(currentProfile || {role:currentUserRole,status:'ACTIVE'}) : ['ADMIN','RESPONSABLE','RESPONSABLE_CATEGORIE'].includes(getCurrentUserRole());
 }
 function isSuperAdmin(){
   const service = permissionsService();
-  return service?.isSuperAdminRole ? service.isSuperAdminRole(getCurrentUserRole()) : getCurrentUserRole() === 'ADMIN';
+  return service?.canManageUsers ? service.canManageUsers(currentProfile || {role:currentUserRole,status:'ACTIVE'}) : getCurrentUserRole() === 'ADMIN';
 }
 function hasModulePermission(module, action='read'){
   const service = permissionsService();
-  if(service?.canUseModule) return service.canUseModule(module, getCurrentUserRole(), action);
+  if(service?.canUseModule) return service.canUseModule(currentProfile || {role:currentUserRole,status:'ACTIVE'}, module, action);
   if(!module || module.active === false) return false;
   const roles = module.permissions?.[action] || module.permissions?.read || [];
   return roles.map(String).map(r => r.toUpperCase()).includes(getCurrentUserRole());
 }
 function canAccessTool(key){ return hasModulePermission(getModule(key), 'read'); }
-function guardAdminAction(label='Action réservée aux administrateurs'){
+function accessProfile(){
+  return currentProfile || {uid:currentUser?.uid || '', email:currentUser?.email || '', role:currentUserRole, status:'ACTIVE'};
+}
+function canViewModule(moduleId){ return hasModulePermission(getModule(moduleId), 'read'); }
+function canEditModule(moduleId){ return hasModulePermission(getModule(moduleId), 'write'); }
+function canDeleteData(moduleId){
+  const service = permissionsService();
+  return service?.canDeleteData ? service.canDeleteData(accessProfile(), moduleId) : getCurrentUserRole() === 'ADMIN';
+}
+function canAccessTeamId(teamId){
+  const service = permissionsService();
+  return service?.canAccessTeam ? service.canAccessTeam(accessProfile(), teamId) : true;
+}
+function canAccessPlayerRecord(player){
+  const service = permissionsService();
+  return service?.canAccessPlayer ? service.canAccessPlayer(accessProfile(), player) : true;
+}
+function accessContext(){
+  const profile = accessProfile();
+  return {
+    type:'coachpulse-access-context',
+    user:{uid:currentUser?.uid || '', email:currentUser?.email || ''},
+    profile:{
+      uid:profile.uid || currentUser?.uid || '',
+      email:profile.email || currentUser?.email || '',
+      name:profile.name || currentUser?.displayName || currentUser?.email || '',
+      role:getCurrentUserRole(),
+      roleLabel:profile.roleLabel || permissionsService()?.roleLabel?.(getCurrentUserRole()) || getCurrentUserRole(),
+      permissionLevel:getCurrentPermissionLevel(),
+      permissionLabel:permissionsService()?.permissionLabel?.(getCurrentPermissionLevel()) || getCurrentPermissionLevel(),
+      status:profile.status || 'ACTIVE',
+      teamIds:profile.teamIds || [],
+      allowedTeamIds:profile.allowedTeamIds || [],
+      allowedModules:profile.allowedModules || [],
+      modulePermissions:profile.modulePermissions || {}
+    },
+    modules:Object.fromEntries(moduleRegistry().map(module => [module.id, {read:hasModulePermission(module, 'read'), write:hasModulePermission(module, 'write'), delete:canDeleteData(module.id)}]))
+  };
+}
+function notifyFramesAccessUpdated(){
+  try{ frame?.contentWindow?.postMessage(accessContext(), '*'); }catch(_e){}
+}
+function guardAdminAction(label='Action réservée aux éditeurs autorisés'){
   if(isAdmin()) return true;
   alert(label);
   return false;
@@ -126,7 +183,7 @@ function sortPlayersForApp(players){
 function visibleModules(section){
   const service = permissionsService();
   const modules = moduleRegistry();
-  if(service?.visibleModules) return service.visibleModules(modules, getCurrentUserRole(), section);
+  if(service?.visibleModules) return service.visibleModules(modules, currentProfile || {role:currentUserRole,status:'ACTIVE'}, section);
   return modules.filter(module => module.active !== false && module.settings?.showInNav !== false && (!section || module.section === section) && hasModulePermission(module, 'read'));
 }
 function renderModuleShell(){
@@ -167,11 +224,13 @@ function updateRoleUi(){
   renderModuleShell();
   shell.classList.toggle('role-admin', isAdmin());
   $$('.admin-only,.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-  const roleLabel = isAdmin() ? 'Admin' : 'Staff';
+  const service = permissionsService();
+  const roleLabel = service?.roleLabel ? service.roleLabel(currentUserRole) : (isAdmin() ? 'Admin' : 'Staff');
+  const permissionLabel = service?.permissionLabel ? service.permissionLabel(getCurrentPermissionLevel()) : getCurrentPermissionLevel();
   const dashRole = $('#dashboardRole');
   const dashAccess = $('#dashboardAccess');
-  if(dashRole) dashRole.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${currentUserRole}`;
-  if(dashAccess) dashAccess.textContent = roleLabel;
+  if(dashRole) dashRole.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${roleLabel}`;
+  if(dashAccess) dashAccess.textContent = permissionLabel;
 }
 
 function setLocked(locked){
@@ -188,8 +247,9 @@ function setLocked(locked){
     shell.classList.remove('locked');
     authGate.classList.add('hidden');
     topUser.classList.remove('hidden');
-    topUser.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${currentProfile?.role || 'STAFF'}`;
+    topUser.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${currentProfile?.roleLabel || currentProfile?.role || 'Staff'} · ${currentProfile?.permissionLabel || getCurrentPermissionLevel()}`;
     updateRoleUi();
+    notifyFramesAccessUpdated();
     updateDashboard();
   }
 }
@@ -201,7 +261,9 @@ function showHome(){
   if(adminView) adminView.classList.add('hidden');
 }
 function showAdmin(){
-  if(!isAdmin()) { alert('Accès réservé aux Admins / Responsables.'); return showHome(); }
+  if(!isSuperAdmin()) { alert('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.'); return showHome(); }
+  ensureUserAdminFields();
+  refreshAdminAccessPickers();
   frame.classList.add('hidden');
   frame.removeAttribute('src');
   homeView.classList.add('hidden');
@@ -212,7 +274,7 @@ function showAdmin(){
 function routeTo(key){
   if(!requireAuth()) { setLocked(true); return; }
   if(!canAccessTool(key)){
-    alert('Accès réservé aux administrateurs.');
+    alert('Accès non autorisé.');
     key = 'home';
   }
   let item = tools[key];
@@ -229,6 +291,7 @@ function routeTo(key){
     frame.classList.remove('hidden');
     const target = new URL(item.src, location.href).href;
     if(frame.src !== target) frame.src = item.src;
+    else notifyFramesAccessUpdated();
     if(!window.matchMedia('(max-width:1100px)').matches) shell.classList.add('collapsed');
   }
   closeDrawer();
@@ -247,16 +310,29 @@ async function loadFirebaseFns(){
 async function ensureUserProfile(user){
   const ref = firebaseFns.doc(db, 'staff_members', user.uid);
   const snap = await firebaseFns.getDoc(ref);
+  const service = permissionsService();
   if(snap.exists()){
     currentProfile = {uid:user.uid, ...snap.data()};
-    if(currentProfile.status === 'ARCHIVED') throw new Error('Compte archivé. Contacte un administrateur.');
-    await firebaseFns.setDoc(ref, {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email}, {merge:true});
+    const legacyRole = currentProfile.legacyRole || currentProfile.role || currentUserRole;
+    currentProfile.legacyRole = legacyRole;
+    currentProfile.role = service?.normalizeRole ? service.normalizeRole(currentProfile.businessRole || currentProfile.role) : currentProfile.role;
+    currentProfile.roleLabel = service?.roleLabel ? service.roleLabel(currentProfile.role) : currentProfile.role;
+    currentProfile.permissionLevel = service?.normalizePermission ? service.normalizePermission(currentProfile.permissionLevel, {...currentProfile, legacyRole}) : (currentProfile.permissionLevel || 'LECTEUR');
+    currentProfile.permissionLabel = service?.permissionLabel ? service.permissionLabel(currentProfile.permissionLevel) : currentProfile.permissionLevel;
+    if(service?.normalizePermission && currentProfile.permissionLevel === 'ADMIN' && (!Array.isArray(currentProfile.allowedModules) || !currentProfile.allowedModules.length)){
+      currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
+    }
+    if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(currentProfile.status || '').toUpperCase())) throw new Error('Compte inactif. Contacte un administrateur.');
+    await firebaseFns.setDoc(ref, {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email, legacyRole, role:currentProfile.role, roleLabel:currentProfile.roleLabel, permissionLevel:currentProfile.permissionLevel, permissionLabel:currentProfile.permissionLabel, allowedModules:currentProfile.allowedModules || []}, {merge:true});
     return currentProfile;
   }
   const email = (user.email || '').toLowerCase();
-  const role = (email.includes('maxence.boisdron') || email.endsWith('@asse.fr')) ? 'ADMIN' : 'EDUCATEUR';
-  currentProfile = {uid:user.uid, email:user.email, name:user.displayName || user.email, role, scope:'CoachPulse', status:'ACTIVE', createdAt:new Date().toISOString()};
-  await firebaseFns.setDoc(ref, {...currentProfile, createdAt:firebaseFns.serverTimestamp(), lastLoginAt:firebaseFns.serverTimestamp()}, {merge:true});
+  const isSeedAdmin = email.includes('maxence.boisdron') || email.endsWith('@asse.fr');
+  const role = isSeedAdmin ? 'DIRIGEANT' : 'ENTRAINEUR';
+  const permissionLevel = isSeedAdmin ? 'ADMIN' : 'LECTEUR';
+  currentProfile = service?.defaultProfile ? service.defaultProfile(user, role, permissionLevel) : {uid:user.uid, email:user.email, name:user.displayName || user.email, role, permissionLevel, scope:'CoachPulse', status:'ACTIVE'};
+  if(isSeedAdmin) currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
+  await firebaseFns.setDoc(ref, {...currentProfile, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp(), lastLoginAt:firebaseFns.serverTimestamp()}, {merge:true});
   return currentProfile;
 }
 
@@ -279,7 +355,7 @@ async function initFirebase(){
           await syncCloud(false);
           await pullCentralPlayersToLocal(false).catch(()=>{});
           const last = localStorage.getItem('coachpulse:lastTool') || 'home';
-          routeTo((last === 'admin' && !isAdmin()) ? 'home' : last);
+          routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
         }catch(e){
           $('#authError').textContent = cleanError(e);
           await firebaseFns.signOut(auth);
@@ -452,10 +528,12 @@ function startRealtimeSync(){
 }
 function notifyFramesCloudUpdated(){
   try{ frame?.contentWindow?.postMessage({type:'coachpulse-cloud-updated'}, '*'); }catch(_e){}
+  notifyFramesAccessUpdated();
 }
 function notifyFramesPlayersUpdated(){
   try{ frame?.contentWindow?.postMessage({type:'coachpulse-players-updated'}, '*'); }catch(_e){}
   try{ frame?.contentWindow?.postMessage({type:'coachpulse-cloud-updated'}, '*'); }catch(_e){}
+  notifyFramesAccessUpdated();
 }
 function installFrameLocalStorageWatcher(){
   try{
@@ -476,6 +554,7 @@ function installFrameLocalStorageWatcher(){
       });
     };
     patch();
+    notifyFramesAccessUpdated();
   }catch(_e){ /* certains navigateurs bloquent l'injection : la synchro périodique prend le relais */ }
 }
 
@@ -619,7 +698,7 @@ function collectCentralFirestoreDocs(){
     });
   });
   if(currentProfile){
-    addDoc(docs,'staff',currentUser.uid,{staffId:currentUser.uid, uid:currentUser.uid, email:currentUser.email || currentProfile.email || '', name:currentProfile.name || '', role:currentProfile.role || '', scope:currentProfile.scope || '', status:currentProfile.status || 'ACTIVE'});
+    addDoc(docs,'staff',currentUser.uid,{staffId:currentUser.uid, uid:currentUser.uid, email:currentUser.email || currentProfile.email || '', name:currentProfile.name || '', role:currentProfile.role || '', roleLabel:currentProfile.roleLabel || '', permissionLevel:currentProfile.permissionLevel || '', permissionLabel:currentProfile.permissionLabel || '', scope:currentProfile.scope || '', status:currentProfile.status || 'ACTIVE'});
   }
   addDoc(docs,'settings','coachpulse-schema',{settingsId:'coachpulse-schema',version:'firestore-v1',legacyCloudCollection:'coachpulse_common_base',migratedAtIso:new Date().toISOString(),collections:FIRESTORE_COLLECTIONS,modules:moduleRegistry().map(module => ({id:module.id,name:module.name,active:module.active,section:module.section,collection:module.collection,relatedCollections:module.relatedCollections||[],permissions:module.permissions,screen:module.screen,settings:module.settings}))});
   return docs;
@@ -1878,7 +1957,7 @@ function canUseMedical(action='read'){
 }
 function guardMedical(action='read'){
   if(canUseMedical(action)) return true;
-  alert(action === 'importExport' ? 'Export médical réservé aux administrateurs.' : 'Accès médical non autorisé pour ce rôle.');
+  alert(action === 'importExport' ? 'Export médical réservé aux éditeurs autorisés.' : 'Accès médical non autorisé.');
   return false;
 }
 function medicalCapabilities(){
@@ -2152,7 +2231,16 @@ async function adminSaveModuleSettings(moduleId, updates={}){
   updateRoleUi();
   return getModuleCatalog();
 }
+var seasonFromDate = typeof seasonFromDate === 'function' ? seasonFromDate : (() => '');
+var currentSeason = typeof currentSeason === 'function' ? currentSeason : (() => '');
+var listPlayers = typeof listPlayers === 'function' ? listPlayers : adminListPlayers;
+var getPlayer = typeof getPlayer === 'function' ? getPlayer : (async playerId => (await adminListPlayers()).find(p => (p.playerId || p.id) === playerId) || null);
+var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'function' ? adminBuildDuplicateMergePlan : (async () => []);
+var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
+var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
+var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
 window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, listPlayers, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+Object.assign(window.CoachPulseCentralData, {accessContext, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   snapshotLocalData({fromCloud:true});
@@ -2229,12 +2317,19 @@ async function logout(){
 
 async function createMember(){
   const msg = $('#adminMsg'); msg.textContent=''; msg.classList.remove('bad');
-  if(!guardAdminAction()) return;
+  if(!isSuperAdmin()){ msg.textContent='Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.'; msg.classList.add('bad'); return; }
   const name = $('#newStaffName').value.trim();
   const email = $('#newStaffEmail').value.trim().toLowerCase();
   const password = $('#newStaffPassword').value;
-  const role = $('#newStaffRole').value;
+  const service = permissionsService();
+  const role = service?.normalizeRole ? service.normalizeRole($('#newStaffRole').value) : $('#newStaffRole').value;
+  const roleLabel = service?.roleLabel ? service.roleLabel(role) : role;
+  const permissionLevel = service?.normalizePermission ? service.normalizePermission($('#newStaffPermission')?.value || 'LECTEUR') : ($('#newStaffPermission')?.value || 'LECTEUR');
+  const permissionLabel = service?.permissionLabel ? service.permissionLabel(permissionLevel) : permissionLevel;
   const scope = $('#newStaffScope').value.trim();
+  const teamIds = readCsvField('newStaffTeams');
+  const allowedModules = readCsvField('newStaffModules');
+  const status = $('#newStaffStatus')?.value || 'ACTIVE';
   if(!email || !password || password.length < 6){ msg.textContent='Email et mot de passe de 6 caractères minimum obligatoires.'; msg.classList.add('bad'); return; }
 
   let secondary = null;
@@ -2248,7 +2343,8 @@ async function createMember(){
     await firebaseFns.updateProfile(cred.user, {displayName:name || email});
 
     await firebaseFns.setDoc(firebaseFns.doc(db, 'staff_members', cred.user.uid), {
-      uid:cred.user.uid, name:name || email, email, role, scope:scope || 'CoachPulse', status:'ACTIVE',
+      uid:cred.user.uid, name:name || email, email, role, roleLabel, permissionLevel, permissionLabel, scope:scope || teamIds.join(', ') || 'CoachPulse', teamIds, allowedTeamIds:teamIds, allowedModules, modulePermissions:{}, status,
+      userType:'staff',
       createdBy:currentUser.uid, createdByEmail:currentUser.email, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp()
     }, {merge:true});
 
@@ -2271,12 +2367,149 @@ async function createMember(){
   }
 }
 function resetMemberForm(clearMsg=true){
-  ['newStaffName','newStaffEmail','newStaffPassword','newStaffScope'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
-  $('#newStaffRole').value='EDUCATEUR';
+  ['newStaffName','newStaffEmail','newStaffPassword','newStaffScope','newStaffTeams','newStaffModules'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
+  $('#newStaffRole').value='ENTRAINEUR';
+  if($('#newStaffPermission')) $('#newStaffPermission').value='LECTEUR';
+  if($('#newStaffStatus')) $('#newStaffStatus').value='ACTIVE';
+  refreshAdminAccessPickers();
   if(clearMsg){ $('#adminMsg').textContent=''; $('#adminMsg').classList.remove('bad'); }
 }
+function roleOptions(selected='ENTRAINEUR'){
+  const service = permissionsService();
+  const labels = service?.ROLE_LABELS || {RESPONSABLE_POLE:'Responsable de pôle',ENTRAINEUR:'Entraîneur',ENTRAINEUR_ADJOINT:'Entraîneur adjoint',PREPARATEUR_PHYSIQUE:'Préparateur physique',KINE:'Kiné',MEDECIN:'Médecin',DIRIGEANT:'Dirigeant'};
+  const current = service?.normalizeRole ? service.normalizeRole(selected) : selected;
+  return Object.entries(labels).map(([role,label]) => `<option value="${role}" ${role===current?'selected':''}>${escapeHtml(label)}</option>`).join('');
+}
+function permissionOptions(selected='LECTEUR'){
+  const service = permissionsService();
+  const labels = service?.PERMISSION_LABELS || {LECTEUR:'Lecteur',SAISIE:'Saisie',EDITEUR:'Éditeur',ADMIN:'Admin'};
+  const current = service?.normalizePermission ? service.normalizePermission(selected) : selected;
+  return Object.entries(labels).map(([permission,label]) => `<option value="${permission}" ${permission===current?'selected':''}>${escapeHtml(label)}</option>`).join('');
+}
+function readCsvField(id){
+  return parseAccessList($('#'+id)?.value || '');
+}
+function parseAccessList(value){
+  return [...new Set(String(value || '').split(/[,;\n]+/).map(v => v.trim()).filter(Boolean))];
+}
+function accessChoiceKey(value){
+  return String(value || '').trim().toLowerCase();
+}
+function uniqueAccessChoices(items=[]){
+  const seen = new Set();
+  return items.map(item => {
+    const value = String(item?.value || '').trim();
+    const label = String(item?.label || value).trim();
+    const hint = String(item?.hint || '').trim();
+    return value ? {value, label, hint} : null;
+  }).filter(Boolean).filter(item => {
+    const key = accessChoiceKey(item.value);
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function moduleAccessChoices(){
+  return uniqueAccessChoices(moduleRegistry()
+    .filter(module => module.id !== 'home')
+    .map(module => ({
+      value:module.id,
+      label:module.name,
+      hint:module.section === 'admin' ? 'Admin' : (module.section === 'future' ? 'À venir' : 'Staff')
+    })));
+}
+async function loadAdminAccessChoices(force=false){
+  if(adminAccessChoiceCache && !force) return adminAccessChoiceCache;
+  const moduleChoices = moduleAccessChoices();
+  const baseTeamChoices = DEFAULT_DB_OPTIONS.categories.map(value => ({value, label:value, hint:'Catégorie'}));
+  let teamChoices = [...baseTeamChoices];
+  try{
+    const data = await adminListTeamsAndSettings();
+    const settings = data?.settings || {};
+    teamChoices = [
+      ...(Array.isArray(settings.categories) ? settings.categories : []).map(value => ({value, label:value, hint:'Catégorie'})),
+      ...(Array.isArray(settings.subCategories) ? settings.subCategories : []).map(value => ({value, label:value, hint:'Sous-catégorie'})),
+      ...(data?.teams || []).map(team => {
+        const value = team.teamId || team.id || team.name || team.category || '';
+        const label = team.name || team.teamName || value;
+        const hint = team.category || team.level || 'Équipe';
+        return {value, label, hint};
+      }),
+      ...baseTeamChoices
+    ];
+  }catch(_e){}
+  adminAccessChoiceCache = {
+    teams:uniqueAccessChoices(teamChoices).sort((a,b) => a.label.localeCompare(b.label, 'fr', {numeric:true})),
+    modules:moduleChoices
+  };
+  return adminAccessChoiceCache;
+}
+function renderAccessPicker(kind, selected=[], choices=[], inputAttrs=''){
+  const selectedKeys = new Set(parseAccessList(selected).map(accessChoiceKey));
+  const knownKeys = new Set(choices.map(choice => accessChoiceKey(choice.value)));
+  const extraChoices = parseAccessList(selected)
+    .filter(value => value && !knownKeys.has(accessChoiceKey(value)))
+    .map(value => ({value, label:value, hint:'Personnalisé'}));
+  const allChoices = uniqueAccessChoices([...choices, ...extraChoices]);
+  const selectedValues = allChoices.filter(choice => selectedKeys.has(accessChoiceKey(choice.value))).map(choice => choice.value);
+  const list = allChoices.length ? allChoices.map(choice => {
+    const checked = selectedKeys.has(accessChoiceKey(choice.value)) ? 'checked' : '';
+    const title = choice.hint ? `${choice.label} · ${choice.hint}` : choice.label;
+    return `<label class="access-choice" title="${escapeHtml(title)}"><input type="checkbox" data-access-choice="${escapeHtml(kind)}" value="${escapeHtml(choice.value)}" ${checked}><span>${escapeHtml(choice.label)}</span>${choice.hint ? `<small>${escapeHtml(choice.hint)}</small>` : ''}</label>`;
+  }).join('') : '<div class="admin-note">Aucun choix disponible.</div>';
+  const summary = selectedValues.length ? `${selectedValues.length} sélectionné(s)` : 'Aucun accès spécifique';
+  const selectedLabel = selectedValues.length ? selectedValues.slice(0, 2).join(', ') + (selectedValues.length > 2 ? ` +${selectedValues.length - 2}` : '') : 'Choisir';
+  return `<details class="access-picker" data-access-kind="${escapeHtml(kind)}"><summary><span class="access-summary">${escapeHtml(summary)}</span><b>${escapeHtml(selectedLabel)}</b></summary><input type="hidden" ${inputAttrs} value="${escapeHtml(selectedValues.join(', '))}"><div class="access-choice-list">${list}</div></details>`;
+}
+function syncAccessPicker(picker){
+  if(!picker) return;
+  const selected = [...picker.querySelectorAll('[data-access-choice]:checked')].map(input => input.value);
+  const hidden = picker.querySelector('input[type="hidden"]');
+  if(hidden) hidden.value = selected.join(', ');
+  const summary = picker.querySelector('.access-summary');
+  if(summary) summary.textContent = selected.length ? `${selected.length} sélectionné(s)` : 'Aucun accès spécifique';
+  const label = picker.querySelector('summary b');
+  if(label) label.textContent = selected.length ? selected.slice(0, 2).join(', ') + (selected.length > 2 ? ` +${selected.length - 2}` : '') : 'Choisir';
+}
+function ensureAccessPickerStyles(){
+  if(document.getElementById('accessPickerStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'accessPickerStyles';
+  style.textContent = `.access-picker{position:relative;border:1px solid var(--line);border-radius:12px;background:#fff}.access-picker summary{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:8px 10px;cursor:pointer;list-style:none}.access-picker summary::-webkit-details-marker{display:none}.access-picker summary:after{content:'⌄';color:var(--muted);font-weight:1000}.access-picker[open] summary:after{content:'⌃'}.access-picker summary b{font-size:12px;color:#06351f;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.access-choice-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;max-height:210px;overflow:auto;padding:8px;border-top:1px solid var(--line);background:#fff;box-shadow:0 14px 30px rgba(6,23,13,.10);border-radius:0 0 12px 12px}.access-choice{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:10px;background:#f8fafc;padding:8px;cursor:pointer;min-width:0}.access-choice input{width:auto!important;margin:0}.access-choice span{font-weight:900;color:#06351f;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.access-choice small{margin-left:auto;color:var(--muted);font-size:10px;font-weight:900;text-transform:uppercase}.access-choice:has(input:checked){border-color:rgba(29,153,91,.55);background:#eef8f2}.access-summary{color:var(--muted);font-size:12px;font-weight:900;white-space:nowrap}.staff-table .access-picker{min-width:190px}.staff-table .access-choice-list{grid-template-columns:minmax(130px,1fr);max-height:170px}.staff-table .access-choice small{display:none}`;
+  document.head.appendChild(style);
+}
+async function refreshAdminAccessPickers(){
+  if(!isSuperAdmin()) return;
+  const choices = await loadAdminAccessChoices();
+  const teamsBox = $('#newStaffTeamsPicker');
+  const modulesBox = $('#newStaffModulesPicker');
+  if(teamsBox) teamsBox.innerHTML = renderAccessPicker('teams', readCsvField('newStaffTeams'), choices.teams, 'id="newStaffTeams"');
+  if(modulesBox) modulesBox.innerHTML = renderAccessPicker('modules', readCsvField('newStaffModules'), choices.modules, 'id="newStaffModules"');
+}
+function ensureUserAdminFields(){
+  ensureAccessPickerStyles();
+  const roleSelect = $('#newStaffRole');
+  if(roleSelect && !roleSelect.dataset.extendedRoles){
+    const roleLabel = roleSelect.closest('.field')?.querySelector('label');
+    if(roleLabel) roleLabel.textContent = 'Rôle métier';
+    roleSelect.innerHTML = roleOptions('ENTRAINEUR');
+    roleSelect.dataset.extendedRoles = '1';
+    roleSelect.closest('.field')?.insertAdjacentHTML('afterend', `<div class="field"><label>Permission</label><select id="newStaffPermission">${permissionOptions('LECTEUR')}</select></div>`);
+  }
+  const scope = $('#newStaffScope');
+  if(scope && !$('#newStaffTeams')){
+    scope.closest('.field')?.insertAdjacentHTML('afterend', `<div class="form-grid"><div class="field"><label>Équipes autorisées</label><div id="newStaffTeamsPicker" class="admin-note">Chargement des équipes...</div></div><div class="field"><label>Modules autorisés</label><div id="newStaffModulesPicker" class="admin-note">Chargement des modules...</div></div></div><div class="field"><label>Statut</label><select id="newStaffStatus"><option value="ACTIVE">Actif</option><option value="INACTIVE">Inactif</option><option value="ARCHIVED">Archivé</option></select></div>`);
+  }
+  const roleList = document.querySelector('.role-list');
+  if(roleList && !roleList.dataset.extendedRoles){
+    roleList.innerHTML = `<div><b>Rôle métier</b><span>Fonction dans le club : responsable de pôle, entraîneur, adjoint, préparateur, kiné, médecin ou dirigeant.</span></div><div><b>Équipes</b><span>Périmètre sportif accessible. Plusieurs équipes peuvent être sélectionnées.</span></div><div><b>Modules</b><span>Périmètre fonctionnel visible dans CoachPulse.</span></div><div><b>Lecteur</b><span>Consultation uniquement sur les modules autorisés.</span></div><div><b>Saisie</b><span>Consultation et ajout/modification courante sur les modules autorisés.</span></div><div><b>Éditeur</b><span>Droits avancés sur les modules autorisés, avec accès aux actions d’administration si le module est autorisé.</span></div><div><b>Admin</b><span>Tous les droits, toutes les équipes et tous les modules.</span></div>`;
+    roleList.dataset.extendedRoles = '1';
+  }
+}
 async function loadMembers(){
-  if(!db || !isAdmin()) return;
+  if(!db || !isSuperAdmin()) return;
+  ensureUserAdminFields();
+  const choices = await loadAdminAccessChoices();
   const tbody = $('#membersTbody'); if(!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6">Chargement...</td></tr>';
   try{
@@ -2287,7 +2520,11 @@ async function loadMembers(){
     snap.forEach(docSnap => {
       const m = {uid:docSnap.id, ...docSnap.data()};
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><b>${escapeHtml(m.name||'-')}</b></td><td>${escapeHtml(m.email||'-')}</td><td><select data-role="${m.uid}">${['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'].map(r=>`<option value="${r}" ${r===(m.role||'')?'selected':''}>${r}</option>`).join('')}</select></td><td>${escapeHtml(m.scope||'-')}</td><td><span class="role-pill">${escapeHtml(m.status||'ACTIVE')}</span></td><td><div class="staff-actions"><button data-reset="${m.email||''}">Reset MDP</button><button data-save="${m.uid}">Sauver rôle</button><button class="danger" data-archive="${m.uid}">${m.status==='ARCHIVED'?'Réactiver':'Archiver'}</button></div></td>`;
+      const teams = [...new Set([...(m.teamIds || []), ...(m.allowedTeamIds || [])])].filter(Boolean);
+      const modules = m.allowedModules || [];
+      const teamPicker = renderAccessPicker('teams', teams, choices.teams, `data-teams="${escapeHtml(m.uid)}"`);
+      const modulePicker = renderAccessPicker('modules', modules, choices.modules, `data-modules="${escapeHtml(m.uid)}"`);
+      tr.innerHTML = `<td><b>${escapeHtml(m.name||'-')}</b></td><td>${escapeHtml(m.email||'-')}</td><td><label class="admin-note">Rôle métier</label><select data-role="${m.uid}">${roleOptions(m.role)}</select><label class="admin-note" style="display:block;margin-top:8px">Permission</label><select data-permission="${m.uid}">${permissionOptions(m.permissionLevel || m.permission || m.role)}</select></td><td><label class="admin-note">Équipes</label>${teamPicker}<label class="admin-note" style="display:block;margin-top:8px">Modules</label>${modulePicker}</td><td><select data-status="${m.uid}"><option value="ACTIVE" ${String(m.status||'ACTIVE').toUpperCase()==='ACTIVE'?'selected':''}>Actif</option><option value="INACTIVE" ${String(m.status||'').toUpperCase()==='INACTIVE'?'selected':''}>Inactif</option><option value="ARCHIVED" ${String(m.status||'').toUpperCase()==='ARCHIVED'?'selected':''}>Archivé</option></select></td><td><div class="staff-actions"><button data-reset="${m.email||''}">Reset MDP</button><button data-save="${m.uid}">Sauver accès</button><button class="danger" data-archive="${m.uid}">${String(m.status||'ACTIVE').toUpperCase()==='ARCHIVED'?'Réactiver':'Archiver'}</button></div></td>`;
       tbody.appendChild(tr);
     });
   }catch(e){ tbody.innerHTML = `<tr><td colspan="6">Erreur : ${escapeHtml(cleanError(e))}</td></tr>`; }
@@ -2394,11 +2631,48 @@ async function adminTableClick(e){
   const resetEmail = e.target?.dataset?.reset;
   const saveUid = e.target?.dataset?.save;
   const archiveUid = e.target?.dataset?.archive;
+  if((resetEmail || saveUid || archiveUid) && !isSuperAdmin()){
+    alert('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.');
+    return;
+  }
   try{
     if(resetEmail){ await firebaseFns.sendPasswordResetEmail(auth, resetEmail); alert('Email de réinitialisation envoyé à '+resetEmail); }
-    if(saveUid){ const role = document.querySelector(`[data-role="${saveUid}"]`)?.value || 'EDUCATEUR'; await firebaseFns.setDoc(firebaseFns.doc(db,'staff_members',saveUid), {role, updatedAt:firebaseFns.serverTimestamp(), updatedBy:currentUser.uid}, {merge:true}); alert('Rôle mis à jour.'); await loadMembers(); }
-    if(archiveUid){ const ref=firebaseFns.doc(db,'staff_members',archiveUid); const snap=await firebaseFns.getDoc(ref); const current=snap.data()?.status; await firebaseFns.setDoc(ref,{status:current==='ARCHIVED'?'ACTIVE':'ARCHIVED', updatedAt:firebaseFns.serverTimestamp(), updatedBy:currentUser.uid},{merge:true}); await loadMembers(); }
+    if(saveUid){
+      const service = permissionsService();
+      const role = service?.normalizeRole ? service.normalizeRole(document.querySelector(`[data-role="${saveUid}"]`)?.value || 'ENTRAINEUR') : (document.querySelector(`[data-role="${saveUid}"]`)?.value || 'ENTRAINEUR');
+      const permissionLevel = service?.normalizePermission ? service.normalizePermission(document.querySelector(`[data-permission="${saveUid}"]`)?.value || 'LECTEUR') : (document.querySelector(`[data-permission="${saveUid}"]`)?.value || 'LECTEUR');
+      const teamIds = parseAccessList(document.querySelector(`[data-teams="${saveUid}"]`)?.value || '');
+      const allowedModules = parseAccessList(document.querySelector(`[data-modules="${saveUid}"]`)?.value || '');
+      const status = String(document.querySelector(`[data-status="${saveUid}"]`)?.value || 'ACTIVE').toUpperCase();
+      await firebaseFns.setDoc(firebaseFns.doc(db,'staff_members',saveUid), {
+        role,
+        roleLabel:service?.roleLabel ? service.roleLabel(role) : role,
+        permissionLevel,
+        permissionLabel:service?.permissionLabel ? service.permissionLabel(permissionLevel) : permissionLevel,
+        teamIds,
+        allowedTeamIds:teamIds,
+        allowedModules,
+        status,
+        userType:'staff',
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:new Date().toISOString(),
+        updatedBy:currentUser.uid,
+        updatedByEmail:currentUser.email || ''
+      }, {merge:true});
+      alert('Accès utilisateur mis à jour.');
+      await loadMembers();
+    }
+    if(archiveUid){
+      const ref=firebaseFns.doc(db,'staff_members',archiveUid);
+      const snap=await firebaseFns.getDoc(ref);
+      const current=String(snap.data()?.status || 'ACTIVE').toUpperCase();
+      await firebaseFns.setDoc(ref,{status:current==='ARCHIVED'?'ACTIVE':'ARCHIVED', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''},{merge:true});
+      await loadMembers();
+    }
   }catch(err){ alert('Action impossible : '+cleanError(err)); }
+}
+function adminAccessPickerChange(e){
+  if(e.target?.matches?.('[data-access-choice]')) syncAccessPicker(e.target.closest('.access-picker'));
 }
 
 $('#menuBtn').addEventListener('click', () => { if(window.matchMedia('(max-width:1180px)').matches) openDrawer(); else shell.classList.toggle('collapsed'); });
@@ -2451,8 +2725,9 @@ $('#exportCentralJson')?.addEventListener('click', () => exportCentralFirestore(
 $('#exportCentralCsv')?.addEventListener('click', () => exportCentralFirestore('csv'));
 $('#createMemberBtn').addEventListener('click', createMember);
 $('#resetMemberFormBtn').addEventListener('click', () => resetMemberForm(true));
-$('#refreshMembersBtn').addEventListener('click', loadMembers);
+$('#refreshMembersBtn').addEventListener('click', async () => { adminAccessChoiceCache = null; await refreshAdminAccessPickers(); await loadMembers(); });
 $('#membersTbody').addEventListener('click', adminTableClick);
+adminView?.addEventListener('change', adminAccessPickerChange);
 
 window.addEventListener('online', () => { updateSyncState('Retour Internet · sync...'); syncCloud(false); });
 window.addEventListener('offline', () => updateSyncState('Hors ligne · local actif'));
