@@ -362,7 +362,11 @@ async function ensureUserProfile(user){
       currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
     }
     if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(currentProfile.status || '').toUpperCase())) throw new Error('Compte inactif. Contacte un administrateur.');
-    await firebaseFns.setDoc(ref, {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email, legacyRole, role:currentProfile.role, roleLabel:currentProfile.roleLabel, permissionLevel:currentProfile.permissionLevel, permissionLabel:currentProfile.permissionLabel, allowedModules:currentProfile.allowedModules || []}, {merge:true});
+    const loginPatch = {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email};
+    if(seedAdmin || isAdminLikeProfile(currentProfile)){
+      Object.assign(loginPatch, {legacyRole, role:currentProfile.role, roleLabel:currentProfile.roleLabel, permissionLevel:currentProfile.permissionLevel, permissionLabel:currentProfile.permissionLabel, allowedModules:currentProfile.allowedModules || [], status:currentProfile.status || 'ACTIVE'});
+    }
+    await firebaseFns.setDoc(ref, loginPatch, {merge:true});
     return currentProfile;
   }
   const email = (user.email || '').toLowerCase();
