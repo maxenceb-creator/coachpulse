@@ -73,6 +73,21 @@
     return 'U19';
   }
 
+  function categoryForSubCategory(value){
+    const official = resolveOfficialTeam(value);
+    if(official) return official.category;
+    const raw = normalizeTeamName(value);
+    if(raw === 'R1' || raw.includes('SENIOR') || raw.includes('SÉNIOR')) return 'SENIORS';
+    const n = Number((raw.match(/\d+/) || [])[0] || 0);
+    if(!n) return raw;
+    if(n <= 7) return 'U7';
+    if(n <= 9) return 'U9';
+    if(n <= 11) return 'U11';
+    if(n <= 14) return 'U13';
+    if(n <= 16) return 'U16';
+    return 'U19';
+  }
+
   function officialTeamRows(){
     return OFFICIAL_TEAMS.map(team => normalizeTeam({
       ...team,
@@ -227,7 +242,7 @@
 
   const service = {
     COLLECTION, SETTINGS_COLLECTION, OPTIONS_ID, OFFICIAL_TEAMS, DEFAULT_DB_OPTIONS,
-    stableId, canonicalTeamId, defaultTeamForSubCategory, resolveOfficialTeam, cleanOptionList,
+    stableId, canonicalTeamId, defaultTeamForSubCategory, categoryForSubCategory, resolveOfficialTeam, cleanOptionList,
     officialTeamRows, mergeWithOfficialTeams, normalizeTeam, normalizeTeamForWrite,
     listTeams, ensureOfficialTeams, getTeam, saveTeam, archiveTeam, readDatabaseOptions, saveDatabaseOptions
   };

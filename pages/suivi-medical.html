@@ -95,10 +95,11 @@ function pid(p){return p.playerId||p.id}
 function upper(v){return String(v??'').trim().toUpperCase()}
 function slug(v){return upper(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9]+/g,'')}
 function personKey(p){return [p?.nom||p?.lastName,p?.prenom||p?.firstName].map(slug).join('|')}
-function teamCategoryFromSubCategory(value){const raw=upper(value).replace(/\s+/g,'');if(raw==='R1'||raw.includes('SENIOR')||raw.includes('SÉNIOR'))return 'SENIORS';const n=Number((raw.match(/\d+/)||[])[0]||0);if(!n)return '';if(n<=7)return 'U7';if(n<=9)return 'U9';if(n<=11)return 'U11';if(n<=14)return 'U13';if(n<=16)return 'U16';return 'U19'}
+function seasonSnapshot(p,season=selectedMedicalSeason()){return api()?.playerSeasonSnapshot?.(p,season)||api()?.playerForSeason?.(p,season)||p}
+function teamCategoryFromSubCategory(value){const snap=api()?.playerSeasonSnapshot?.({birth:'',subCategory:value},selectedMedicalSeason());if(snap?.categorie)return snap.categorie;const raw=upper(value).replace(/\s+/g,'');if(raw==='R1'||raw.includes('SENIOR')||raw.includes('SÉNIOR'))return 'SENIORS';const n=Number((raw.match(/\d+/)||[])[0]||0);if(!n)return '';if(n<=7)return 'U7';if(n<=9)return 'U9';if(n<=11)return 'U11';if(n<=14)return 'U13';if(n<=16)return 'U16';return 'U19'}
 function playerSubCategory(p){return p?.subCategory||p?.sousCategorie||(/^U([1-9]|1[0-9])$/i.test(String(p?.categorie||p?.category||'').trim())?p.categorie||p.category:'')}
 function playerMainCategory(p){const raw=p?.categorie||p?.category||p?.team||'';return /^U([1-9]|1[0-9])$/i.test(String(raw).trim())?teamCategoryFromSubCategory(raw):(raw||teamCategoryFromSubCategory(playerSubCategory(p)))}
-function normalizeMedicalPlayer(p){const sub=playerSubCategory(p);const cat=playerMainCategory(p);return {...p,nom:upper(p.nom||p.lastName),prenom:upper(p.prenom||p.firstName),displayName:playerName({...p,nom:p.nom||p.lastName,prenom:p.prenom||p.firstName}),categorie:cat,subCategory:sub,team:p.team||cat,teamId:p.teamId||''}}
+function normalizeMedicalPlayer(p){const ps=seasonSnapshot(p);const sub=ps?.subCategory||playerSubCategory(p);const cat=ps?.categorie||playerMainCategory(p);return {...p,...ps,nom:upper(ps?.nom||p.nom||p.lastName),prenom:upper(ps?.prenom||p.prenom||p.firstName),displayName:playerName({...p,...ps,nom:ps?.nom||p.nom||p.lastName,prenom:ps?.prenom||p.prenom||p.firstName}),categorie:cat,subCategory:sub,team:ps?.team||p.team||cat,teamId:ps?.teamId||p.teamId||''}}
 function playerName(p){const direct=[p?.prenom||p?.firstName,p?.nom||p?.lastName].filter(Boolean).join(' ');return upper(direct||p?.displayName)}
 function playerById(id,snapshot={}){const direct=players.find(p=>pid(p)===id);if(direct)return direct;const key=personKey(snapshot);return (key&&players.find(p=>personKey(p)===key))||normalizeMedicalPlayer(snapshot||{})||{}}
 function painBand(v){v=Number(v||0);return v>=7?'high':v>=4?'mid':'low'}
@@ -113,7 +114,7 @@ function preferredPlayerId(){return $('#playerSelect').value||$('#filterPlayer')
 function currentSeason(){return api()?.currentSeason?.()||'2026-2027'}
 function injurySeason(i){return i.season||api()?.seasonFromDate?.(i.declaredAt||i.date)||currentSeason()}
 function selectedMedicalSeason(){const v=$('#filterSeason')?.value||'';return !v||v==='all'?currentSeason():v}
-function playerForSeasonView(p,season=selectedMedicalSeason()){return api()?.playerForSeason?.(p,season)||p}
+function playerForSeasonView(p,season=selectedMedicalSeason()){return api()?.playerForSeason?.(p,season)||seasonSnapshot(p,season)||p}
 function playerForInjury(i){return playerForSeasonView(playerById(i.playerId,i.playerSnapshot),injurySeason(i))}
 function sortByDateDesc(rows){return [...rows].sort((a,b)=>String(b.declaredAt||b.date||'').localeCompare(String(a.declaredAt||a.date||'')))}
 function setStatus(t,b=false){$('#status').textContent=t;$('#status').classList.toggle('bad',b)}

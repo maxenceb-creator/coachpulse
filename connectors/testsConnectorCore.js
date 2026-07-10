@@ -1,4 +1,4 @@
-import { cleanText, keyText, stableId, parseDate, normalizeCategorie, normalizeSousCategorie, splitName } from './fichesJoueusesConnector.js';
+import { cleanText, keyText, stableId, parseDate, normalizeConnectorPlayer, splitName } from './fichesJoueusesConnector.js';
 
 const BASE_ALIASES = {
   fullName:['joueuse','joueur','nom complet','nom prenom','nom prénom','nom et prenom','nom et prénom','nom prénom concaténé','licencie','licencié','player'],
@@ -51,13 +51,11 @@ function inferUnit(testName, explicit=''){
 
 function playerFromMapped(mapped, rowNumber, connector){
   const names = splitName(mapped);
-  const fullName = cleanText(mapped.fullName || '');
-  if(!names.nom && !names.prenom && !fullName) return {error:'joueuse non détectée'};
-  const sousCategorie = normalizeSousCategorie(mapped.sousCategorie || mapped.categorie || '');
-  const categorie = normalizeCategorie(mapped.categorie || sousCategorie || '');
+  if(!names.nom && !names.prenom) return {error:'joueuse non détectée'};
+  if(!names.nom || !names.prenom) return {error:'nom ou prénom incomplet'};
   const dateNaissance = parseDate(mapped.dateNaissance);
-  const playerId = stableId('player', names.prenom || fullName, names.nom, dateNaissance || 'no-birth');
-  return {type:'player', connector, rowNumber, playerId, nom:names.nom, prenom:names.prenom, fullName, categorie, sousCategorie, dateNaissance, birth:dateNaissance};
+  const player = normalizeConnectorPlayer({nom:names.nom, prenom:names.prenom, categorie:mapped.categorie, subCategory:mapped.sousCategorie, birth:dateNaissance, dateNaissance});
+  return {type:'player', connector, rowNumber, playerId:player.playerId, nom:player.nom, prenom:player.prenom, categorie:player.categorie, sousCategorie:player.subCategory || player.sousCategorie, subCategory:player.subCategory || player.sousCategorie, team:player.team || '', teamId:player.teamId || '', dateNaissance, birth:dateNaissance};
 }
 
 function shouldUseWideColumn(header, value, mode){
