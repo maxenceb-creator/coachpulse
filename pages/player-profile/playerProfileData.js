@@ -47,8 +47,27 @@
     const nom = text(player.nom || player.lastName);
     const prenom = text(player.prenom || player.firstName);
     const birth = text(player.birth || player.dateNaissance || player.birthDate);
+    [
+      nom,
+      prenom,
+      player.displayName,
+      player.name,
+      player.playerName,
+      [prenom, nom].filter(Boolean).join(' '),
+      [nom, prenom].filter(Boolean).join(' ')
+    ].forEach(value => {
+      const raw = text(value);
+      if(raw){
+        aliases.add(raw);
+        aliases.add(raw.toUpperCase());
+        raw.split(/\s+/).map(text).filter(Boolean).forEach(part => {
+          aliases.add(part);
+          aliases.add(part.toUpperCase());
+        });
+      }
+    });
     if(nom || prenom){
-      [birth, birth || 'no-birth'].forEach(date => {
+      [birth, 'no-birth'].filter(Boolean).forEach(date => {
         aliases.add(stableId('player', nom, prenom, date));
         aliases.add(stableId('player', prenom, nom, date));
       });
@@ -56,6 +75,26 @@
       aliases.add(stableId(prenom, nom));
     }
     return [...aliases].filter(Boolean);
+  }
+  function normName(value){
+    return text(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  }
+  function rowPlayerNames(row={}){
+    return [
+      row.playerName,
+      row.joueuse,
+      row.name,
+      row.nom,
+      row.prenom,
+      row.fullName,
+      row.displayName,
+      [row.prenom, row.nom].filter(Boolean).join(' '),
+      [row.nom, row.prenom].filter(Boolean).join(' '),
+      row.playerSnapshot?.displayName,
+      row.player?.displayName,
+      [row.playerSnapshot?.prenom, row.playerSnapshot?.nom].filter(Boolean).join(' '),
+      [row.player?.prenom, row.player?.nom].filter(Boolean).join(' ')
+    ].map(text).filter(Boolean);
   }
   function rowPlayerIds(row={}){
     const out = [];
@@ -83,9 +122,10 @@
   }
   function rowMatchesPlayer(row={}, aliases=[]){
     const ids = rowPlayerIds(row);
-    if(!ids.length) return false;
     const set = new Set(aliases);
-    return ids.some(id => set.has(id));
+    if(ids.some(id => set.has(id))) return true;
+    const normalizedAliases = new Set(aliases.map(normName).filter(Boolean));
+    return rowPlayerNames(row).some(name => normalizedAliases.has(normName(name)));
   }
   async function listPlayers(){
     if(api().listPlayers){

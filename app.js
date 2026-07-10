@@ -689,6 +689,83 @@ function addDoc(map, collection, id, data){
   const previous = map[collection].get(id) || {};
   map[collection].set(id, {...previous, ...data, id});
 }
+function profileAliasKey(value){
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+function rowsMatchingProfileAliases(rows=[], aliases=[]){
+  const exactAliases = new Set(aliases.map(value => String(value || '').trim()).filter(Boolean));
+  const nameAliases = new Set([...exactAliases].map(profileAliasKey).filter(Boolean));
+  return rows.filter(Boolean).filter(row => {
+    const candidates = [
+      row.playerId,
+      row.id,
+      row.playerID,
+      row.player_id,
+      row.legacyPlayerId,
+      row.oldPlayerId,
+      row.previousPlayerId,
+      row.playerKey,
+      row.playerRef,
+      row.externalId,
+      row.playerName,
+      row.joueuse,
+      row.name,
+      row.nom,
+      row.prenom,
+      row.displayName,
+      row.fullName,
+      [row.prenom, row.nom].filter(Boolean).join(' '),
+      [row.nom, row.prenom].filter(Boolean).join(' '),
+      row.playerSnapshot?.playerId,
+      row.playerSnapshot?.id,
+      row.playerSnapshot?.playerName,
+      row.playerSnapshot?.displayName,
+      row.playerSnapshot?.nom,
+      row.playerSnapshot?.prenom,
+      [row.playerSnapshot?.prenom, row.playerSnapshot?.nom].filter(Boolean).join(' '),
+      [row.playerSnapshot?.nom, row.playerSnapshot?.prenom].filter(Boolean).join(' '),
+      row.player?.playerId,
+      row.player?.id,
+      row.player?.playerName,
+      row.player?.displayName,
+      [row.player?.prenom, row.player?.nom].filter(Boolean).join(' '),
+      [row.player?.nom, row.player?.prenom].filter(Boolean).join(' ')
+    ].map(value => String(value || '').trim()).filter(Boolean);
+    return candidates.some(value => exactAliases.has(value) || nameAliases.has(profileAliasKey(value)));
+  });
+}
+function normalizeProfileTechnicalRows(rows=[]){
+  return rows.map((row, idx) => {
+    const sourcePlayerId = String(row.playerId || row.id || '').trim();
+    const testId = row.testId || stableFirestoreId('technical-local', sourcePlayerId || row.playerName || row.joueuse || 'joueuse', row.date || 'date-inconnue', row.saison || row.season || idx);
+    return {
+      ...row,
+      id:testId,
+      testId,
+      playerId:sourcePlayerId || row.playerId || '',
+      playerName:row.playerName || row.joueuse || '',
+      season:row.season || row.saison || seasonFromDate(row.date || new Date()),
+      source:row.source || 'Tests techniques local'
+    };
+  });
+}
+function localTechnicalTestsForProfile(aliases=[]){
+  return normalizeProfileTechnicalRows(rowsMatchingProfileAliases(parseStoredJson('coachStatsV13Rows', []), aliases));
+}
+let technicalTestsSeedRowsCache = null;
+async function seedTechnicalTestsForProfile(aliases=[]){
+  if(!technicalTestsSeedRowsCache){
+    try{
+      const response = await fetch('pages/tests-techniques.html', {cache:'no-store'});
+      const html = await response.text();
+      const match = html.match(/"hist":(\[[\s\S]*?\]),"obj":/);
+      technicalTestsSeedRowsCache = match ? JSON.parse(match[1]) : [];
+    }catch(_e){
+      technicalTestsSeedRowsCache = [];
+    }
+  }
+  return normalizeProfileTechnicalRows(rowsMatchingProfileAliases(technicalTestsSeedRowsCache, aliases));
+}
 function collectCentralFirestoreDocs(){
   const docs = Object.fromEntries(FIRESTORE_COLLECTIONS.map(name => [name, new Map()]));
   const players = [
@@ -697,7 +774,9 @@ function collectCentralFirestoreDocs(){
   ].filter(Boolean);
   const rows = parseStoredJson('coachStatsV13Rows', []);
   rows.forEach(row => {
-    if(row && row.joueuse) players.push({joueuse:row.joueuse, categorie:row.categorie, subCategory:row.sousCategorie, source:'Tests techniques'});
+    if(row && (row.playerId || row.playerName || row.joueuse)){
+      players.push({playerId:row.playerId || '', joueuse:row.playerName || row.joueuse, categorie:row.categorie, subCategory:row.sousCategorie, source:'Tests techniques'});
+    }
   });
   players.map(normalizePlayer).forEach(p => {
     if(!p.displayName) return;
@@ -726,11 +805,17 @@ function collectCentralFirestoreDocs(){
     addDoc(docs,'sessions',sessionId,{sessionId,date:e.date || e.start || '',type:'Séance',theme:e.title || e.theme || e.text || 'Séance',categories:e.categories || e.category || [],team:e.team || '',teamId,source:'Méthodologie'});
   });
   rows.forEach((row, idx) => {
-    const player = playerByName.get(stableFirestoreId(row.joueuse, row.categorie, row.sousCategorie)) || normalizePlayer({joueuse:row.joueuse,categorie:row.categorie,subCategory:row.sousCategorie,source:'Tests techniques'});
-    addDoc(docs,'players',player.playerId,{...player, updatedAtIso:new Date().toISOString()});
-    addDoc(docs,'technicalTests',row.testId || stableFirestoreId('technical', player.playerId, row.date, row.saison, idx), {
-      testId:row.testId || stableFirestoreId('technical', player.playerId, row.date, row.saison, idx),
-      playerId:player.playerId, playerName:row.joueuse || player.displayName, date:row.date || '', season:row.saison || '',
+    const sourcePlayerId = String(row.playerId || row.id || '').trim();
+    const sourceName = row.playerName || row.joueuse || '';
+    const player = playerIndex.get(sourcePlayerId)
+      || playerByName.get(stableFirestoreId(sourceName, row.categorie, row.sousCategorie))
+      || playerByName.get(stableFirestoreId(row.joueuse, row.categorie, row.sousCategorie))
+      || normalizePlayer({playerId:sourcePlayerId, joueuse:sourceName, categorie:row.categorie, subCategory:row.sousCategorie, source:'Tests techniques'});
+    const resolvedPlayerId = player.playerId || sourcePlayerId;
+    if(player.displayName) addDoc(docs,'players',resolvedPlayerId,{...player, playerId:resolvedPlayerId, updatedAtIso:new Date().toISOString()});
+    addDoc(docs,'technicalTests',row.testId || stableFirestoreId('technical', resolvedPlayerId, row.date, row.saison, idx), {
+      testId:row.testId || stableFirestoreId('technical', resolvedPlayerId, row.date, row.saison, idx),
+      playerId:resolvedPlayerId, playerName:sourceName || player.displayName, date:row.date || '', season:row.saison || '',
       categorie:row.categorie || player.categorie || '', subCategory:row.sousCategorie || player.subCategory || '', team:player.team || '', teamId:player.teamId || '',
       tests:row.tests || {}, objectifs:row.objectifs || {}, source:row.source || 'Tests techniques'
     });
@@ -856,10 +941,9 @@ async function playerProfileLoadData(options={}){
   }
   async function readPlayerLinkedCollection(collectionName){
     const primary = await readWhereIn(collectionName, 'playerId');
-    if(primary.length) return primary;
     const fallbackCollections = new Set(['attendance','matchEvents','technicalTests','physicalTests','injuries','medicalFollowUps']);
     if(!fallbackCollections.has(collectionName)) return primary;
-    const idFields = ['playerID','player_id','legacyPlayerId','oldPlayerId','playerKey'];
+    const idFields = ['playerID','player_id','legacyPlayerId','oldPlayerId','previousPlayerId','playerKey','playerRef','externalId','playerSnapshot.playerId','playerSnapshot.id','playerSnapshot.playerName','playerSnapshot.displayName','playerSnapshot.nom','playerSnapshot.prenom','player.playerId','player.id','player.playerName','player.displayName','playerName','joueuse','nom','prenom','name','displayName','fullName'];
     const arrayFields = ['playerIds','legacyPlayerIds','previousPlayerIds','aliases','aliasIds'];
     const results = await Promise.allSettled([
       ...idFields.map(field => readWhereIn(collectionName, field)),
@@ -896,6 +980,12 @@ async function playerProfileLoadData(options={}){
     if(!payload.collections.players.some(player => player.id === row.id)) payload.collections.players.push(row);
   });
   await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
+  const seedTechnicalTests = await seedTechnicalTestsForProfile(aliases);
+  payload.collections.technicalTests = [...new Map([
+    ...(payload.collections.technicalTests || []),
+    ...localTechnicalTestsForProfile(aliases),
+    ...seedTechnicalTests
+  ].map(row => [row.id || row.testId || stableFirestoreId('technical', row.playerId, row.date, row.season, row.playerName), row])).values()];
   const sessionIds = new Set((payload.collections.attendance || []).map(row => row.sessionId).filter(Boolean));
   const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
   const [sessions, matches] = await Promise.all([
