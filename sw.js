@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-55-20260710-player-profile-technical-tests';
+const CACHE_NAME = 'coachpulse-v6-4-60-20260710-athletic-profile-integration';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',
