@@ -1,7 +1,7 @@
 import { cleanText, keyText, stableId, parseDate, normalizeConnectorPlayer, splitName } from './fichesJoueusesConnector.js';
 
 const BASE_ALIASES = {
-  fullName:['joueuse','joueur','nom complet','nom prenom','nom prénom','licencie','licencié','player'],
+  fullName:['joueuse','joueur','nom complet','nom prenom','nom prénom','nom et prenom','nom et prénom','nom prénom concaténé','licencie','licencié','player'],
   nom:['nom','last name','surname'],
   prenom:['prenom','prénom','first name','firstname'],
   categorie:['categorie','catégorie','category','groupe','equipe','équipe','collectif'],
@@ -15,7 +15,7 @@ const BASE_ALIASES = {
 };
 
 const TECHNICAL_HINTS = /(jongle|jonglage|pied|pfp|pfm|tete|tête|conduite|passe|technique|max_|reg_|mouv_|dribble|contrôle|controle)/;
-const PHYSICAL_HINTS = /(vitesse|sprint|vma|endurance|force|detente|détente|agilite|agilité|physique|yo yo|yoyo|cooper|cmj|sj|navette|luc leger|léger)/;
+const PHYSICAL_HINTS = /(vitesse|sprint|vmi|vma|ift|30 15|endurance|force|detente|détente|agilite|agilité|illinois|physique|yo yo|yoyo|cooper|cmj|sj|navette|luc leger|léger)/;
 
 function detectColumn(header){
   const key = keyText(header);
@@ -25,6 +25,7 @@ function detectColumn(header){
   for(const [field, aliases] of Object.entries(BASE_ALIASES)){
     if(aliases.some(alias => {
       const aliasKey = keyText(alias);
+      if(field === 'testName' && aliasKey === 'test') return false;
       return aliasKey.length > 3 && key.includes(aliasKey);
     })) return field;
   }
@@ -41,7 +42,8 @@ function toNumber(value){
 function inferUnit(testName, explicit=''){
   if(explicit) return cleanText(explicit);
   const key = keyText(testName);
-  if(/vitesse|sprint|agilite|agilite|navette/.test(key)) return 's';
+  if(/km h|kmh|vmi|ift|30 15/.test(key)) return 'km/h';
+  if(/vitesse|sprint|agilite|agilite|illinois|navette/.test(key)) return 's';
   if(/vma|endurance|cooper|yo yo|yoyo|luc leger/.test(key)) return 'palier';
   if(/detente|cmj|sj/.test(key)) return 'cm';
   return '';
@@ -106,9 +108,6 @@ export function createTestAnalyzer({mode, connector, itemType}){
         result.anomalies.push({row:rowNumber, level:player.error.includes('incomplet')?'error':'ignored', message:`Ligne ignorée : ${player.error}`});
         return;
       }
-      if(!player.dateNaissance) result.anomalies.push({row:rowNumber, level:'warn', message:`Date de naissance manquante : rapprochement playerId moins fiable pour ${player.nom} ${player.prenom}`});
-      result.items.push(player);
-
       const date = parseDate(mapped.date);
       const season = cleanText(mapped.season || '');
       const directValue = toNumber(mapped.value);
@@ -120,7 +119,7 @@ export function createTestAnalyzer({mode, connector, itemType}){
         seen.add(key);
         result.items.push({
           type:itemType, connector, rowNumber, testId, playerId:player.playerId,
-          playerName:`${player.nom} ${player.prenom}`.trim(), date, season,
+          playerName:player.fullName || `${player.nom} ${player.prenom}`.trim(), nom:player.nom, prenom:player.prenom, fullName:player.fullName, date, season,
           categorie:player.categorie, sousCategorie:player.sousCategorie,
           testName, value:directValue, unit:inferUnit(testName, mapped.unit)
         });
@@ -136,7 +135,7 @@ export function createTestAnalyzer({mode, connector, itemType}){
         seen.add(key);
         result.items.push({
           type:itemType, connector, rowNumber, testId, playerId:player.playerId,
-          playerName:`${player.nom} ${player.prenom}`.trim(), date, season,
+          playerName:player.fullName || `${player.nom} ${player.prenom}`.trim(), nom:player.nom, prenom:player.prenom, fullName:player.fullName, date, season,
           categorie:player.categorie, sousCategorie:player.sousCategorie,
           testName, value:numeric, unit:inferUnit(testName, mapped.unit)
         });

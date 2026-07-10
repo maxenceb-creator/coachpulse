@@ -1440,15 +1440,59 @@ function normalizeDataHubAttendance(item, meta={}){
     source:meta.fileName || item.source || 'Data Hub'
   };
 }
-function normalizeDataHubTest(item, meta={}){
+function resolveDataHubPlayerRef(existing, item={}){
+  if(!existing) return null;
+  const direct = item.playerId ? existing.byId?.get(item.playerId) : null;
+  if(direct) return direct;
+  const nameKey = value => String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '');
+  const fullNameKey = nameKey(item.fullName || item.playerName || item.joueuse);
+  if(fullNameKey && existing.byId){
+    const foundByFullName = [...existing.byId.values()].find(player => {
+      const names = [
+        player.displayName,
+        player.playerName,
+        `${player.nom || ''} ${player.prenom || ''}`,
+        `${player.prenom || ''} ${player.nom || ''}`
+      ].map(nameKey);
+      return names.includes(fullNameKey);
+    });
+    if(foundByFullName) return foundByFullName;
+  }
+  const names = splitImportName({
+    nom:item.nom,
+    prenom:item.prenom,
+    fullName:item.fullName || item.playerName || item.joueuse
+  });
+  const candidates = [
+    stableFirestoreId('person', names.nom, names.prenom, item.birth || item.dateNaissance || ''),
+    stableFirestoreId('person', names.nom, names.prenom)
+  ].filter(Boolean);
+  return candidates.map(key => existing.byPerson?.get(key)).find(Boolean) || null;
+}
+function normalizeDataHubTest(item, meta={}, existing=null){
   const collection = item.type === 'physicalTest' ? 'physicalTests' : 'technicalTests';
-  const testId = item.testId || stableFirestoreId(item.type || 'test', item.playerId, item.date || 'date-inconnue', item.testName || 'test');
+  const linkedPlayer = resolveDataHubPlayerRef(existing, item);
+  const linkedPlayerId = linkedPlayer?.playerId || linkedPlayer?.id || item.playerId || '';
+  const date = item.date || '';
+  const season = item.season || (date ? seasonFromDate(date) : '');
+  const testId = item.testId && !linkedPlayerId ? item.testId : stableFirestoreId(item.type || 'test', linkedPlayerId || item.playerId, date || 'date-inconnue', item.testName || 'test');
+  const playerName = linkedPlayer?.displayName || item.playerName || [item.prenom, item.nom].filter(Boolean).join(' ').trim();
   return {
     collection,
-    testId, id:testId, playerId:item.playerId || '', playerName:item.playerName || '',
-    date:item.date || '', season:item.season || '', categorie:item.categorie || '',
-    subCategory:item.sousCategorie || item.subCategory || '', testName:item.testName || item.testType || '',
+    testId, id:testId, playerId:linkedPlayerId, playerName,
+    date, season, categorie:item.categorie || linkedPlayer?.categorie || '',
+    subCategory:item.sousCategorie || item.subCategory || linkedPlayer?.subCategory || '', testName:item.testName || item.testType || '',
     testType:item.testName || item.testType || '', value:item.value ?? '', unit:item.unit || '',
+    playerSnapshot:linkedPlayer ? {
+      playerId:linkedPlayerId,
+      nom:linkedPlayer.nom || '',
+      prenom:linkedPlayer.prenom || '',
+      displayName:playerName,
+      categorie:linkedPlayer.categorie || '',
+      subCategory:linkedPlayer.subCategory || '',
+      team:linkedPlayer.team || '',
+      photo:linkedPlayer.photo || ''
+    } : undefined,
     source:meta.fileName || item.source || 'Data Hub'
   };
 }
@@ -1463,6 +1507,10 @@ function buildDataHubPlayerIdMap(items=[], existing){
 }
 function buildDataHubPlayerMap(items=[], existing){
   const map = new Map();
+  existing?.byId?.forEach(player => {
+    const id = player.playerId || player.id;
+    if(id) map.set(id, {...player, playerId:id, id});
+  });
   items.filter(item => item.type === 'player').forEach(item => {
     const player = normalizeDataHubPlayer(item, {});
     const found = findExistingPlayerForImport(existing, player);
@@ -1487,7 +1535,8 @@ function remapDataHubAttendance(item, meta, playerIdMap, playerMap){
   return applyDataHubSeasonSnapshot({...base, playerId, attendanceId:stableFirestoreId('attendance', base.sessionId, playerId), id:stableFirestoreId('attendance', base.sessionId, playerId)}, playerMap);
 }
 function remapDataHubTest(item, meta, playerIdMap, playerMap){
-  const base = normalizeDataHubTest(item, meta);
+  const existing = {byId:playerMap};
+  const base = normalizeDataHubTest(item, meta, existing);
   const playerId = resolveDataHubPlayerId(base.playerId, playerIdMap);
   const testId = stableFirestoreId(base.collection, playerId, base.date || 'date-inconnue', base.testName || base.testType || 'test');
   return applyDataHubSeasonSnapshot({...base, playerId, testId, id:testId}, playerMap);
@@ -2346,6 +2395,178 @@ function localAthleticPayload(){
 function saveLocalAthleticPayload(payload){
   localStorage.setItem('coachpulse:athleticTests', JSON.stringify(Array.isArray(payload) ? payload : []));
 }
+async function bundledAthleticPayload(){
+  try{
+    const response = await fetch('data/tests-athletiques-2025-2026.json', {cache:'no-store'});
+    if(!response.ok) return [];
+    const rows = await response.json();
+    return Array.isArray(rows) ? rows : [];
+  }catch(_){
+    return [];
+  }
+}
+function normalizeAthleticToken(value){
+  return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '');
+}
+function athleticNumber(value){
+  if(value === '' || value == null) return '';
+  const clean = String(value).replace(',', '.').replace(/[^\d.-]/g, '');
+  const n = Number(clean);
+  return Number.isFinite(n) ? n : '';
+}
+function athleticDateValue(row={}){
+  return row.date || row.testDate || row.test_date || row.dateTest || row.createdAtIso?.slice?.(0, 10) || '';
+}
+function normalizeAthleticDate(value){
+  const text = String(value || '').trim();
+  if(!text) return '';
+  const iso = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if(iso){
+    const [, y, m, d] = iso;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  const fr = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if(fr){
+    const [, d, m, y] = fr;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+}
+function normalizeAthleticSeason(value, dateValue){
+  const text = String(value || '').trim();
+  if(/^\d{4}-\d{4}$/.test(text)) return text;
+  const date = normalizeAthleticDate(dateValue);
+  return date ? seasonFromDate(date) : seasonFromDate(new Date());
+}
+function athleticMetricKey(label='', row={}){
+  const key = normalizeAthleticToken(label || row.testName || row.testType || row.type || row.metric);
+  const unit = normalizeAthleticToken(row.unit || row.unite);
+  if(!key) return '';
+  if(key.includes('vmi') || key.includes('ift') || key.includes('3015')) return 'vmi';
+  if(key.includes('illinois') || key.includes('agilite')) return 'illinois';
+  if(key.includes('cmj') || key.includes('detente') || key.includes('jump') || key.includes('puissance')) return 'cmj';
+  if(key.includes('10m') || key.includes('vitesse10') || key.includes('sprint10')){
+    return key.includes('kmh') || unit.includes('kmh') ? 'v10kmh' : 'v10s';
+  }
+  if(key.includes('40m') || key.includes('vitesse40') || key.includes('sprint40')){
+    return key.includes('kmh') || unit.includes('kmh') ? 'v40kmh' : 'v40s';
+  }
+  if(['vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].includes(key)) return key;
+  return '';
+}
+function athleticTestsFromRow(row={}){
+  const tests = {};
+  const source = row.tests && typeof row.tests === 'object' ? row.tests : {};
+  ['vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].forEach(key => {
+    const value = athleticNumber(source[key] ?? row[key]);
+    if(value !== '') tests[key] = value;
+  });
+  const metricKey = athleticMetricKey(row.testName || row.testType || row.type || row.metric, row);
+  if(metricKey){
+    const value = athleticNumber(row.value ?? row.valeur ?? row.result ?? row.resultat ?? row.score);
+    if(value !== '') tests[metricKey] = value;
+  }
+  return tests;
+}
+function playerSearchKey(value){
+  return normalizeAthleticToken(value);
+}
+function athleticNameVariants(value){
+  const text = String(value || '').trim();
+  const tokens = text.split(/\s+/).filter(Boolean);
+  const variants = new Set([playerSearchKey(text)]);
+  if(tokens.length > 1){
+    variants.add(playerSearchKey([...tokens].reverse().join(' ')));
+    variants.add(playerSearchKey(tokens.filter(token => token.length > 1).join(' ')));
+    variants.add(playerSearchKey(tokens.filter(token => token.length > 1).reverse().join(' ')));
+  }
+  return [...variants].filter(Boolean);
+}
+function athleticRowNameCandidates(row={}){
+  const lastName = row.nom || row.lastName || row.lastname || row.playerLastName || row.playerSnapshot?.nom;
+  const firstName = row.prenom || row.prénom || row.firstName || row.firstname || row.playerFirstName || row.playerSnapshot?.prenom;
+  return [
+    row.playerName,
+    row.joueuse,
+    row.name,
+    row.fullName,
+    row.displayName,
+    row.playerSnapshot?.displayName,
+    `${firstName || ''} ${lastName || ''}`,
+    `${lastName || ''} ${firstName || ''}`
+  ];
+}
+function athleticPlayerLookup(players=[]){
+  const byId = new Map();
+  const byName = new Map();
+  players.forEach(player => {
+    const id = player.playerId || player.id;
+    if(id) byId.set(id, player);
+    const names = [
+      player.displayName,
+      player.playerName,
+      `${player.prenom || ''} ${player.nom || ''}`,
+      `${player.nom || ''} ${player.prenom || ''}`
+    ].flatMap(athleticNameVariants).filter(Boolean);
+    names.forEach(name => { if(!byName.has(name)) byName.set(name, player); });
+  });
+  return {byId, byName};
+}
+function resolveAthleticPlayer(row={}, lookup={}){
+  const id = row.playerId || row.idPlayer || row.player?.playerId || row.playerSnapshot?.playerId;
+  if(id && lookup.byId?.has(id)) return lookup.byId.get(id);
+  const names = athleticRowNameCandidates(row)
+    .flatMap(athleticNameVariants)
+    .filter(Boolean);
+  return names.map(name => lookup.byName?.get(name)).find(Boolean) || null;
+}
+function normalizeAthleticRows(rawRows=[], players=[]){
+  const service = playersService();
+  const lookup = athleticPlayerLookup(players);
+  const grouped = new Map();
+  rawRows.forEach((raw, idx) => {
+    const tests = athleticTestsFromRow(raw);
+    if(!Object.keys(tests).length) return;
+    const date = normalizeAthleticDate(athleticDateValue(raw));
+    const season = normalizeAthleticSeason(raw.season || raw.saison, date);
+    const rawPlayer = resolveAthleticPlayer(raw, lookup);
+    const playerId = rawPlayer?.playerId || rawPlayer?.id || raw.playerId || raw.playerSnapshot?.playerId || '';
+    if(!playerId) return;
+    const seasonPlayer = rawPlayer && service?.playerForSeason ? service.playerForSeason(rawPlayer, season) : (rawPlayer || raw.playerSnapshot || {});
+    const canonicalId = seasonPlayer.playerId || seasonPlayer.id || playerId;
+    const groupId = stableFirestoreId('physicalTest', canonicalId, date || 'date-inconnue', season);
+    const previous = grouped.get(groupId) || {
+      id:groupId,
+      physicalTestId:groupId,
+      testId:groupId,
+      playerId:canonicalId,
+      playerName:seasonPlayer.displayName || `${seasonPlayer.prenom || ''} ${seasonPlayer.nom || ''}`.trim() || raw.playerName || raw.joueuse || '',
+      playerSnapshot:{
+        playerId:canonicalId,
+        nom:seasonPlayer.nom || raw.playerSnapshot?.nom || '',
+        prenom:seasonPlayer.prenom || raw.playerSnapshot?.prenom || '',
+        displayName:seasonPlayer.displayName || raw.playerSnapshot?.displayName || raw.playerName || raw.joueuse || '',
+        categorie:seasonPlayer.categorie || raw.categorie || raw.category || '',
+        subCategory:seasonPlayer.subCategory || raw.subCategory || raw.sousCategorie || '',
+        team:seasonPlayer.team || raw.team || raw.equipe || '',
+        photo:seasonPlayer.photo || raw.playerSnapshot?.photo || ''
+      },
+      date,
+      season,
+      categorie:seasonPlayer.categorie || raw.categorie || raw.category || '',
+      subCategory:seasonPlayer.subCategory || raw.subCategory || raw.sousCategorie || '',
+      tests:{},
+      source:raw.source || 'Tests athlétiques'
+    };
+    grouped.set(groupId, {
+      ...previous,
+      originalIds:[...(previous.originalIds || []), raw.physicalTestId || raw.testId || raw.id || `row-${idx}`],
+      tests:{...previous.tests, ...tests}
+    });
+  });
+  return [...grouped.values()].sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
+}
 async function moduleListPlayers(){
   if(!requireAuth()) throw new Error('Connexion Firebase requise.');
   const service = playersService();
@@ -2517,17 +2738,23 @@ async function medicalExport(format='json'){
 async function athleticListData(filters={}){
   if(!guardAthletic('read')) return [];
   const local = localAthleticPayload();
-  const rows = [];
+  const rawById = new Map();
+  const bundled = await bundledAthleticPayload();
+  bundled.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `bundled-${idx}`, row));
+  local.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `local-${idx}`, row));
   if(db && currentUser){
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'physicalTests'));
-    snap.forEach(docSnap => rows.push({id:docSnap.id, physicalTestId:docSnap.id, ...docSnap.data()}));
-    saveLocalAthleticPayload(rows);
-  }else rows.push(...local);
+    snap.forEach(docSnap => rawById.set(docSnap.id, {id:docSnap.id, physicalTestId:docSnap.id, ...docSnap.data(), syncPending:false}));
+    saveLocalAthleticPayload([...rawById.values()]);
+  }
+  const rawRows = [...rawById.values()];
+  const players = await listPlayers({season:'all', includeArchived:true});
+  const rows = normalizeAthleticRows(rawRows, players);
   return rows.filter(row =>
     (!filters.playerId || row.playerId === filters.playerId)
     && (!filters.season || filters.season === 'all' || row.season === filters.season)
     && (!filters.date || row.date === filters.date)
-  ).sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
+  );
 }
 async function athleticSaveTest(test={}){
   if(!guardAthletic('write')) return null;
@@ -2568,23 +2795,38 @@ async function athleticSaveTest(test={}){
     subCategory:playerSnapshot.subCategory,
     tests:test.tests || {},
     source:test.source || 'Tests athlétiques',
+    syncPending:!!(db && currentUser),
     updatedAtIso:now,
     updatedBy:currentUser?.uid || '',
     updatedByEmail:currentUser?.email || ''
   };
   if(!clean.createdAtIso) clean.createdAtIso = now;
-  if(db && currentUser){
-    await firebaseFns.setDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId), {
-      ...clean,
-      updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined
-    }, {merge:true});
-  }
   const local = localAthleticPayload();
   const idx = local.findIndex(row => (row.physicalTestId || row.testId || row.id) === physicalTestId);
   if(idx >= 0) local[idx] = {...local[idx], ...clean};
   else local.push(clean);
   saveLocalAthleticPayload(local);
   snapshotLocalData();
+  if(db && currentUser){
+    const payload = {
+      ...clean,
+      updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined
+    };
+    const firestoreWrite = firebaseFns.setDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId), payload, {merge:true})
+      .then(() => {
+        const refreshed = localAthleticPayload();
+        const localIdx = refreshed.findIndex(row => (row.physicalTestId || row.testId || row.id) === physicalTestId);
+        if(localIdx >= 0){
+          refreshed[localIdx] = {...refreshed[localIdx], syncPending:false};
+          saveLocalAthleticPayload(refreshed);
+        }
+      })
+      .catch(error => console.warn('CoachPulse athletic Firestore sync pending', error));
+    await Promise.race([
+      firestoreWrite,
+      new Promise(resolve => setTimeout(resolve, 1800))
+    ]);
+  }
   return clean;
 }
 async function athleticExport(format='json'){
