@@ -82,7 +82,7 @@
       <article class="panel"><h2>Informations générales</h2><div class="chips"><span class="chip">Dernière VMI ${esc(summary.latest.vmi || '-')}</span><span class="chip">Dernier CMJ ${esc(summary.latest.cmj || '-')}</span><span class="chip">Tests techniques ${esc(summary.technicalTests.length)}</span><span class="chip">Tests athlétiques ${esc(summary.physicalTests.length)}</span></div></article>
       <article class="panel"><h2>Données reliées au playerId</h2><div class="chips">${Object.entries(summary.linkedCounts || {}).map(([key,value]) => `<span class="chip">${esc(linkedLabels[key] || key)} ${esc(value)}</span>`).join('')}</div></article>
       <article class="panel"><h2>Statistiques de match</h2><div class="bar-list">${Object.keys(summary.actions).length ? Object.entries(summary.actions).map(([k,v]) => bar(k,v,actionMax)).join('') : '<div class="empty-state">Aucune statistique match sur cette période.</div>'}</div></article>
-      <article class="panel"><h2>Tests techniques</h2>${summary.technicalTests.length ? renderEvents(summary.technicalTests,'testType','value') : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
+      <article class="panel"><h2>Tests techniques</h2>${summary.technicalTests.length ? renderTechnicalTests(summary.technicalTests) : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
       <article class="panel"><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderEvents(summary.physicalTests,'source','tests') : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
       <article class="panel"><h2>Blessures</h2>${summary.injuries.length ? renderEvents(summary.injuries,'injuryType','status') : '<div class="empty-state">Aucune blessure sur cette période.</div>'}</article>
       <article class="panel"><h2>Suivi médical</h2>${summary.medical.length ? renderEvents(summary.medical,'type','status') : '<div class="empty-state">Aucun suivi médical sur cette période.</div>'}</article>
@@ -91,7 +91,42 @@
     </section>`;
   }
   function renderEvents(rows=[], titleKey='type', valueKey='status'){
-    return `<div class="timeline">${rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,12).map(row => `<div class="event"><b>${esc(row[titleKey] || row.theme || row.testName || row.action || row.source || 'Donnée')}</b><small>${esc(Filters.dateOf(row) || 'Sans date')} · ${esc(typeof row[valueKey] === 'object' ? JSON.stringify(row[valueKey]) : row[valueKey] || row.note || '')}</small></div>`).join('')}</div>`;
+    function valueText(row){
+      const value = row[valueKey] ?? row.note ?? row.tests ?? row.objectifs ?? '';
+      return typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
+    }
+    return `<div class="timeline">${rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,12).map(row => `<div class="event"><b>${esc(row[titleKey] || row.theme || row.testName || row.action || row.source || 'Donnée')}</b><small>${esc(Filters.dateOf(row) || 'Sans date')} · ${esc(valueText(row))}</small></div>`).join('')}</div>`;
+  }
+  function renderTechnicalTests(rows=[]){
+    const labels = {
+      max_pfp:'Max pied fort',
+      max_pfm:'Max pied faible',
+      max_alt:'Max alterné',
+      max_tete:'Max tête',
+      reg_pfp:'Régularité pied fort',
+      reg_pfm:'Régularité pied faible',
+      reg_alt:'Régularité alterné',
+      reg_tete:'Régularité tête',
+      mouv_pfp:'Libre pied fort',
+      mouv_pfm:'Libre pied faible',
+      mouv_alt:'Libre alterné'
+    };
+    function testEntries(row){
+      if(row.tests && typeof row.tests === 'object'){
+        return Object.entries(labels)
+          .map(([key,label]) => [label, row.tests[key]])
+          .filter(([,value]) => value !== '' && value != null && !Number.isNaN(Number(value)));
+      }
+      const label = row.testName || row.testType || 'Test';
+      const value = row.value ?? row.score ?? row.note;
+      return value !== '' && value != null ? [[label, value]] : [];
+    }
+    const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,12);
+    return `<div class="timeline technical-list">${sorted.map(row => {
+      const entries = testEntries(row);
+      const source = row.source ? `<span class="mini-source">${esc(row.source)}</span>` : '';
+      return `<div class="event technical-event"><div class="event-head"><b>${esc(Filters.dateOf(row) || 'Sans date')}</b>${source}</div><div class="chips">${entries.length ? entries.map(([label,value]) => `<span class="chip">${esc(label)} <strong>${esc(value)}</strong></span>`).join('') : '<span class="chip">Aucune valeur renseignée</span>'}</div></div>`;
+    }).join('')}</div>`;
   }
   function renderSeasonCompare(rows, state){
     return `<section class="panel"><h2>Comparaison entre saisons</h2><div class="filter-grid"><div class="field"><label>Saison A</label><select id="compareSeasonA">${state.seasons.map(s => option(s,s,state.filters.compareSeasonA)).join('')}</select></div><div class="field"><label>Saison B</label><select id="compareSeasonB">${state.seasons.map(s => option(s,s,state.filters.compareSeasonB)).join('')}</select></div></div><table class="compare-table"><thead><tr><th>Indicateur</th><th>Saison A</th><th>Saison B</th><th>Tendance</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.label)}</td><td>${esc(row.a)} ${esc(row.unit)}</td><td>${esc(row.b)} ${esc(row.unit)}</td><td class="${row.trend.className}">${esc(row.trend.label)} (${esc(row.trend.diff)})</td></tr>`).join('')}</tbody></table></section>`;
@@ -101,5 +136,5 @@
     const candidates = filteredPlayers(state);
     return `<section class="panel"><h2>Comparaison entre joueuses</h2><div class="notice">Période utilisée : ${esc(Filters.periodFromState(state).label)}</div><div class="compare-picker">${candidates.map(p => `<label class="compare-choice"><input type="checkbox" data-compare-player value="${esc(p.playerId)}" ${selected.has(p.playerId) ? 'checked' : ''}> <span>${esc(Data.displayName(p))}</span></label>`).join('')}</div><table class="compare-table"><thead><tr><th>Joueuse</th><th>Présence</th><th>Charge</th><th>Matchs</th><th>Tests athlétiques</th><th>Blessures</th></tr></thead><tbody>${rows.length ? rows.map(row => `<tr><td>${esc(Data.displayName(row.player))}</td><td>${row.summary.kpis.presenceRate}%</td><td>${row.summary.kpis.minutes} min</td><td>${row.summary.kpis.matches}</td><td>${row.summary.physicalTests.length}</td><td>${row.summary.kpis.injuries}</td></tr>`).join('') : '<tr><td colspan="6">Sélectionne une ou plusieurs joueuses.</td></tr>'}</tbody></table></section>`;
   }
-  global.PlayerProfileRender = {esc, renderControls, renderIdentity, renderKpis, renderOverview, renderEvents, renderSeasonCompare, renderPlayerCompare};
+  global.PlayerProfileRender = {esc, renderControls, renderIdentity, renderKpis, renderOverview, renderEvents, renderTechnicalTests, renderSeasonCompare, renderPlayerCompare};
 })(window);

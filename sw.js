@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-52-20260708-season-category-rule';
+const CACHE_NAME = 'coachpulse-v6-4-55-20260710-player-profile-technical-tests';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js',
   './shared/services/players-service.js',
