@@ -152,6 +152,31 @@ service cloud.firestore {
       return false;
     }
 
+    function isSeedAdminEmail() {
+      return signedIn()
+        && request.auth.token.email != null
+        && (
+          request.auth.token.email.matches('.*maxence\\.boisdron.*')
+          || request.auth.token.email == 'sylvain.ostard@gmail.com'
+        );
+    }
+
+    function isAllowedSelfStaffMaintenance(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email']);
+    }
+
+    function isAllowedSeedAdminRepair(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && isSeedAdminEmail()
+        && request.resource.data.permissionLevel == 'ADMIN'
+        && request.resource.data.role == 'ADMIN'
+        && request.resource.data.status == 'ACTIVE'
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email', 'legacyRole', 'role', 'roleLabel', 'permissionLevel', 'permissionLabel', 'allowedModules', 'status']);
+    }
+
     match /staff_members/{uid} {
       allow read: if canManageUsers() || (signedIn() && request.auth.uid == uid);
       allow create: if canManageUsers()
@@ -166,19 +191,10 @@ service cloud.firestore {
           signedIn()
           && request.auth.uid == uid
           && request.resource.data.permissionLevel == 'ADMIN'
-          && request.auth.token.email != null
-          && (
-            request.auth.token.email.matches('.*maxence\\.boisdron.*')
-            || request.auth.token.email == 'sylvain.ostard@gmail.com'
-          )
+          && isSeedAdminEmail()
           && request.resource.data.status == 'ACTIVE'
         );
-      allow update: if canManageUsers()
-        || (
-          signedIn()
-          && request.auth.uid == uid
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email', 'legacyRole', 'role', 'roleLabel', 'permissionLevel', 'permissionLabel', 'allowedModules'])
-        );
+      allow update: if canManageUsers() || isAllowedSelfStaffMaintenance(uid) || isAllowedSeedAdminRepair(uid);
       allow delete: if noDelete();
     }
 
