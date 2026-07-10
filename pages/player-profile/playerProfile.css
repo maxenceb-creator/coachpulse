@@ -50,6 +50,14 @@ button.primary{background:linear-gradient(135deg,var(--green),var(--deep));color
 .mini-source{color:var(--muted);font-size:11px;font-weight:900}
 .technical-event .chip{background:var(--mint)}
 .technical-event .chip strong{margin-left:4px;color:var(--green);font-size:13px}
+.physical-tests{display:grid;gap:12px}
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.metric-card{border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#fff,var(--mint));padding:10px}
+.metric-card h3{margin:0 0 6px;color:var(--deep);font-size:15px}
+.metric-main{font-size:24px;font-weight:1000;color:var(--green);line-height:1.1;margin-bottom:8px}
+.metric-row{display:flex;justify-content:space-between;gap:8px;border-top:1px solid rgba(0,132,61,.12);padding-top:6px;margin-top:6px;font-size:12px}
+.metric-row span{color:var(--muted);font-weight:900}
+.metric-row b{color:var(--deep)}
 .bar-list{display:grid;gap:8px}
 .bar-row{display:grid;grid-template-columns:110px 1fr 70px;gap:8px;align-items:center;font-size:12px;font-weight:900}
 .bar-bg{height:12px;border-radius:999px;background:#e7eee9;overflow:hidden}

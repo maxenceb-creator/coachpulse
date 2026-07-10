@@ -981,11 +981,16 @@ async function playerProfileLoadData(options={}){
   });
   await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
   const seedTechnicalTests = await seedTechnicalTestsForProfile(aliases);
+  const profilePhysicalTests = canUseAthletic('read') ? await athleticListData({playerId, season:'all'}).catch(() => []) : [];
   payload.collections.technicalTests = [...new Map([
     ...(payload.collections.technicalTests || []),
     ...localTechnicalTestsForProfile(aliases),
     ...seedTechnicalTests
   ].map(row => [row.id || row.testId || stableFirestoreId('technical', row.playerId, row.date, row.season, row.playerName), row])).values()];
+  payload.collections.physicalTests = [...new Map([
+    ...(payload.collections.physicalTests || []),
+    ...profilePhysicalTests
+  ].map(row => [row.id || row.physicalTestId || row.testId || stableFirestoreId('physical', row.playerId, row.date, row.season, row.playerName), row])).values()];
   const sessionIds = new Set((payload.collections.attendance || []).map(row => row.sessionId).filter(Boolean));
   const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
   const [sessions, matches] = await Promise.all([
@@ -2504,6 +2509,29 @@ function athleticNumber(value){
   const n = Number(clean);
   return Number.isFinite(n) ? n : '';
 }
+const ATHLETIC_METRICS = {
+  vmi:{type:'vmi', label:'VMI 30/15 IFT', unit:'km/h', direction:'high'},
+  illinois:{type:'illinois', label:'Illinois', unit:'s', direction:'low'},
+  v10s:{type:'v10s', label:'Vitesse 10m', unit:'s', direction:'low'},
+  v10kmh:{type:'v10kmh', label:'Vitesse 10m', unit:'km/h', direction:'high'},
+  v40s:{type:'v40s', label:'Vitesse 40m', unit:'s', direction:'low'},
+  v40kmh:{type:'v40kmh', label:'Vitesse 40m', unit:'km/h', direction:'high'},
+  cmj:{type:'cmj', label:'CMJ', unit:'cm', direction:'high'}
+};
+function athleticMetricsFromTests(tests={}, comment=''){
+  return Object.entries(ATHLETIC_METRICS).map(([key, meta]) => {
+    const value = athleticNumber(tests?.[key]);
+    if(value === '') return null;
+    return {
+      type:meta.type,
+      label:meta.label,
+      result:value,
+      unit:meta.unit,
+      direction:meta.direction,
+      comment:comment || ''
+    };
+  }).filter(Boolean);
+}
 function athleticDateValue(row={}){
   return row.date || row.testDate || row.test_date || row.dateTest || row.createdAtIso?.slice?.(0, 10) || '';
 }
@@ -2552,6 +2580,13 @@ function athleticTestsFromRow(row={}){
     const value = athleticNumber(source[key] ?? row[key]);
     if(value !== '') tests[key] = value;
   });
+  if(Array.isArray(row.metrics)){
+    row.metrics.forEach(metric => {
+      const metricKey = athleticMetricKey(metric.type || metric.label || metric.testName, metric);
+      const value = athleticNumber(metric.result ?? metric.value ?? metric.valeur ?? metric.score);
+      if(metricKey && value !== '') tests[metricKey] = value;
+    });
+  }
   const metricKey = athleticMetricKey(row.testName || row.testType || row.type || row.metric, row);
   if(metricKey){
     const value = athleticNumber(row.value ?? row.valeur ?? row.result ?? row.resultat ?? row.score);
@@ -2647,12 +2682,16 @@ function normalizeAthleticRows(rawRows=[], players=[]){
       categorie:seasonPlayer.categorie || raw.categorie || raw.category || '',
       subCategory:seasonPlayer.subCategory || raw.subCategory || raw.sousCategorie || '',
       tests:{},
+      metrics:[],
+      comment:raw.comment || raw.commentaire || raw.note || '',
       source:raw.source || 'Tests athlétiques'
     };
+    const nextTests = {...previous.tests, ...tests};
     grouped.set(groupId, {
       ...previous,
       originalIds:[...(previous.originalIds || []), raw.physicalTestId || raw.testId || raw.id || `row-${idx}`],
-      tests:{...previous.tests, ...tests}
+      tests:nextTests,
+      metrics:athleticMetricsFromTests(nextTests, previous.comment || raw.comment || raw.commentaire || raw.note || '')
     });
   });
   return [...grouped.values()].sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
@@ -2859,6 +2898,9 @@ async function athleticSaveTest(test={}){
   const seasonPlayer = service?.playerForSeason ? service.playerForSeason(canonicalPlayer, season) : canonicalPlayer;
   const canonicalPlayerId = seasonPlayer.playerId || seasonPlayer.id || test.playerId;
   const playerName = seasonPlayer.displayName || `${seasonPlayer.prenom || ''} ${seasonPlayer.nom || ''}`.trim();
+  const comment = test.comment || test.commentaire || test.note || '';
+  const tests = test.tests || {};
+  const metrics = athleticMetricsFromTests(tests, comment);
   const playerSnapshot = {
     playerId:canonicalPlayerId,
     nom:seasonPlayer.nom || '',
@@ -2883,9 +2925,17 @@ async function athleticSaveTest(test={}){
     season,
     categorie:playerSnapshot.categorie,
     subCategory:playerSnapshot.subCategory,
-    tests:test.tests || {},
+    team:playerSnapshot.team,
+    teamId:playerSnapshot.teamId,
+    tests,
+    metrics,
+    testTypes:metrics.map(metric => metric.type),
+    type:'athleticTest',
+    comment,
     source:test.source || 'Tests athlétiques',
     syncPending:!!(db && currentUser),
+    createdBy:test.createdBy || currentUser?.uid || '',
+    createdByEmail:test.createdByEmail || currentUser?.email || '',
     updatedAtIso:now,
     updatedBy:currentUser?.uid || '',
     updatedByEmail:currentUser?.email || ''
