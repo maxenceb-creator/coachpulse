@@ -23,6 +23,7 @@ migration-output/
 .firebase/
 
 # Build outputs
+public/
 dist/
 build/
 .cache/
