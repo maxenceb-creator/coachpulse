@@ -31,6 +31,38 @@ export function stableId(){
   return Array.from(arguments).filter(Boolean).join('-').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,120) || 'item';
 }
 
+function coachPulseApi(){
+  try{ return globalThis.parent?.CoachPulseCentralData || globalThis.CoachPulseCentralData || {}; }
+  catch(_e){ return globalThis.CoachPulseCentralData || {}; }
+}
+
+function centralNormalizePlayer(raw={}){
+  return coachPulseApi().normalizePlayer?.(raw) || null;
+}
+
+export function normalizeConnectorPlayer(raw={}){
+  const central = centralNormalizePlayer(raw);
+  if(central) return central;
+  const names = splitName(raw);
+  const birth = parseDate(raw.dateNaissance || raw.birth || raw.birthDate) || cleanText(raw.dateNaissance || raw.birth || raw.birthDate || '');
+  const subCategory = normalizeSousCategorie(raw.subCategory || raw.sousCategorie || raw.categorie || raw.category || '');
+  const categorie = normalizeCategorie(raw.categorie || raw.category || subCategory || '');
+  const playerId = stableId('player', names.prenom, names.nom, birth || 'no-birth');
+  return {
+    ...raw,
+    id:playerId,
+    playerId,
+    nom:names.nom,
+    prenom:names.prenom,
+    displayName:[names.prenom, names.nom].filter(Boolean).join(' ').trim().toUpperCase(),
+    categorie,
+    subCategory,
+    sousCategorie:subCategory,
+    birth,
+    dateNaissance:birth
+  };
+}
+
 export function detectColumn(header){
   const key = keyText(header);
   for(const [field, aliases] of Object.entries(PLAYER_ALIASES)){
@@ -136,10 +168,9 @@ export function analyzeRows(rows, context={}){
       return;
     }
 
-    const sousCategorie = normalizeSousCategorie(mapped.sousCategorie || mapped.categorie || '');
-    const categorie = normalizeCategorie(mapped.categorie || sousCategorie || '');
     const dateNaissance = parseDate(mapped.dateNaissance);
-    const playerId = stableId('player', names.prenom, names.nom, dateNaissance || 'no-birth');
+    const centralPlayer = normalizeConnectorPlayer({nom:names.nom, prenom:names.prenom, categorie:mapped.categorie, subCategory:mapped.sousCategorie, birth:dateNaissance, dateNaissance});
+    const playerId = centralPlayer.playerId;
     const duplicateKey = stableId(names.prenom, names.nom, dateNaissance || 'no-birth');
     if(!dateNaissance){
       result.anomalies.push({row:row.__rowNumber || index + 1, level:'warn', message:`Date de naissance manquante : playerId provisoire pour ${names.nom} ${names.prenom}`});
@@ -156,8 +187,11 @@ export function analyzeRows(rows, context={}){
       playerId,
       nom:names.nom,
       prenom:names.prenom,
-      categorie,
-      sousCategorie,
+      categorie:centralPlayer.categorie || '',
+      sousCategorie:centralPlayer.subCategory || centralPlayer.sousCategorie || '',
+      subCategory:centralPlayer.subCategory || centralPlayer.sousCategorie || '',
+      team:centralPlayer.team || '',
+      teamId:centralPlayer.teamId || '',
       poste:cleanText(mapped.poste || ''),
       photo:cleanText(mapped.photo || ''),
       dateNaissance,
@@ -168,4 +202,4 @@ export function analyzeRows(rows, context={}){
   return result;
 }
 
-export default {analyzeRows, detectColumn, cleanText, keyText, stableId};
+export default {analyzeRows, detectColumn, cleanText, keyText, stableId, normalizeConnectorPlayer};

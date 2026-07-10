@@ -624,6 +624,10 @@ function stableFirestoreId(){
   return slugify([].slice.call(arguments).filter(Boolean).join('-')).slice(0,120);
 }
 function normalizeTeamFromCategory(category){
+  const service = playersService();
+  if(service?.normalizeTeamFromCategory) return service.normalizeTeamFromCategory(category);
+  const teamService = teamsService();
+  if(teamService?.categoryForSubCategory) return teamService.categoryForSubCategory(category);
   const c = String(category || '').toUpperCase();
   const n = Number((c.match(/\d+/)||[])[0] || 0);
   if(c.includes('R1') || c.includes('SENIOR') || c.includes('SÉNIOR')) return 'SENIORS';
@@ -634,6 +638,19 @@ function normalizeTeamFromCategory(category){
   if(n <= 14) return 'U13';
   if(n <= 16) return 'U16';
   return 'U19';
+}
+function playerSeasonSnapshot(player={}, season=seasonFromDate()){
+  const service = playersService();
+  if(service?.playerSeasonSnapshot) return service.playerSeasonSnapshot(player, season);
+  const p = service?.playerForSeason ? service.playerForSeason(player, season) : player;
+  return {
+    season,
+    categorie:p?.categorie || p?.category || '',
+    subCategory:p?.subCategory || p?.sousCategorie || '',
+    sousCategorie:p?.subCategory || p?.sousCategorie || '',
+    team:p?.team || p?.equipe || '',
+    teamId:p?.teamId || teamsService()?.canonicalTeamId?.(p?.team || p?.equipe || p?.categorie || p?.category || '') || ''
+  };
 }
 function normalizePlayer(raw={}){
   const service = playersService();
@@ -1254,7 +1271,7 @@ async function commitImportPlan(plan){
   function applySeasonSnapshot(doc={}){
     const player = resolvedPlayers.get(doc.playerId);
     const season = doc.season || doc.saison || seasonFromDate(doc.date || new Date());
-    const snap = service?.playerForSeason && player ? service.playerForSeason(player, season) : player;
+    const snap = player ? playerSeasonSnapshot(player, season) : null;
     return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || ''} : doc;
   }
   function remapImportedDoc(collection, doc={}){
@@ -1459,10 +1476,9 @@ function resolveDataHubPlayerId(playerId, playerIdMap){
   return playerIdMap.get(playerId) || playerId || '';
 }
 function applyDataHubSeasonSnapshot(doc={}, playerMap){
-  const service = playersService();
   const player = playerMap.get(doc.playerId);
   const season = doc.season || doc.saison || seasonFromDate(doc.date || new Date());
-  const snap = service?.playerForSeason && player ? service.playerForSeason(player, season) : player;
+  const snap = player ? playerSeasonSnapshot(player, season) : null;
   return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || ''} : doc;
 }
 function remapDataHubAttendance(item, meta, playerIdMap, playerMap){
@@ -2614,7 +2630,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, playerForSeason, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord});
 async function syncCloud(manual=false){
   if(applyingCloud) return;

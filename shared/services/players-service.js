@@ -88,6 +88,19 @@
     return {season:selectedSeason, categorie, subCategory, team, teamId};
   }
 
+  function playerSeasonSnapshot(player={}, season=seasonFromDate()){
+    const normalized = normalizePlayer(player);
+    const snapshot = categorySnapshotForSeason(normalized, season);
+    return {
+      season:snapshot.season || normalized.currentSeason,
+      categorie:snapshot.categorie || normalized.categorie || '',
+      subCategory:snapshot.subCategory || normalized.subCategory || '',
+      sousCategorie:snapshot.subCategory || normalized.sousCategorie || normalized.subCategory || '',
+      team:snapshot.team || normalized.team || '',
+      teamId:snapshot.teamId || normalized.teamId || canonicalTeamId(snapshot.team || normalized.team || snapshot.categorie || normalized.categorie || 'global')
+    };
+  }
+
   function normalizeTeamFromCategory(category){
     const c = normalizeUpper(category);
     const n = Number((c.match(/\d+/) || [])[0] || 0);
@@ -313,7 +326,7 @@
 
   function playerForSeason(player={}, season=seasonFromDate()){
     const normalized = normalizePlayer(player);
-    const snapshot = categorySnapshotForSeason(normalized, season);
+    const snapshot = playerSeasonSnapshot(normalized, season);
     return {
       ...normalized,
       categorie:snapshot.categorie || normalized.categorie,
@@ -487,7 +500,8 @@
   const service = {
     CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
     stableId, canonicalPlayerId, canonicalTeamId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
-    categorySnapshotForSeason, playerForSeason, normalizeTeamFromCategory, defaultClubTeamFromSubCategory, resolveClubTeam, displayName, splitName,
+    categorySnapshotForSeason, playerSeasonSnapshot, playerForSeason, normalizeTeamFromCategory, defaultClubTeamFromSubCategory, resolveClubTeam,
+    teamCategoryRuleForSubCategory, teamCategoryRuleForTeam, displayName, splitName,
     normalizePlayer, normalizePlayerForWrite, identityKey, personKey, dedupePlayers,
     readCachedPlayers, writeCache, filterPlayers,
     listPlayers, readFirestorePlayers, getPlayer, savePlayer, archivePlayer,
