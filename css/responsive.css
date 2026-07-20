@@ -174,25 +174,28 @@ th,td{overflow-wrap:anywhere}
   main,.page,.player-profile-app{padding-left:clamp(18px,2vw,32px);padding-right:clamp(18px,2vw,32px)}
 }
 
-@media (max-width:1500px){
+@media (min-width:1181px) and (max-width:1500px){
+  :root{
+    --side:260px;
+  }
   .app{
-    grid-template-columns:1fr!important;
+    grid-template-columns:var(--side) minmax(0,1fr)!important;
     height:100dvh;
   }
   .sidebar{
-    position:fixed!important;
-    z-index:80!important;
-    inset:0 auto 0 0!important;
-    width:min(340px,88vw)!important;
-    max-width:360px!important;
-    transform:translateX(-105%)!important;
-    transition:transform .22s ease!important;
+    position:static!important;
+    z-index:auto!important;
+    inset:auto!important;
+    width:var(--side)!important;
+    max-width:var(--side)!important;
+    transform:none!important;
+    transition:none!important;
     overflow-y:auto!important;
     overflow-x:hidden!important;
     -webkit-overflow-scrolling:touch;
   }
   .sidebar.open{
-    transform:translateX(0)!important;
+    transform:none!important;
   }
   .menu-btn{
     display:inline-grid!important;
