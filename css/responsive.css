@@ -111,6 +111,40 @@ th,td{overflow-wrap:anywhere}
   overflow:auto;
 }
 
+.sidebar{
+  height:100dvh!important;
+  max-height:100dvh!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-gutter:stable;
+}
+
+.brand,
+.side-bottom{
+  flex:0 0 auto;
+}
+
+.nav{
+  flex:1 0 auto;
+  align-content:start;
+  padding-bottom:max(16px,env(safe-area-inset-bottom));
+}
+
+.sidebar::-webkit-scrollbar{
+  width:8px;
+}
+
+.sidebar::-webkit-scrollbar-thumb{
+  background:rgba(205,183,137,.44);
+  border-radius:999px;
+}
+
+.sidebar::-webkit-scrollbar-track{
+  background:rgba(255,255,255,.06);
+}
+
 .actions,
 .top-actions,
 .cloud-actions,
