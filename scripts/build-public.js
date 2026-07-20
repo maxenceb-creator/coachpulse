@@ -12,6 +12,7 @@ const entries = [
   'release.json',
   'dev-release.json',
   'assets',
+  'css',
   'icons',
   'pages',
   'connectors',
