@@ -1,0 +1,343 @@
+/*
+  CoachPulse responsive layer.
+  Shared safeguards for app shell and module pages without changing business logic.
+*/
+:root{
+  --cp-green:#1d995b;
+  --cp-gold:#cdb789;
+  --cp-white:#ffffff;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{width:100%;max-width:100%;overflow-x:hidden;-webkit-text-size-adjust:100%}
+body{width:100%;max-width:100%;min-width:0;overflow-x:hidden}
+img,svg,canvas,video{max-width:100%;height:auto}
+iframe{max-width:100%}
+
+button,
+.btn,
+input,
+select,
+textarea{
+  max-width:100%;
+  min-height:44px;
+}
+
+button,
+.btn,
+.tab,
+.chip,
+.pill,
+.badge{
+  white-space:normal;
+}
+
+button,
+.btn,
+.tab,
+.chip,
+.code-btn,
+.playerChip,
+.slot{
+  touch-action:manipulation;
+}
+
+main,
+.page,
+.home,
+.workspace,
+.frame,
+.card,
+.panel,
+.kpi,
+.filters,
+.filter-panel,
+.profile,
+.profile-panel,
+.selection,
+.selection-grid,
+.layout,
+.grid,
+.grid2,
+.grid3,
+.grid4,
+.entry-grid,
+.compare-grid,
+.compare-grid-controls,
+.bilan-grid,
+.chart-pair,
+.test-type-charts,
+.sheet-layout,
+.sheet-grid,
+.player-profile-app{
+  min-width:0;
+  max-width:100%;
+}
+
+.table-wrap,
+.wrap,
+.tableWrap,
+.log,
+.session-list,
+.team-list,
+.duplicate-list,
+.matchHistory{
+  max-width:100%;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+  contain:inline-size;
+}
+
+table{max-width:100%}
+.table-wrap table,
+.wrap table,
+.tableWrap table{
+  max-width:none;
+}
+th,td{overflow-wrap:anywhere}
+
+.drawer,
+.player-modal,
+.cloud-panel{
+  padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));
+}
+
+.sheet,
+.player-card,
+.cloud-panel,
+[role="dialog"]{
+  max-width:calc(100vw - 20px);
+  max-height:calc(100dvh - 20px);
+  overflow:auto;
+}
+
+.actions,
+.top-actions,
+.cloud-actions,
+.staff-actions,
+.team-actions,
+.merge-actions,
+.family-buttons,
+.tools,
+.chips,
+.tabs,
+.header-tabs{
+  min-width:0;
+}
+
+.actions button,
+.top-actions button,
+.cloud-actions button,
+.staff-actions button,
+.team-actions button,
+.merge-actions button,
+.family-buttons button,
+.tools button{
+  flex:1 1 auto;
+}
+
+@media (min-width:1440px){
+  main,.page,.player-profile-app{padding-left:clamp(18px,2vw,32px);padding-right:clamp(18px,2vw,32px)}
+}
+
+@media (max-width:1180px){
+  .app{height:100dvh}
+  .workspace{padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
+  .topbar,
+  header,
+  .app-header,
+  .test-header,
+  .head{
+    max-width:100%;
+  }
+  .quick-grid,
+  .v2-grid,
+  .kpis,
+  .cloud-kpis,
+  .admin-summary,
+  .summaryStrip,
+  .tournamentStrip,
+  .season-grid{
+    grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr))!important;
+  }
+  .layout,
+  .admin-layout,
+  .selection,
+  .selection-grid,
+  .two,
+  .grid2,
+  .bilan-grid,
+  .chart-pair,
+  .chart-type-charts,
+  .test-type-charts,
+  .sheet-layout,
+  .sheet-grid,
+  .liveBelow,
+  .matchManager,
+  .radarWrap,
+  .visualDashboard{
+    grid-template-columns:1fr!important;
+  }
+  .grid,
+  .grid3,
+  .grid4,
+  .entry-grid,
+  .filters,
+  .form,
+  .filter-grid,
+  .compare-grid,
+  .compare-grid-controls,
+  .bilan-radar-controls .grid,
+  .setupGrid,
+  .playerFilters{
+    grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))!important;
+  }
+}
+
+@media (max-width:900px){
+  main,.page,.player-profile-app{padding:12px!important}
+  .card,.panel,.admin-card,.hero,.identity,.filters,.profile,.profile-panel,.filter-panel{border-radius:16px!important}
+  .tabs,
+  .header-tabs,
+  .sheet-tabs{
+    display:flex!important;
+    flex-wrap:nowrap!important;
+    overflow-x:auto!important;
+    gap:8px!important;
+    scroll-snap-type:x proximity;
+    -webkit-overflow-scrolling:touch;
+  }
+  .tabs .tab,
+  .header-tabs .tab,
+  .sheet-tabs a{
+    flex:0 0 clamp(112px,34vw,190px)!important;
+    min-width:112px!important;
+    scroll-snap-align:start;
+  }
+  .profile-topbar,
+  .identity,
+  .profile,
+  .profile-panel{
+    grid-template-columns:1fr!important;
+  }
+  .avatar,
+  .photo{
+    margin-left:auto!important;
+    margin-right:auto!important;
+  }
+  .identity-main,
+  .profile-panel,
+  .profile{
+    text-align:center;
+  }
+  .chips{justify-content:center}
+}
+
+@media (max-width:640px){
+  body{min-height:100svh}
+  h1{font-size:clamp(24px,9vw,38px)!important;line-height:1.06!important}
+  h2{font-size:clamp(18px,6vw,24px)!important}
+  .topbar{gap:8px}
+  .top-actions,
+  .actions,
+  .cloud-actions,
+  .merge-actions,
+  .team-actions,
+  .tools,
+  .liveSaveRow,
+  .chronoControls,
+  .matchModeRow,
+  .subActionGrid,
+  .playerPanelActions{
+    display:grid!important;
+    grid-template-columns:1fr!important;
+  }
+  .top-actions button,
+  .top-actions .btn,
+  .actions button,
+  .cloud-actions button,
+  .merge-actions button,
+  .team-actions button,
+  .tools button{
+    width:100%;
+  }
+  .filters,
+  .form,
+  .filter-grid,
+  .grid,
+  .grid2,
+  .grid3,
+  .grid4,
+  .entry-grid,
+  .compare-grid,
+  .compare-grid-controls,
+  .kpis,
+  .season-grid,
+  .metric-grid,
+  .admin-summary,
+  .team-grid,
+  .team-form,
+  .team-item,
+  .merge-grid,
+  .exportPanel{
+    grid-template-columns:1fr!important;
+  }
+  .calendar-grid{gap:4px!important}
+  .cal-day{min-height:86px!important;border-radius:12px!important}
+  .event{font-size:11px!important}
+  .pitch{
+    height:clamp(460px,72svh,680px)!important;
+    min-height:420px;
+  }
+  .slot{
+    width:clamp(58px,18vw,74px)!important;
+    height:clamp(58px,18vw,74px)!important;
+    font-size:clamp(8px,2.5vw,10px)!important;
+  }
+  .playerActionPanel{
+    left:8px!important;
+    right:8px!important;
+    width:auto!important;
+    max-height:calc(100dvh - 120px);
+    overflow:auto;
+  }
+  button,
+  .btn,
+  .code-btn,
+  .addDay,
+  .v33-add{
+    min-width:44px!important;
+    min-height:44px!important;
+  }
+  .drawer{padding:0!important}
+  .sheet{
+    width:100vw!important;
+    max-width:100vw!important;
+    height:100dvh!important;
+    max-height:100dvh!important;
+    border-radius:0!important;
+  }
+}
+
+@media (max-width:380px){
+  main,.page,.player-profile-app{padding:8px!important}
+  .card,.panel,.admin-card,.hero,.identity,.filters,.profile,.profile-panel,.filter-panel{padding:12px!important}
+  .tabs .tab,
+  .header-tabs .tab,
+  .sheet-tabs a{
+    flex-basis:clamp(104px,44vw,160px)!important;
+    min-width:104px!important;
+  }
+}
+
+@media (max-height:620px){
+  .sheet,
+  .player-card,
+  .cloud-panel,
+  .actionMenu.show,
+  .playerActionPanel{
+    max-height:calc(100dvh - 16px)!important;
+    overflow:auto!important;
+  }
+  .pitch{height:clamp(360px,70svh,560px)!important}
+}
