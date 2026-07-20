@@ -18,7 +18,7 @@
     const players = filteredPlayers(state);
     const seasons = state.seasons;
     const selected = state.selectedPlayerId || players[0]?.playerId || '';
-    return `<section class="hero">
+    return `<section class="profile-topbar">
       <div class="identity" id="identityCard"></div>
       <div class="filters">
         <h2>Filtres de fiche</h2>
@@ -42,13 +42,20 @@
   function renderIdentity(player={}, period){
     const photo = player.photo || player.avatar || player.photoUrl || '';
     const initials = Data.displayName(player).split(/\s+/).map(x => x[0]).join('').slice(0,2) || '?';
-    return `<div class="avatar">${photo ? `<img src="${esc(photo)}" alt="">` : esc(initials)}</div><div><h1>${esc(Data.displayName(player) || 'Joueuse')}</h1><div class="chips">
-      <span class="chip">${esc(player.categorie || player.category || 'Catégorie non renseignée')}</span>
-      <span class="chip">${esc(player.subCategory || player.sousCategorie || 'Sous-catégorie non renseignée')}</span>
-      <span class="chip">${esc(player.poste || player.position || 'Poste non renseigné')}</span>
-      <span class="chip">playerId ${esc(player.playerId || player.id || '-')}</span>
-      <span class="chip">${esc(period.label)}</span>
-    </div><p class="notice">Les données affichées sont lues depuis la base commune et reliées par playerId.</p></div>`;
+    const meta = [
+      ['Equipe', Data.teamLabel(player)],
+      ['Categorie', player.categorie || player.category || '-'],
+      ['Sous-cat.', player.subCategory || player.sousCategorie || '-'],
+      ['Poste', player.poste || player.position || '-'],
+      ['Saison', period.label]
+    ];
+    return `<div class="avatar">${photo ? `<img src="${esc(photo)}" alt="">` : esc(initials)}</div>
+      <div class="identity-main">
+        <p class="eyebrow">Fiche individuelle</p>
+        <h1>${esc(Data.displayName(player) || 'Joueuse')}</h1>
+        <div class="identity-meta">${meta.map(([label,value]) => `<span><b>${esc(label)}</b>${esc(value || '-')}</span>`).join('')}</div>
+        <div class="player-id-line">playerId <strong>${esc(player.playerId || player.id || '-')}</strong></div>
+      </div>`;
   }
   function renderKpis(summary){
     const items = [
@@ -67,28 +74,73 @@
   }
   function renderOverview(summary){
     const actionMax = Math.max(1, ...Object.values(summary.actions));
-    const linkedLabels = {
-      presences:'Présences',
-      seances:'Séances',
-      matchs:'Actions match',
-      testsTechniques:'Tests techniques',
-      testsAthletiques:'Tests athlétiques',
-      blessures:'Blessures',
-      suiviMedical:'Suivi médical',
-      convocations:'Convocations',
-      bilansIndividuels:'Bilans'
-    };
-    return `<section class="grid">
-      <article class="panel"><h2>Informations générales</h2><div class="chips"><span class="chip">Dernière VMI ${esc(summary.latest.vmi || '-')}</span><span class="chip">Dernier CMJ ${esc(summary.latest.cmj || '-')}</span><span class="chip">Tests techniques ${esc(summary.technicalTests.length)}</span><span class="chip">Tests athlétiques ${esc(summary.physicalTests.length)}</span></div></article>
-      <article class="panel"><h2>Données reliées au playerId</h2><div class="chips">${Object.entries(summary.linkedCounts || {}).map(([key,value]) => `<span class="chip">${esc(linkedLabels[key] || key)} ${esc(value)}</span>`).join('')}</div></article>
-      <article class="panel"><h2>Statistiques de match</h2><div class="bar-list">${Object.keys(summary.actions).length ? Object.entries(summary.actions).map(([k,v]) => bar(k,v,actionMax)).join('') : '<div class="empty-state">Aucune statistique match sur cette période.</div>'}</div></article>
-      <article class="panel"><h2>Tests techniques</h2>${summary.technicalTests.length ? renderTechnicalTests(summary.technicalTests) : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
-      <article class="panel"><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderPhysicalTests(summary.physicalTests) : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
-      <article class="panel"><h2>Blessures</h2>${summary.injuries.length ? renderEvents(summary.injuries,'injuryType','status') : '<div class="empty-state">Aucune blessure sur cette période.</div>'}</article>
-      <article class="panel"><h2>Suivi médical</h2>${summary.medical.length ? renderEvents(summary.medical,'type','status') : '<div class="empty-state">Aucun suivi médical sur cette période.</div>'}</article>
-      <article class="panel"><h2>Convocations</h2>${summary.convocations.length ? renderEvents(summary.convocations,'type','status') : '<div class="empty-state">Aucune convocation sur cette période.</div>'}</article>
-      <article class="panel"><h2>Bilans individuels</h2>${summary.individualReports.length ? renderEvents(summary.individualReports,'title','summary') : '<div class="empty-state">Aucun bilan individuel sur cette période.</div>'}</article>
+    return `<section class="player-sheet">
+      <nav class="sheet-tabs" aria-label="Sections fiche">
+        <a href="#resume">Résumé</a>
+        <a href="#presences">Présences</a>
+        <a href="#matchs">Matchs</a>
+        <a href="#technique">Tests techniques</a>
+        <a href="#athletique">Tests athlétiques</a>
+        <a href="#blessures">Blessures</a>
+        <a href="#evolution">Évolution</a>
+      </nav>
+      <section id="resume" class="sheet-layout">
+        <article class="panel season-summary">
+          <div>
+            <p class="eyebrow">Résumé de saison</p>
+            <h2>${esc(summary.player?.categorie || summary.player?.category || 'Saison')}</h2>
+          </div>
+          <div class="season-grid">
+            <span><b>${esc(summary.kpis.presenceRate)}%</b>Présence</span>
+            <span><b>${esc(summary.kpis.sessions)}</b>Séances</span>
+            <span><b>${esc(summary.kpis.matches)}</b>Matchs</span>
+            <span><b>${esc(summary.physicalTests.length)}</b>Tests athlétiques</span>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Statistiques de match</h2>
+          <div class="bar-list">${Object.keys(summary.actions).length ? Object.entries(summary.actions).map(([k,v]) => bar(k,v,actionMax)).join('') : '<div class="empty-state">Aucune statistique match sur cette période.</div>'}</div>
+        </article>
+      </section>
+      <section class="sheet-grid">
+        <article id="presences" class="panel stat-section"><h2>Présences</h2>${renderAttendanceTable(summary.attendance)}</article>
+        <article id="matchs" class="panel stat-section"><h2>Matchs</h2>${renderMatchStats(summary.matchEvents)}</article>
+        <article id="technique" class="panel stat-section wide"><h2>Tests techniques</h2>${summary.technicalTests.length ? renderTechnicalTests(summary.technicalTests) : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
+        <article id="athletique" class="panel stat-section wide"><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderPhysicalTests(summary.physicalTests) : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
+        <article id="blessures" class="panel stat-section"><h2>Blessures</h2>${renderInjuryTable(summary.injuries)}</article>
+        <article id="evolution" class="panel stat-section"><h2>Évolution</h2>${renderEvolution(summary)}</article>
+      </section>
     </section>`;
+  }
+  function table(headers=[], rows=[], empty='Aucune donnée sur cette période.'){
+    if(!rows.length) return `<div class="empty-state">${esc(empty)}</div>`;
+    return `<div class="table-wrap"><table class="data-table"><thead><tr>${headers.map(header => `<th>${esc(header)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+  }
+  function renderAttendanceTable(rows=[]){
+    const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,8);
+    return table(['Date','Statut','Minutes'], sorted.map(row => `<tr><td>${esc(Filters.dateOf(row) || '-')}</td><td>${esc(row.status || row.code || '-')}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`), 'Aucune présence sur cette période.');
+  }
+  function renderMatchStats(rows=[]){
+    const grouped = Object.entries(rows.reduce((out,row) => {
+      const key = row.action || row.type || row.eventType || 'Action';
+      out[key] = (out[key] || 0) + 1;
+      return out;
+    }, {})).sort((a,b) => b[1] - a[1]);
+    return table(['Action','Total'], grouped.map(([label,total]) => `<tr><td>${esc(label)}</td><td>${esc(total)}</td></tr>`), 'Aucune statistique match sur cette période.');
+  }
+  function renderInjuryTable(rows=[]){
+    const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,6);
+    return table(['Date','Type','Statut'], sorted.map(row => `<tr><td>${esc(Filters.dateOf(row) || '-')}</td><td>${esc(row.injuryType || row.bodyZone || '-')}</td><td>${esc(row.status || row.availability || '-')}</td></tr>`), 'Aucune blessure sur cette période.');
+  }
+  function renderEvolution(summary){
+    const items = [
+      ['Présence', summary.kpis.presenceRate, '%'],
+      ['Charge', summary.kpis.minutes, 'min'],
+      ['VMI', summary.latest.vmi || 0, ''],
+      ['CMJ', summary.latest.cmj || 0, '']
+    ];
+    const max = Math.max(1, ...items.map(([,value]) => Number(value) || 0));
+    return `<div class="bar-list">${items.map(([label,value,suffix]) => bar(label, Number(value) || 0, max, suffix)).join('')}</div>`;
   }
   function renderEvents(rows=[], titleKey='type', valueKey='status'){
     function valueText(row){
@@ -98,35 +150,50 @@
     return `<div class="timeline">${rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,12).map(row => `<div class="event"><b>${esc(row[titleKey] || row.theme || row.testName || row.action || row.source || 'Donnée')}</b><small>${esc(Filters.dateOf(row) || 'Sans date')} · ${esc(valueText(row))}</small></div>`).join('')}</div>`;
   }
   function renderTechnicalTests(rows=[]){
-    const labels = {
-      max_pfp:'Max pied fort',
-      max_pfm:'Max pied faible',
-      max_alt:'Max alterné',
-      max_tete:'Max tête',
-      reg_pfp:'Régularité pied fort',
-      reg_pfm:'Régularité pied faible',
-      reg_alt:'Régularité alterné',
-      reg_tete:'Régularité tête',
-      mouv_pfp:'Libre pied fort',
-      mouv_pfm:'Libre pied faible',
-      mouv_alt:'Libre alterné'
-    };
-    function testEntries(row){
-      if(row.tests && typeof row.tests === 'object'){
-        return Object.entries(labels)
-          .map(([key,label]) => [label, row.tests[key]])
-          .filter(([,value]) => value !== '' && value != null && !Number.isNaN(Number(value)));
-      }
-      const label = row.testName || row.testType || 'Test';
-      const value = row.value ?? row.score ?? row.note;
-      return value !== '' && value != null ? [[label, value]] : [];
+    const labels = [
+      ['max_pfp','Max pied fort','Maximum'],
+      ['max_pfm','Max pied faible','Maximum'],
+      ['max_alt','Max alterné','Maximum'],
+      ['max_tete','Max tête','Maximum'],
+      ['reg_pfp','Régularité pied fort','Régularité'],
+      ['reg_pfm','Régularité pied faible','Régularité'],
+      ['reg_alt','Régularité alterné','Régularité'],
+      ['reg_tete','Régularité tête','Régularité'],
+      ['mouv_pfp','Libre pied fort','Libre'],
+      ['mouv_pfm','Libre pied faible','Libre'],
+      ['mouv_alt','Libre alterné','Libre']
+    ];
+    function technicalValue(row={}, key){
+      if(row.tests && row.tests[key] != null && row.tests[key] !== '') return Number(row.tests[key]);
+      if((row.testName === key || row.testType === key) && row.value != null) return Number(row.value);
+      return null;
     }
-    const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,12);
-    return `<div class="timeline technical-list">${sorted.map(row => {
-      const entries = testEntries(row);
-      const source = row.source ? `<span class="mini-source">${esc(row.source)}</span>` : '';
-      return `<div class="event technical-event"><div class="event-head"><b>${esc(Filters.dateOf(row) || 'Sans date')}</b>${source}</div><div class="chips">${entries.length ? entries.map(([label,value]) => `<span class="chip">${esc(label)} <strong>${esc(value)}</strong></span>`).join('') : '<span class="chip">Aucune valeur renseignée</span>'}</div></div>`;
-    }).join('')}</div>`;
+    function bestFor(key){
+      return rows.reduce((best,row) => {
+        const value = technicalValue(row, key);
+        if(!Number.isFinite(value)) return best;
+        if(!best || value > best.value) return {value, date:Filters.dateOf(row)};
+        return best;
+      }, null);
+    }
+    const highlights = labels.map(([key,label,group]) => ({key,label,group,...(bestFor(key) || {})})).filter(item => Number.isFinite(item.value)).slice(0,6);
+    const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,10);
+    const primaryKeys = ['max_pfp','max_pfm','max_alt','reg_pfp','reg_pfm','reg_alt','mouv_pfp','mouv_pfm','mouv_alt'];
+    const labelMap = Object.fromEntries(labels.map(([key,label]) => [key,label]));
+    return `<div class="technical-board">
+      <div class="technical-summary">${highlights.map(item => `<div class="technical-score">
+        <span>${esc(item.group)}</span>
+        <b>${esc(item.value)}</b>
+        <small>${esc(item.label)}${item.date ? ` · ${esc(item.date)}` : ''}</small>
+      </div>`).join('')}</div>
+      <div class="table-wrap"><table class="data-table technical-table">
+        <thead><tr><th>Date</th>${primaryKeys.map(key => `<th>${esc(labelMap[key])}</th>`).join('')}</tr></thead>
+        <tbody>${sorted.map(row => `<tr><td><b>${esc(Filters.dateOf(row) || '-')}</b></td>${primaryKeys.map(key => {
+          const value = technicalValue(row, key);
+          return `<td>${Number.isFinite(value) ? esc(value) : '<span class="muted-dash">-</span>'}</td>`;
+        }).join('')}</tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
   }
   const physicalLabels = {
     vmi:{label:'VMI', unit:'km/h', direction:'high'},
