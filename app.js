@@ -34,6 +34,7 @@ const DEFAULT_MODULE_REGISTRY = [
   {id:'convocations', name:'Convocations', icon:'📣', section:'future', active:false, collection:'convocations', relatedCollections:['players','teams','matches'], screen:{type:'iframe', src:'pages/convocations.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Groupes, convocations et disponibilités.'}},
   {id:'medical', name:'Suivi médical', icon:'🩺', section:'staff', active:true, collection:'injuries', relatedCollections:['players','teams','injuryUpdates','medicalAppointments','rehabRoutines','settings'], screen:{type:'iframe', src:'pages/suivi-medical.html'}, permissions:{read:ROLES.medicalRead, write:ROLES.medicalWrite, importExport:ROLES.medicalWrite}, settings:{showInNav:true, showOnDashboard:true, description:'Blessures, douleurs, rendez-vous et reprise.'}},
   {id:'playerProfile', name:'Fiche individuelle', icon:'👤', section:'staff', active:true, collection:'players', relatedCollections:['attendance','sessions','matches','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps'], screen:{type:'iframe', src:'pages/player-profile.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Tableau de bord joueuse par playerId, saisons et comparaisons.'}},
+  {id:'teamProfile', name:'Fiche équipe', icon:'🛡️', section:'staff', active:true, collection:'teams', relatedCollections:['players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','workloads'], screen:{type:'iframe', src:'pages/team-profile.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Bilan complet équipe par teamId, résultats, effectif et tendances.'}},
   {id:'individualReports', name:'Bilans individuels', icon:'📝', section:'future', active:false, collection:'individualReports', relatedCollections:['players','teams','matches','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/bilans-individuels.html'}, permissions:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','OBSERVATEUR_STAFF','LECTURE'], write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Bilans individuels staff.'}}
 ];
 
@@ -999,6 +1000,113 @@ async function playerProfileLoadData(options={}){
   ]);
   payload.collections.sessions = sessions;
   payload.collections.matches = matches;
+  return payload;
+}
+function rowTeamIds(row={}){
+  return [
+    row.teamId,
+    row.team_id,
+    row.team?.teamId,
+    row.teamSnapshot?.teamId,
+    row.playerSnapshot?.teamId,
+    row.sessionSnapshot?.teamId,
+    row.matchSnapshot?.teamId
+  ].map(value => String(value || '').trim()).filter(Boolean);
+}
+function rowMatchesTeamId(row={}, teamId=''){
+  const target = String(teamId || '').trim();
+  return Boolean(target && rowTeamIds(row).includes(target));
+}
+function playerMatchesTeamIdForAnySeason(player={}, teamId=''){
+  if(!teamId) return false;
+  if(rowMatchesTeamId(player, teamId)) return true;
+  const history = player.seasonHistory || player.seasons || {};
+  return Object.values(history || {}).some(snapshot => rowMatchesTeamId(snapshot, teamId));
+}
+async function teamProfileLoadData(options={}){
+  if(!canViewModule('teamProfile')) throw new Error('Accès non autorisé.');
+  const teamId = String(options.teamId || '').trim();
+  if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
+  const payload = {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), teamId, collections:{}};
+  const names = ['teams','players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
+  names.forEach(name => { payload.collections[name] = []; });
+
+  if(!db || !currentUser){
+    const docs = collectCentralFirestoreDocs();
+    names.forEach(name => { payload.collections[name] = [...(docs[name] || new Map()).values()]; });
+    payload.collections.teams = (payload.collections.teams || []).filter(team => !teamId || (team.teamId || team.id) === teamId);
+    payload.collections.players = (payload.collections.players || []).filter(player => !teamId || playerMatchesTeamIdForAnySeason(player, teamId));
+    const playerIds = new Set(payload.collections.players.map(player => player.playerId || player.id).filter(Boolean));
+    const matchIds = new Set((payload.collections.matches || []).filter(row => !teamId || rowMatchesTeamId(row, teamId)).map(row => row.matchId || row.id).filter(Boolean));
+    payload.collections.matches = payload.collections.matches.filter(row => !teamId || rowMatchesTeamId(row, teamId));
+    ['technicalTests','physicalTests','injuries','workloads','convocations','individualReports'].forEach(name => {
+      payload.collections[name] = payload.collections[name].filter(row => rowMatchesTeamId(row, teamId) || playerIds.has(row.playerId));
+    });
+    payload.collections.matchEvents = payload.collections.matchEvents.filter(row => rowMatchesTeamId(row, teamId) || matchIds.has(row.matchId));
+    const sessionIds = new Set((payload.collections.sessions || []).filter(row => !teamId || rowMatchesTeamId(row, teamId)).map(row => row.sessionId || row.id).filter(Boolean));
+    payload.collections.sessions = payload.collections.sessions.filter(row => !teamId || rowMatchesTeamId(row, teamId));
+    payload.collections.attendance = payload.collections.attendance.filter(row => rowMatchesTeamId(row, teamId) || playerIds.has(row.playerId) || sessionIds.has(row.sessionId));
+    return payload;
+  }
+
+  async function docsFromSnap(snap){
+    const rows = [];
+    snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
+    return rows;
+  }
+  async function readCollection(name){
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, name));
+    return docsFromSnap(snap);
+  }
+  async function readWhere(name, field, operator, value){
+    try{
+      const q = firebaseFns.query(firebaseFns.collection(db, name), firebaseFns.where(field, operator, value));
+      return docsFromSnap(await firebaseFns.getDocs(q));
+    }catch(_e){ return []; }
+  }
+  async function readWhereIn(name, field, values=[]){
+    const unique = [...new Set(values.filter(Boolean))];
+    const chunks = [];
+    for(let i = 0; i < unique.length; i += 10) chunks.push(unique.slice(i, i + 10));
+    const settled = await Promise.allSettled(chunks.map(chunk => readWhere(name, field, 'in', chunk)));
+    return settled.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+  }
+  function uniqueRows(rows=[]){
+    return [...new Map(rows.map(row => [row.id || row.teamId || row.matchId || row.sessionId || row.playerId || JSON.stringify(row), row])).values()];
+  }
+
+  const [teams, allPlayers] = await Promise.all([listTeams({includeArchived:true}), listPlayers({season:'all', includeArchived:true})]);
+  payload.collections.teams = teams.filter(team => !teamId || (team.teamId || team.id) === teamId);
+  payload.collections.players = allPlayers.filter(player => (!teamId || playerMatchesTeamIdForAnySeason(player, teamId)) && canAccessPlayerRecord(player));
+  const playerIds = payload.collections.players.map(player => player.playerId || player.id).filter(Boolean);
+  const directNames = ['matches','sessions','technicalTests','physicalTests','injuries','workloads','convocations','individualReports'];
+  const directRows = await Promise.all(directNames.map(name => readWhere(name, 'teamId', '==', teamId)));
+  directNames.forEach((name, idx) => { payload.collections[name] = directRows[idx]; });
+  const matchIds = payload.collections.matches.map(row => row.matchId || row.id).filter(Boolean);
+  const sessionIds = payload.collections.sessions.map(row => row.sessionId || row.id).filter(Boolean);
+  payload.collections.matchEvents = uniqueRows([
+    ...await readWhere('matchEvents', 'teamId', '==', teamId),
+    ...await readWhereIn('matchEvents', 'matchId', matchIds)
+  ]);
+  payload.collections.attendance = uniqueRows([
+    ...await readWhere('attendance', 'teamId', '==', teamId),
+    ...await readWhereIn('attendance', 'sessionId', sessionIds),
+    ...await readWhereIn('attendance', 'playerId', playerIds)
+  ]);
+  for(const name of ['technicalTests','physicalTests','injuries','workloads','convocations','individualReports']){
+    payload.collections[name] = uniqueRows([
+      ...(payload.collections[name] || []),
+      ...await readWhereIn(name, 'playerId', playerIds),
+      ...await readWhere(name, 'playerSnapshot.teamId', '==', teamId)
+    ]);
+  }
+  for(const name of ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps']){
+    payload.collections[name] = uniqueRows([
+      ...await readWhere(name, 'teamId', '==', teamId),
+      ...await readWhereIn(name, 'playerId', playerIds),
+      ...await readWhere(name, 'playerSnapshot.teamId', '==', teamId)
+    ]);
+  }
   return payload;
 }
 function csvEscape(v){
@@ -3012,7 +3120,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
@@ -3509,7 +3617,13 @@ adminView?.addEventListener('change', adminAccessPickerChange);
 window.addEventListener('online', () => { updateSyncState('Retour Internet · sync...'); syncCloud(false); });
 window.addEventListener('offline', () => updateSyncState('Hors ligne · local actif'));
 window.addEventListener('resize', () => { if(window.matchMedia('(max-width:1180px)').matches) shell.classList.remove('collapsed'); });
-window.addEventListener('message', e => { if(e.data?.type === 'coachpulse-local-change') snapshotLocalData(); });
+window.addEventListener('message', e => {
+  if(e.data?.type === 'coachpulse-local-change') snapshotLocalData();
+  if(e.data?.type === 'coachpulse-open-module' && e.data.moduleId){
+    if(e.data.playerId) localStorage.setItem('coachpulse:playerProfile:selectedPlayerId', e.data.playerId);
+    routeTo(e.data.moduleId);
+  }
+});
 frame.addEventListener('load', installFrameLocalStorageWatcher);
 setInterval(() => { snapshotLocalData(); if(currentUser && localStorage.getItem('coachpulse:pendingSync') === '1') scheduleCloudSync(500); }, 5000);
 setInterval(snapshotLocalData, 15000);
