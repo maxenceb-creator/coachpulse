@@ -53,7 +53,8 @@
   async function init(){
     try{
       state.players = await Data.listPlayers();
-      state.selectedPlayerId = state.players[0]?.playerId || '';
+      const requestedPlayerId = localStorage.getItem('coachpulse:playerProfile:selectedPlayerId') || '';
+      state.selectedPlayerId = state.players.some(player => player.playerId === requestedPlayerId) ? requestedPlayerId : (state.players[0]?.playerId || '');
       await loadSelected();
       await render();
     }catch(error){

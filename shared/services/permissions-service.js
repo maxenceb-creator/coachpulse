@@ -83,6 +83,7 @@
     admin:{read:true, write:true, importExport:true},
     medical:{read:true, write:true, importExport:true},
     playerProfile:{read:true, write:true, importExport:true},
+    teamProfile:{read:true, write:true, importExport:true},
     injuries:{read:true, write:true, importExport:true},
     workload:{read:true, write:true, importExport:true},
     convocations:{read:true, write:true, importExport:true},
@@ -93,17 +94,17 @@
 
   const LEGACY_ROLE_MODULES = {
     ADMIN:'*',
-    RESPONSABLE:['stats','presences','tests','methodologie','database','dataHub','admin','medical','playerProfile','injuries','workload','convocations','individualReports'],
-    RESPONSABLE_CATEGORIE:['stats','presences','tests','methodologie','database','dataHub','medical','playerProfile','injuries','workload','convocations','individualReports'],
-    EDUCATEUR:['stats','presences','tests','methodologie','playerProfile','workload','convocations','individualReports'],
-    COACH:['stats','presences','tests','methodologie','playerProfile','workload','convocations','individualReports'],
+    RESPONSABLE:['stats','presences','tests','methodologie','database','dataHub','admin','medical','playerProfile','teamProfile','injuries','workload','convocations','individualReports'],
+    RESPONSABLE_CATEGORIE:['stats','presences','tests','methodologie','database','dataHub','medical','playerProfile','teamProfile','injuries','workload','convocations','individualReports'],
+    EDUCATEUR:['stats','presences','tests','methodologie','playerProfile','teamProfile','workload','convocations','individualReports'],
+    COACH:['stats','presences','tests','methodologie','playerProfile','teamProfile','workload','convocations','individualReports'],
     PREPARATEUR_ATHLETIQUE:['presences','tests','workload'],
     PREPARATEUR_PHYSIQUE:['presences','tests','workload'],
     MEDICAL:['medical','injuries'],
     KINE:['medical','injuries'],
     MEDECIN:['medical','injuries'],
-    OBSERVATEUR_STAFF:['stats','presences','tests','methodologie','playerProfile','individualReports'],
-    LECTURE:['stats','presences','tests','methodologie','playerProfile','individualReports']
+    OBSERVATEUR_STAFF:['stats','presences','tests','methodologie','playerProfile','teamProfile','individualReports'],
+    LECTURE:['stats','presences','tests','methodologie','playerProfile','teamProfile','individualReports']
   };
 
   function asText(value){ return String(value ?? '').trim(); }
