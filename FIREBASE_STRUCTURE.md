@@ -45,9 +45,9 @@ Fichiers Firebase versionnés :
   - ID stable : `testId`
   - Champs principaux : `playerId`, `playerName`, `date`, `season`, `categorie`, `subCategory`, `tests`, `objectifs`
 - `physicalTests` : réservé aux tests physiques.
-- `staff` : profils staff normalisés.
+- `staff_members` : profils staff normalisés.
   - ID stable : `staffId`
-  - Champs principaux : `uid`, `email`, `name`, `role`, `scope`, `status`
+  - Champs principaux : `uid`, `email`, `name`, `role`, `authorizedTeamIds`, `allowedModules`, `modulePermissions`, `scope`, `status`
 - `settings` : configuration et version du schéma.
 
 ## Règles d'accès v1.0

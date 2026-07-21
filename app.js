@@ -690,7 +690,7 @@ function downloadText(content, filename, type='text/plain;charset=utf-8'){
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
-const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','staff','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
+const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','staff_members','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
 function parseStoredJson(key, fallback){
   try{ return JSON.parse(localStorage.getItem(key) || ''); }catch(_e){ return fallback; }
 }
@@ -923,7 +923,7 @@ function collectCentralFirestoreDocs(){
     });
   });
   if(currentProfile){
-    addDoc(docs,'staff',currentUser.uid,{staffId:currentUser.uid, uid:currentUser.uid, email:currentUser.email || currentProfile.email || '', name:currentProfile.name || '', role:currentProfile.role || '', roleLabel:currentProfile.roleLabel || '', permissionLevel:currentProfile.permissionLevel || '', permissionLabel:currentProfile.permissionLabel || '', scope:currentProfile.scope || '', status:currentProfile.status || 'ACTIVE'});
+    addDoc(docs,'staff_members',currentUser.uid,{staffId:currentUser.uid, uid:currentUser.uid, email:currentUser.email || currentProfile.email || '', name:currentProfile.name || '', role:currentProfile.role || '', roleLabel:currentProfile.roleLabel || '', permissionLevel:currentProfile.permissionLevel || '', permissionLabel:currentProfile.permissionLabel || '', scope:currentProfile.scope || '', authorizedTeamIds:currentProfile.authorizedTeamIds || [], teamIds:currentProfile.teamIds || [], allowedTeamIds:currentProfile.allowedTeamIds || [], allowedModules:currentProfile.allowedModules || [], modulePermissions:currentProfile.modulePermissions || {}, status:currentProfile.status || 'ACTIVE'});
   }
   addDoc(docs,'settings','coachpulse-schema',{settingsId:'coachpulse-schema',version:'firestore-v1',legacyCloudCollection:'coachpulse_common_base',migratedAtIso:new Date().toISOString(),collections:FIRESTORE_COLLECTIONS,modules:moduleRegistry().map(module => ({id:module.id,name:module.name,active:module.active,section:module.section,collection:module.collection,relatedCollections:module.relatedCollections||[],permissions:module.permissions,screen:module.screen,settings:module.settings}))});
   return docs;
