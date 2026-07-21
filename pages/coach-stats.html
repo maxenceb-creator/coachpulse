@@ -1795,7 +1795,7 @@ if(typeof window.v51Season==='function'){
   function playerKey(p){return [p.nom||p.lastName,p.prenom||p.firstName].map(normalizeKey).join("|");}
   function mergePlayer(a,b){const out=Object.assign({},a||{});Object.keys(b||{}).forEach(k=>{if((out[k]==null||out[k]==="")&&b[k]!=null&&b[k]!=="")out[k]=b[k]});if(b&&b.photo&&!out.photo)out.photo=b.photo;return out;}
   function readCachedPlayers(){try{const central=JSON.parse(localStorage.getItem("coachpulse:centralPlayers")||"[]").filter(Boolean);const manual=JSON.parse(localStorage.getItem("coachpulse:customPlayers")||"[]").filter(Boolean);const by=new Map();central.concat(manual).forEach(p=>{const key=playerKey(p)||p.playerId||p.id;if(!key)return;by.set(key,mergePlayer(by.get(key),p))});return Array.from(by.values())}catch(_){return []}}
-  async function readPlayers(){try{const api=window.parent&&window.parent.CoachPulseCentralData;if(api&&typeof api.listPlayers==="function"){const players=await api.listPlayers();if(Array.isArray(players)&&players.length)return players}}catch(_){}return readCachedPlayers()}
+  async function readPlayers(){try{const api=window.parent&&window.parent.CoachPulseCentralData;if(api&&typeof api.listPlayers==="function"){const players=await api.listPlayers();if(Array.isArray(players)&&players.length)return players}}catch(_){}return []}
   function displayName(p){return `${String(p.nom||p.lastName||"").toUpperCase()} ${String(p.prenom||p.firstName||"").trim()}`.trim().toUpperCase();}
   function teamCategory(p){
     const sub=String(p.subCategory||p.sousCategorie||p.categorie||p.category||p.team||"").toUpperCase();

@@ -151,8 +151,8 @@ function fallbackApi(){
     currentSeason:()=>fallbackSeason(new Date()),
     seasonFromDate:fallbackSeason,
     athleticCapabilities:()=>({canRead:true,canWrite:false,canExport:false,role:'APERÇU_LOCAL'}),
-    listPlayers:async()=>[...readLocal('coachpulse:centralPlayers', []), ...readLocal('coachpulse:customPlayers', [])],
-    athleticListData:async()=>readLocal('coachpulse:athleticTests', []),
+    listPlayers:async()=>[],
+    athleticListData:async()=>[],
     athleticSaveTest:async()=>{throw new Error('Ouvre cet onglet depuis CoachPulse pour utiliser la base joueuses unique.')},
     athleticExport:()=>{}
   };
