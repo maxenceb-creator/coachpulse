@@ -5,7 +5,8 @@
   "description": "CoachPulse PWA for staff, match stats, attendance, tests, medical follow-up and administration.",
   "scripts": {
     "build:public": "node scripts/build-public.js",
-    "check": "node --check app.js && node --check sw.js && node --check shared/services/players-service.js && node --check shared/services/teams-service.js && node --check shared/services/permissions-service.js && node --check scripts/build-public.js",
+    "check": "node --check app.js && node --check sw.js && node --check shared/services/players-service.js && node --check shared/services/teams-service.js && node --check shared/services/permissions-service.js && node --check scripts/build-public.js && node --check scripts/audit-static.js",
+    "audit:static": "node scripts/audit-static.js",
     "deploy:prod": "firebase deploy --project coach-pulse-ee6b0",
     "deploy:dev": "firebase hosting:channel:deploy dev --project coach-pulse-ee6b0",
     "firebase:project": "firebase use"
