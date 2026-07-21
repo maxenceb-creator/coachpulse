@@ -3391,7 +3391,17 @@ function moduleAccessChoices(){
 async function loadAdminAccessChoices(force=false){
   if(adminAccessChoiceCache && !force) return adminAccessChoiceCache;
   const moduleChoices = moduleAccessChoices();
-  const baseTeamChoices = DEFAULT_DB_OPTIONS.teams.map(value => ({value:teamsService()?.canonicalTeamId?.(value) || stableFirestoreId('team', value), label:value, hint:'Équipe'}));
+  const officialRows = teamsService()?.officialTeamRows?.() || DEFAULT_DB_OPTIONS.teams.map(name => ({
+    teamId:teamsService()?.canonicalTeamId?.(name) || stableFirestoreId('team', name),
+    name,
+    category:''
+  }));
+  const officialIds = new Set(officialRows.map(team => team.teamId || team.id).filter(Boolean));
+  const baseTeamChoices = officialRows.map(team => ({
+    value:team.teamId || team.id,
+    label:team.name || team.teamName || team.teamId || team.id,
+    hint:[team.category, Array.isArray(team.subCategories) ? team.subCategories.join(', ') : ''].filter(Boolean).join(' · ') || 'Équipe officielle'
+  }));
   let teamChoices = [...baseTeamChoices];
   try{
     const data = await adminListTeamsAndSettings();
@@ -3401,7 +3411,7 @@ async function loadAdminAccessChoices(force=false){
         const label = team.name || team.teamName || value;
         const hint = team.category || team.level || 'Équipe';
         return {value, label, hint};
-      }),
+      }).filter(choice => officialIds.has(choice.value)),
       ...baseTeamChoices
     ];
   }catch(_e){}
@@ -3415,17 +3425,18 @@ function renderAccessPicker(kind, selected=[], choices=[], inputAttrs=''){
   const selectedKeys = new Set(parseAccessList(selected).map(accessChoiceKey));
   const knownKeys = new Set(choices.map(choice => accessChoiceKey(choice.value)));
   const extraChoices = parseAccessList(selected)
-    .filter(value => value && !knownKeys.has(accessChoiceKey(value)))
+    .filter(value => kind !== 'teams' && value && !knownKeys.has(accessChoiceKey(value)))
     .map(value => ({value, label:value, hint:'Personnalisé'}));
   const allChoices = uniqueAccessChoices([...choices, ...extraChoices]);
   const selectedValues = allChoices.filter(choice => selectedKeys.has(accessChoiceKey(choice.value))).map(choice => choice.value);
+  const selectedLabels = allChoices.filter(choice => selectedKeys.has(accessChoiceKey(choice.value))).map(choice => choice.label);
   const list = allChoices.length ? allChoices.map(choice => {
     const checked = selectedKeys.has(accessChoiceKey(choice.value)) ? 'checked' : '';
     const title = choice.hint ? `${choice.label} · ${choice.hint}` : choice.label;
     return `<label class="access-choice" title="${escapeHtml(title)}"><input type="checkbox" data-access-choice="${escapeHtml(kind)}" value="${escapeHtml(choice.value)}" ${checked}><span>${escapeHtml(choice.label)}</span>${choice.hint ? `<small>${escapeHtml(choice.hint)}</small>` : ''}</label>`;
   }).join('') : '<div class="admin-note">Aucun choix disponible.</div>';
   const summary = selectedValues.length ? `${selectedValues.length} sélectionné(s)` : 'Aucun accès spécifique';
-  const selectedLabel = selectedValues.length ? selectedValues.slice(0, 2).join(', ') + (selectedValues.length > 2 ? ` +${selectedValues.length - 2}` : '') : 'Choisir';
+  const selectedLabel = selectedLabels.length ? selectedLabels.slice(0, 2).join(', ') + (selectedLabels.length > 2 ? ` +${selectedLabels.length - 2}` : '') : 'Choisir';
   return `<details class="access-picker" data-access-kind="${escapeHtml(kind)}"><summary><span class="access-summary">${escapeHtml(summary)}</span><b>${escapeHtml(selectedLabel)}</b></summary><input type="hidden" ${inputAttrs} value="${escapeHtml(selectedValues.join(', '))}"><div class="access-choice-list">${list}</div></details>`;
 }
 function syncAccessPicker(picker){
@@ -3487,7 +3498,7 @@ async function loadMembers(){
     snap.forEach(docSnap => {
       const m = {uid:docSnap.id, ...docSnap.data()};
       const tr = document.createElement('tr');
-      const teams = [...new Set([...(m.teamIds || []), ...(m.allowedTeamIds || [])])].filter(Boolean);
+      const teams = [...new Set([...(m.authorizedTeamIds || []), ...(m.teamIds || []), ...(m.allowedTeamIds || [])])].filter(Boolean);
       const modules = m.allowedModules || [];
       const teamPicker = renderAccessPicker('teams', teams, choices.teams, `data-teams="${escapeHtml(m.uid)}"`);
       const modulePicker = renderAccessPicker('modules', modules, choices.modules, `data-modules="${escapeHtml(m.uid)}"`);
