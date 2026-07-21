@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded',init);
         if(Array.isArray(players)&&players.length)return players;
       }
     }catch(_){}
-    return readCachedPlayers();
+    return [];
   }
   function displayName(p){return `${String(p.prenom||"").trim()} ${String(p.nom||"").toUpperCase()}`.trim().toUpperCase();}
   function teamCategoryFromSubCategory(value){

@@ -359,7 +359,7 @@ renderFilters();installFilterEvents();renderAll();renderCalendar();
         if(Array.isArray(players)&&players.length)return players;
       }
     }catch(_){}
-    return readCachedPlayers();
+    return [];
   }
   function slug(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"joueuse"}
   function personKey(p){return [p.nom||p.lastName,p.prenom||p.firstName].map(x=>slug(x)).join("|")}

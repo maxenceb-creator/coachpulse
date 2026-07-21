@@ -132,10 +132,7 @@
       const rows = await api().listPlayers({season:currentSeason()});
       return rows.map(row => ({...row, playerId:idOf(row), displayName:displayName(row)})).filter(row => row.playerId);
     }
-    try{
-      const cached = JSON.parse(localStorage.getItem('coachpulse:centralPlayers') || '[]');
-      return Array.isArray(cached) ? cached.map(row => ({...row, playerId:idOf(row), displayName:displayName(row)})).filter(row => row.playerId) : [];
-    }catch(_e){ return []; }
+    return [];
   }
   async function loadProfileData(playerOrId=''){
     const player = typeof playerOrId === 'object' && playerOrId ? playerOrId : {playerId:playerOrId};

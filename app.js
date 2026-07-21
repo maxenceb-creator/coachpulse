@@ -131,8 +131,40 @@ function canAccessPlayerRecord(player){
   const service = permissionsService();
   return service?.canAccessPlayer ? service.canAccessPlayer(accessProfile(), player) : true;
 }
+function getAuthorizedTeamIds(){
+  const service = permissionsService();
+  return service?.getAuthorizedTeamIds ? service.getAuthorizedTeamIds(accessProfile()) : [];
+}
+function canAccessRecord(record){
+  const service = permissionsService();
+  return service?.canAccessRecord ? service.canAccessRecord(accessProfile(), record) : true;
+}
+function filterAuthorizedTeams(teams=[]){
+  const service = permissionsService();
+  return service?.filterAuthorizedTeams ? service.filterAuthorizedTeams(accessProfile(), teams) : teams;
+}
+function filterAuthorizedPlayers(players=[]){
+  const service = permissionsService();
+  return service?.filterAuthorizedPlayers ? service.filterAuthorizedPlayers(accessProfile(), players) : players;
+}
+function filterAuthorizedRecords(records=[]){
+  const service = permissionsService();
+  return service?.filterAuthorizedRecords ? service.filterAuthorizedRecords(accessProfile(), records) : records;
+}
+function normalizeProfileAccessFields(profile={}){
+  const teams = [...new Set([
+    ...(profile.authorizedTeamIds || []),
+    ...(profile.teamIds || []),
+    ...(profile.allowedTeamIds || [])
+  ].map(v => String(v || '').trim()).filter(Boolean))];
+  profile.authorizedTeamIds = teams;
+  profile.teamIds = teams;
+  profile.allowedTeamIds = teams;
+  return profile;
+}
 function accessContext(){
   const profile = accessProfile();
+  const authorizedTeamIds = getAuthorizedTeamIds();
   return {
     type:'coachpulse-access-context',
     user:{uid:currentUser?.uid || '', email:currentUser?.email || ''},
@@ -145,8 +177,9 @@ function accessContext(){
       permissionLevel:getCurrentPermissionLevel(),
       permissionLabel:permissionsService()?.permissionLabel?.(getCurrentPermissionLevel()) || getCurrentPermissionLevel(),
       status:profile.status || 'ACTIVE',
-      teamIds:profile.teamIds || [],
-      allowedTeamIds:profile.allowedTeamIds || [],
+      authorizedTeamIds,
+      teamIds:authorizedTeamIds,
+      allowedTeamIds:authorizedTeamIds,
       allowedModules:profile.allowedModules || [],
       modulePermissions:profile.modulePermissions || {}
     },
@@ -351,7 +384,7 @@ async function ensureUserProfile(user){
   const service = permissionsService();
   const seedAdmin = isSeedAdminEmail(user.email);
   if(snap.exists()){
-    currentProfile = {uid:user.uid, ...snap.data()};
+    currentProfile = normalizeProfileAccessFields({uid:user.uid, ...snap.data()});
     const legacyRole = currentProfile.legacyRole || currentProfile.role || currentUserRole;
     currentProfile.legacyRole = legacyRole;
     currentProfile.role = service?.normalizeRole ? service.normalizeRole(currentProfile.businessRole || currentProfile.role) : currentProfile.role;
@@ -366,6 +399,12 @@ async function ensureUserProfile(user){
     const loginPatch = {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email};
     if(seedAdmin || isAdminLikeProfile(currentProfile)){
       Object.assign(loginPatch, {legacyRole, role:currentProfile.role, roleLabel:currentProfile.roleLabel, permissionLevel:currentProfile.permissionLevel, permissionLabel:currentProfile.permissionLabel, allowedModules:currentProfile.allowedModules || [], status:currentProfile.status || 'ACTIVE'});
+    }else{
+      Object.assign(loginPatch, {
+        authorizedTeamIds:currentProfile.authorizedTeamIds || [],
+        teamIds:currentProfile.teamIds || [],
+        allowedTeamIds:currentProfile.allowedTeamIds || []
+      });
     }
     await firebaseFns.setDoc(ref, loginPatch, {merge:true});
     return currentProfile;
@@ -375,6 +414,7 @@ async function ensureUserProfile(user){
   const role = isSeedAdmin ? 'DIRIGEANT' : 'ENTRAINEUR';
   const permissionLevel = isSeedAdmin ? 'ADMIN' : 'LECTEUR';
   currentProfile = service?.defaultProfile ? service.defaultProfile(user, role, permissionLevel) : {uid:user.uid, email:user.email, name:user.displayName || user.email, role, permissionLevel, scope:'CoachPulse', status:'ACTIVE'};
+  normalizeProfileAccessFields(currentProfile);
   if(isSeedAdmin) applyAdminProfileRepair(currentProfile, service);
   await firebaseFns.setDoc(ref, {...currentProfile, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp(), lastLoginAt:firebaseFns.serverTimestamp()}, {merge:true});
   return currentProfile;
@@ -398,6 +438,7 @@ async function initFirebase(){
           startRealtimeSync();
           await syncCloud(false);
           await pullCentralPlayersToLocal(false).catch(()=>{});
+          purgeUnauthorizedLocalData();
           const last = localStorage.getItem('coachpulse:lastTool') || 'home';
           routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
         }catch(e){
@@ -464,6 +505,38 @@ function collectLocalStorage(){
     data[key] = localStorage.getItem(key);
   }
   return data;
+}
+function purgeUnauthorizedLocalData(){
+  const filterPlayers = rows => {
+    if(!Array.isArray(rows)) return [];
+    return filterAuthorizedPlayers(rows).filter(Boolean);
+  };
+  const scrubJsonArray = key => {
+    try{
+      const next = filterPlayers(JSON.parse(localStorage.getItem(key) || '[]'));
+      localStorage.setItem(key, JSON.stringify(next));
+    }catch(_e){ localStorage.removeItem(key); }
+  };
+  scrubJsonArray('coachpulse:centralPlayers');
+  scrubJsonArray('coachpulse:customPlayers');
+  const selectedPlayerId = localStorage.getItem('coachpulse:playerProfile:selectedPlayerId');
+  if(selectedPlayerId){
+    const players = parseStoredJson('coachpulse:centralPlayers', []).concat(parseStoredJson('coachpulse:customPlayers', []));
+    if(!players.some(player => (player.playerId || player.id) === selectedPlayerId)) localStorage.removeItem('coachpulse:playerProfile:selectedPlayerId');
+  }
+}
+function clearSensitiveLocalData(){
+  [
+    'coachpulse:centralPlayers',
+    'coachpulse:customPlayers',
+    'coachpulse:playerProfile:selectedPlayerId',
+    'coachpulse:medicalProfiles',
+    'coachStatsV13Rows',
+    'coachStatsV170',
+    'presenceSeanceV3_6_Excel',
+    'methodo_events_v24'
+  ].forEach(key => localStorage.removeItem(key));
+  Object.keys(localStorage).filter(key => key.startsWith('coachpulse:autoBackup')).forEach(key => localStorage.removeItem(key));
 }
 function buildPayload(){
   return {
@@ -971,15 +1044,15 @@ async function playerProfileLoadData(options={}){
     return [...new Map(rows.map(row => [row.id, row])).values()];
   }
   if(!aliases.length){
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
-    snap.forEach(docSnap => payload.collections.players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
+    payload.collections.players = await listPlayers({season:'all', includeArchived:true});
     return payload;
   }
   const [playersById, playerRows] = await Promise.all([readDocsByIds('players', aliases), readWhereIn('players')]);
-  payload.collections.players = playersById;
+  payload.collections.players = filterAuthorizedPlayers(playersById);
   playerRows.forEach(row => {
-    if(!payload.collections.players.some(player => player.id === row.id)) payload.collections.players.push(row);
+    if(canAccessPlayerRecord(row) && !payload.collections.players.some(player => player.id === row.id)) payload.collections.players.push(row);
   });
+  if(playerId && !payload.collections.players.some(player => (player.playerId || player.id) === playerId)) throw new Error('Accès non autorisé à cette joueuse.');
   await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
   const seedTechnicalTests = await seedTechnicalTestsForProfile(aliases);
   const profilePhysicalTests = canUseAthletic('read') ? await athleticListData({playerId, season:'all'}).catch(() => []) : [];
@@ -992,6 +1065,15 @@ async function playerProfileLoadData(options={}){
     ...(payload.collections.physicalTests || []),
     ...profilePhysicalTests
   ].map(row => [row.id || row.physicalTestId || row.testId || stableFirestoreId('physical', row.playerId, row.date, row.season, row.playerName), row])).values()];
+  const accessiblePlayerIds = new Set(payload.collections.players.map(player => player.playerId || player.id).filter(Boolean));
+  directCollections.forEach(name => {
+    payload.collections[name] = (payload.collections[name] || []).filter(row =>
+      canAccessRecord(row)
+      || accessiblePlayerIds.has(row.playerId)
+      || accessiblePlayerIds.has(row.playerSnapshot?.playerId)
+      || accessiblePlayerIds.has(row.player?.playerId)
+    );
+  });
   const sessionIds = new Set((payload.collections.attendance || []).map(row => row.sessionId).filter(Boolean));
   const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
   const [sessions, matches] = await Promise.all([
@@ -2821,12 +2903,13 @@ async function moduleListPlayers(){
 async function listPlayers(filters={}){
   const players = await moduleListPlayers();
   const service = playersService();
-  return service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
+  const filtered = service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
+  return filterAuthorizedPlayers(filtered);
 }
 async function listTeams(filters={}){
   const service = teamsService();
-  if(service?.listTeams && db && currentUser) return service.listTeams(firestoreServiceContext(), filters);
-  return service?.officialTeamRows ? service.officialTeamRows() : [];
+  const teams = service?.listTeams && db && currentUser ? await service.listTeams(firestoreServiceContext(), filters) : (service?.officialTeamRows ? service.officialTeamRows() : []);
+  return filterAuthorizedTeams(teams);
 }
 function seasonFromDate(date=new Date()){
   const service = playersService();
@@ -3121,7 +3204,7 @@ var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? ad
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
 window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
-Object.assign(window.CoachPulseCentralData, {accessContext, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord});
+Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedRecords});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   snapshotLocalData({fromCloud:true});
@@ -3191,6 +3274,7 @@ async function logout(){
   try{ if(auth) await firebaseFns.signOut(auth); }catch(e){ alert('Déconnexion impossible : '+cleanError(e)); }
   stopRealtimeSync();
   currentUser = null; currentProfile = null;
+  clearSensitiveLocalData();
   localStorage.removeItem('coachpulse:pendingSync');
   setLocked(true);
   updateSyncState('Compte déconnecté');
@@ -3224,7 +3308,7 @@ async function createMember(){
     await firebaseFns.updateProfile(cred.user, {displayName:name || email});
 
     await firebaseFns.setDoc(firebaseFns.doc(db, 'staff_members', cred.user.uid), {
-      uid:cred.user.uid, name:name || email, email, role, roleLabel, permissionLevel, permissionLabel, scope:scope || teamIds.join(', ') || 'CoachPulse', teamIds, allowedTeamIds:teamIds, allowedModules, modulePermissions:{}, status,
+      uid:cred.user.uid, name:name || email, email, role, roleLabel, permissionLevel, permissionLabel, scope:scope || teamIds.join(', ') || 'CoachPulse', authorizedTeamIds:teamIds, teamIds, allowedTeamIds:teamIds, allowedModules, modulePermissions:modulePermissionsFromSelection(allowedModules, permissionLevel), status,
       userType:'staff',
       createdBy:currentUser.uid, createdByEmail:currentUser.email, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp()
     }, {merge:true});
@@ -3273,6 +3357,11 @@ function readCsvField(id){
 function parseAccessList(value){
   return [...new Set(String(value || '').split(/[,;\n]+/).map(v => v.trim()).filter(Boolean))];
 }
+function modulePermissionsFromSelection(allowedModules=[], permissionLevel='LECTEUR'){
+  const level = String(permissionLevel || '').toUpperCase();
+  const value = ['ADMIN','EDITEUR','SAISIE'].includes(level) ? 'edit' : 'read';
+  return Object.fromEntries((allowedModules || []).map(moduleId => [moduleId, value]));
+}
 function accessChoiceKey(value){
   return String(value || '').trim().toLowerCase();
 }
@@ -3302,20 +3391,27 @@ function moduleAccessChoices(){
 async function loadAdminAccessChoices(force=false){
   if(adminAccessChoiceCache && !force) return adminAccessChoiceCache;
   const moduleChoices = moduleAccessChoices();
-  const baseTeamChoices = DEFAULT_DB_OPTIONS.teams.map(value => ({value:teamsService()?.canonicalTeamId?.(value) || stableFirestoreId('team', value), label:value, hint:'Équipe'}));
+  const officialRows = teamsService()?.officialTeamRows?.() || DEFAULT_DB_OPTIONS.teams.map(name => ({
+    teamId:teamsService()?.canonicalTeamId?.(name) || stableFirestoreId('team', name),
+    name,
+    category:''
+  }));
+  const officialIds = new Set(officialRows.map(team => team.teamId || team.id).filter(Boolean));
+  const baseTeamChoices = officialRows.map(team => ({
+    value:team.teamId || team.id,
+    label:team.name || team.teamName || team.teamId || team.id,
+    hint:[team.category, Array.isArray(team.subCategories) ? team.subCategories.join(', ') : ''].filter(Boolean).join(' · ') || 'Équipe officielle'
+  }));
   let teamChoices = [...baseTeamChoices];
   try{
     const data = await adminListTeamsAndSettings();
-    const settings = data?.settings || {};
     teamChoices = [
-      ...(Array.isArray(settings.categories) ? settings.categories : []).map(value => ({value, label:value, hint:'Catégorie'})),
-      ...(Array.isArray(settings.subCategories) ? settings.subCategories : []).map(value => ({value, label:value, hint:'Sous-catégorie'})),
       ...(data?.teams || []).map(team => {
         const value = team.teamId || team.id || team.name || team.category || '';
         const label = team.name || team.teamName || value;
         const hint = team.category || team.level || 'Équipe';
         return {value, label, hint};
-      }),
+      }).filter(choice => officialIds.has(choice.value)),
       ...baseTeamChoices
     ];
   }catch(_e){}
@@ -3329,17 +3425,18 @@ function renderAccessPicker(kind, selected=[], choices=[], inputAttrs=''){
   const selectedKeys = new Set(parseAccessList(selected).map(accessChoiceKey));
   const knownKeys = new Set(choices.map(choice => accessChoiceKey(choice.value)));
   const extraChoices = parseAccessList(selected)
-    .filter(value => value && !knownKeys.has(accessChoiceKey(value)))
+    .filter(value => kind !== 'teams' && value && !knownKeys.has(accessChoiceKey(value)))
     .map(value => ({value, label:value, hint:'Personnalisé'}));
   const allChoices = uniqueAccessChoices([...choices, ...extraChoices]);
   const selectedValues = allChoices.filter(choice => selectedKeys.has(accessChoiceKey(choice.value))).map(choice => choice.value);
+  const selectedLabels = allChoices.filter(choice => selectedKeys.has(accessChoiceKey(choice.value))).map(choice => choice.label);
   const list = allChoices.length ? allChoices.map(choice => {
     const checked = selectedKeys.has(accessChoiceKey(choice.value)) ? 'checked' : '';
     const title = choice.hint ? `${choice.label} · ${choice.hint}` : choice.label;
     return `<label class="access-choice" title="${escapeHtml(title)}"><input type="checkbox" data-access-choice="${escapeHtml(kind)}" value="${escapeHtml(choice.value)}" ${checked}><span>${escapeHtml(choice.label)}</span>${choice.hint ? `<small>${escapeHtml(choice.hint)}</small>` : ''}</label>`;
   }).join('') : '<div class="admin-note">Aucun choix disponible.</div>';
   const summary = selectedValues.length ? `${selectedValues.length} sélectionné(s)` : 'Aucun accès spécifique';
-  const selectedLabel = selectedValues.length ? selectedValues.slice(0, 2).join(', ') + (selectedValues.length > 2 ? ` +${selectedValues.length - 2}` : '') : 'Choisir';
+  const selectedLabel = selectedLabels.length ? selectedLabels.slice(0, 2).join(', ') + (selectedLabels.length > 2 ? ` +${selectedLabels.length - 2}` : '') : 'Choisir';
   return `<details class="access-picker" data-access-kind="${escapeHtml(kind)}"><summary><span class="access-summary">${escapeHtml(summary)}</span><b>${escapeHtml(selectedLabel)}</b></summary><input type="hidden" ${inputAttrs} value="${escapeHtml(selectedValues.join(', '))}"><div class="access-choice-list">${list}</div></details>`;
 }
 function syncAccessPicker(picker){
@@ -3401,7 +3498,7 @@ async function loadMembers(){
     snap.forEach(docSnap => {
       const m = {uid:docSnap.id, ...docSnap.data()};
       const tr = document.createElement('tr');
-      const teams = [...new Set([...(m.teamIds || []), ...(m.allowedTeamIds || [])])].filter(Boolean);
+      const teams = [...new Set([...(m.authorizedTeamIds || []), ...(m.teamIds || []), ...(m.allowedTeamIds || [])])].filter(Boolean);
       const modules = m.allowedModules || [];
       const teamPicker = renderAccessPicker('teams', teams, choices.teams, `data-teams="${escapeHtml(m.uid)}"`);
       const modulePicker = renderAccessPicker('modules', modules, choices.modules, `data-modules="${escapeHtml(m.uid)}"`);
@@ -3534,9 +3631,11 @@ async function adminTableClick(e){
         roleLabel:service?.roleLabel ? service.roleLabel(role) : role,
         permissionLevel,
         permissionLabel:service?.permissionLabel ? service.permissionLabel(permissionLevel) : permissionLevel,
+        authorizedTeamIds:teamIds,
         teamIds,
         allowedTeamIds:teamIds,
         allowedModules,
+        modulePermissions:modulePermissionsFromSelection(allowedModules, permissionLevel),
         status,
         userType:'staff',
         updatedAt:firebaseFns.serverTimestamp(),

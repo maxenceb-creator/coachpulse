@@ -99,7 +99,8 @@ service cloud.firestore {
     }
 
     function hasTeamScope() {
-      return profileList('teamIds').size() > 0
+      return profileList('authorizedTeamIds').size() > 0
+        || profileList('teamIds').size() > 0
         || profileList('allowedTeamIds').size() > 0
         || profileList('authorizedTeams').size() > 0
         || profileList('equipesAutorisees').size() > 0;
@@ -107,11 +108,25 @@ service cloud.firestore {
 
     function canAccessTeam(teamId) {
       return permissionLevel() == 'ADMIN'
-        || !hasTeamScope()
+        || profileList('authorizedTeamIds').hasAny([teamId])
         || profileList('teamIds').hasAny([teamId])
         || profileList('allowedTeamIds').hasAny([teamId])
         || profileList('authorizedTeams').hasAny([teamId])
         || profileList('equipesAutorisees').hasAny([teamId]);
+    }
+
+    function canAccessTeamList(teamIds) {
+      return permissionLevel() == 'ADMIN'
+        || (
+          teamIds is list
+          && (
+            teamIds.hasAny(profileList('authorizedTeamIds'))
+            || teamIds.hasAny(profileList('teamIds'))
+            || teamIds.hasAny(profileList('allowedTeamIds'))
+            || teamIds.hasAny(profileList('authorizedTeams'))
+            || teamIds.hasAny(profileList('equipesAutorisees'))
+          )
+        );
     }
 
     function hasPlayerScope() {
@@ -129,17 +144,58 @@ service cloud.firestore {
       return data.keys().hasAny([key]) ? data[key] : '';
     }
 
+    function canAccessLinkedPlayer(playerId) {
+      return playerId != ''
+        && exists(/databases/$(database)/documents/players/$(playerId))
+        && (
+          canAccessTeam(valueOrEmpty(get(/databases/$(database)/documents/players/$(playerId)).data, 'teamId'))
+          || (
+            get(/databases/$(database)/documents/players/$(playerId)).data.keys().hasAny(['teamIds'])
+            && canAccessTeamList(get(/databases/$(database)/documents/players/$(playerId)).data.teamIds)
+          )
+        );
+    }
+
+    function canAccessLinkedMatch(matchId) {
+      return matchId != ''
+        && exists(/databases/$(database)/documents/matches/$(matchId))
+        && (
+          canAccessTeam(valueOrEmpty(get(/databases/$(database)/documents/matches/$(matchId)).data, 'teamId'))
+          || (
+            get(/databases/$(database)/documents/matches/$(matchId)).data.keys().hasAny(['teamIds'])
+            && canAccessTeamList(get(/databases/$(database)/documents/matches/$(matchId)).data.teamIds)
+          )
+        );
+    }
+
+    function canAccessLinkedSession(sessionId) {
+      return sessionId != ''
+        && exists(/databases/$(database)/documents/sessions/$(sessionId))
+        && (
+          canAccessTeam(valueOrEmpty(get(/databases/$(database)/documents/sessions/$(sessionId)).data, 'teamId'))
+          || (
+            get(/databases/$(database)/documents/sessions/$(sessionId)).data.keys().hasAny(['teamIds'])
+            && canAccessTeamList(get(/databases/$(database)/documents/sessions/$(sessionId)).data.teamIds)
+          )
+        );
+    }
+
     function hasScopeFields(data) {
-      return data.keys().hasAny(['teamId', 'team', 'categorie', 'subCategory']);
+      return data.keys().hasAny(['teamId', 'teamIds']);
     }
 
     function canAccessScopedData(data) {
-      return !hasTeamScope()
-        || !hasScopeFields(data)
-        || canAccessTeam(valueOrEmpty(data, 'teamId'))
-        || canAccessTeam(valueOrEmpty(data, 'team'))
-        || canAccessTeam(valueOrEmpty(data, 'categorie'))
-        || canAccessTeam(valueOrEmpty(data, 'subCategory'));
+      return permissionLevel() == 'ADMIN'
+        || (
+          hasScopeFields(data)
+          && (
+            canAccessTeam(valueOrEmpty(data, 'teamId'))
+            || (data.keys().hasAny(['teamIds']) && canAccessTeamList(data.teamIds))
+          )
+        )
+        || (data.keys().hasAny(['playerId']) && canAccessLinkedPlayer(data.playerId))
+        || (data.keys().hasAny(['matchId']) && canAccessLinkedMatch(data.matchId))
+        || (data.keys().hasAny(['sessionId']) && canAccessLinkedSession(data.sessionId));
     }
 
     function canReadPlayerDoc(playerId, data) {
