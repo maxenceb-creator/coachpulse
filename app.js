@@ -1047,10 +1047,17 @@ async function playerProfileLoadData(options={}){
     payload.collections.players = await listPlayers({season:'all', includeArchived:true});
     return payload;
   }
-  const [playersById, playerRows] = await Promise.all([readDocsByIds('players', aliases), readWhereIn('players')]);
-  payload.collections.players = filterAuthorizedPlayers(playersById);
-  playerRows.forEach(row => {
-    if(canAccessPlayerRecord(row) && !payload.collections.players.some(player => player.id === row.id)) payload.collections.players.push(row);
+  const [authorizedPlayers, playersById, playerRows] = await Promise.all([
+    listPlayers({season:'all', includeArchived:true}),
+    readDocsByIds('players', aliases),
+    readWhereIn('players')
+  ]);
+  payload.collections.players = rowsMatchingProfileAliases(authorizedPlayers, aliases);
+  filterAuthorizedPlayers(playersById.map(normalizePlayer)).forEach(row => {
+    if(!payload.collections.players.some(player => (player.playerId || player.id) === (row.playerId || row.id))) payload.collections.players.push(row);
+  });
+  playerRows.map(normalizePlayer).forEach(row => {
+    if(canAccessPlayerRecord(row) && !payload.collections.players.some(player => (player.playerId || player.id) === (row.playerId || row.id))) payload.collections.players.push(row);
   });
   if(playerId && !payload.collections.players.some(player => (player.playerId || player.id) === playerId)) throw new Error('Accès non autorisé à cette joueuse.');
   await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
