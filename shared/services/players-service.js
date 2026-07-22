@@ -161,7 +161,7 @@
   function displayName(player){
     const nom = player?.nom || player?.lastName || '';
     const prenom = player?.prenom || player?.firstName || '';
-    return normalizeUpper(player?.displayName || [prenom, normalizeUpper(nom)].filter(Boolean).join(' '));
+    return normalizeUpper(nom || prenom ? [prenom, normalizeUpper(nom)].filter(Boolean).join(' ') : player?.displayName);
   }
 
   function keyPart(value){
@@ -238,9 +238,10 @@
     const subCategory = isOfficialSubCategory(sourceSubCategory) ? sourceSubCategory : storedSubCategory;
     const team = sourceRule?.team || resolveClubTeam(raw.team || raw.equipe, subCategory || categorie) || asText(sourceCategory || normalizeTeamFromCategory(subCategory || categorie));
     const importedId = raw.id && !String(raw.id).startsWith('manual-') ? asText(raw.id) : '';
+    const lockedId = asText(raw.documentId || raw.lockPlayerId || raw.preservePlayerId);
     const previousId = asText(raw.playerId || importedId);
     const generatedId = canonicalPlayerId({...raw, ...names, birth}) || stableId('player', names.prenom, names.nom, birth || 'no-birth');
-    const playerId = generatedId || previousId;
+    const playerId = lockedId || generatedId || previousId;
     const legacyPlayerIds = [...new Set([
       ...(Array.isArray(raw.legacyPlayerIds) ? raw.legacyPlayerIds : []),
       raw.legacyPlayerId,
@@ -393,7 +394,7 @@
     }
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION));
     const rows = [];
-    snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()})));
+    snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()})));
     firestorePlayersCache.rows = rows;
     firestorePlayersCache.loadedAt = now;
     const normalized = writeCache([...rows, ...parseCache(CUSTOM_CACHE_KEY)]);
@@ -407,12 +408,13 @@
     if(!ctx.firebaseFns || !ctx.db) return readCachedPlayers().find(p => p.playerId === playerId || p.id === playerId) || null;
     const {firebaseFns, db} = firestoreContext(ctx);
     const snap = await firebaseFns.getDoc(firebaseFns.doc(db, COLLECTION, playerId));
-    return snap.exists() ? normalizePlayer({id:snap.id, playerId:snap.id, ...snap.data()}) : null;
+    return snap.exists() ? normalizePlayer({id:snap.id, playerId:snap.id, documentId:snap.id, ...snap.data()}) : null;
   }
 
   async function savePlayer(player={}, ctx={}, options={}){
     const {firebaseFns, db} = firestoreContext(ctx);
-    const clean = normalizePlayerForWrite(player, {firebaseFns, user:ctx.user});
+    const existingId = asText(player.documentId || player.playerId || player.id);
+    const clean = normalizePlayerForWrite(existingId ? {...player, documentId:existingId} : player, {firebaseFns, user:ctx.user});
     const ref = firebaseFns.doc(db, COLLECTION, clean.playerId);
     const beforeSnap = await firebaseFns.getDoc(ref);
     const before = beforeSnap.exists() ? normalizePlayer({id:beforeSnap.id, playerId:beforeSnap.id, ...beforeSnap.data()}) : null;
