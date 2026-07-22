@@ -813,18 +813,47 @@ function normalizeTechnicalPlayerHint(raw={}){
     nationalite
   };
 }
+function technicalHintText(value=''){
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+function technicalHintDate(value=''){
+  return String(value || '').replace(/\D+/g, '');
+}
+function technicalHintKeys(raw={}){
+  const normalized = normalizePlayer(raw);
+  const id = normalized.playerId || raw.playerId || raw.id || '';
+  const nom = technicalHintText(normalized.nom || raw.nom || raw.lastName);
+  const prenom = technicalHintText(normalized.prenom || raw.prenom || raw.firstName);
+  const birth = technicalHintDate(normalized.dateNaissance || normalized.birth || raw.dateNaissance || raw.birth || raw.birthDate);
+  return [
+    id,
+    raw.playerId,
+    raw.id,
+    nom && prenom && birth ? `identity:${nom}|${prenom}|${birth}` : '',
+    nom && prenom ? `person:${nom}|${prenom}` : ''
+  ].filter(Boolean).map(String);
+}
 function readTechnicalPlayerFootHints(){
   return parseStoredJson(TECHNICAL_PLAYER_HINTS_KEY, []).map(normalizeTechnicalPlayerHint).filter(Boolean);
 }
 function mergeTechnicalPlayerFootHints(hints=[]){
-  const byId = new Map(readTechnicalPlayerFootHints().map(hint => [hint.playerId || hint.id, hint]));
-  hints.map(normalizeTechnicalPlayerHint).filter(Boolean).forEach(hint => {
-    const id = hint.playerId || hint.id;
-    if(!id) return;
-    const previous = byId.get(id) || {};
-    byId.set(id, {...previous, ...hint, foot:hint.foot || previous.foot || '', pied:hint.pied || previous.pied || '', meilleurPiedLabel:hint.meilleurPiedLabel || previous.meilleurPiedLabel || '', nationalite:hint.nationalite || previous.nationalite || ''});
+  const byId = new Map();
+  readTechnicalPlayerFootHints().forEach(hint => {
+    technicalHintKeys(hint).forEach(key => {
+      if(key && !byId.has(key)) byId.set(key, hint);
+    });
   });
-  const merged = [...byId.values()];
+  hints.map(normalizeTechnicalPlayerHint).filter(Boolean).forEach(hint => {
+    const keys = technicalHintKeys(hint);
+    const primaryKey = keys.find(Boolean);
+    if(!primaryKey) return;
+    const previous = keys.map(key => byId.get(key)).find(Boolean) || {};
+    const merged = {...previous, ...hint, foot:hint.foot || previous.foot || '', pied:hint.pied || previous.pied || '', meilleurPiedLabel:hint.meilleurPiedLabel || previous.meilleurPiedLabel || '', nationalite:hint.nationalite || previous.nationalite || ''};
+    keys.forEach(key => {
+      if(key) byId.set(key, merged);
+    });
+  });
+  const merged = [...new Set(byId.values())];
   try{ localStorage.setItem(TECHNICAL_PLAYER_HINTS_KEY, JSON.stringify(merged)); }catch(_e){}
   return merged;
 }
@@ -866,15 +895,45 @@ async function technicalPlayerFootHints(){
   technicalPlayerFootHintsCache = hints;
   return hints;
 }
+async function technicalFirestorePlayerFootHints(){
+  if(!db || !firebaseFns?.getDocs || !firebaseFns?.collection) return [];
+  const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'technicalTests'));
+  const hints = [];
+  snap.forEach(docSnap => {
+    const data = docSnap.data() || {};
+    const snapshot = data.playerSnapshot || data.player || {};
+    const source = {...snapshot, ...data};
+    const foot = technicalFootValue(source) || technicalFootValue(snapshot);
+    const nationalite = technicalNationalityValue(source) || technicalNationalityValue(snapshot);
+    if(!foot && !nationalite) return;
+    hints.push({
+      playerId:data.playerId || snapshot.playerId || data.id || '',
+      id:data.playerId || snapshot.playerId || data.id || '',
+      nom:snapshot.nom || data.nom || data.lastName || '',
+      prenom:snapshot.prenom || data.prenom || data.firstName || '',
+      displayName:snapshot.displayName || data.playerName || data.displayName || '',
+      dateNaissance:snapshot.dateNaissance || data.dateNaissance || data.birth || data.birthDate || '',
+      foot,
+      pied:foot,
+      meilleurPiedLabel:foot,
+      nationalite
+    });
+  });
+  return mergeTechnicalPlayerFootHints(hints);
+}
 function playerHintKey(raw={}){
   const normalized = normalizePlayer(raw);
   return normalized.playerId || raw.playerId || raw.id || stableFirestoreId('player', raw.prenom || raw.firstName || '', raw.nom || raw.lastName || '', raw.dateNaissance || raw.birth || 'no-birth');
 }
 function enrichPlayersWithTechnicalFootHints(players=[], hints=readTechnicalPlayerFootHints()){
-  const byId = new Map(hints.map(hint => [hint.playerId || hint.id, hint]).filter(([id]) => id));
+  const byId = new Map();
+  hints.forEach(hint => {
+    technicalHintKeys(hint).forEach(key => {
+      if(key && !byId.has(key)) byId.set(key, hint);
+    });
+  });
   return players.map(player => {
-    const id = player.playerId || player.id || playerHintKey(player);
-    const hint = byId.get(id) || byId.get(playerHintKey(player));
+    const hint = technicalHintKeys(player).map(key => byId.get(key)).find(Boolean) || byId.get(playerHintKey(player));
     if(!hint) return player;
     const foot = player.foot || player.pied || player.meilleurPiedLabel || player.meilleurPied || player.piedFort || player.piedFortLabel || player.preferredFoot || player.preferredFootLabel || player.strongFoot || player.strongFootLabel || player.dominantFoot || hint.foot || hint.pied || hint.meilleurPiedLabel || hint.piedFort || '';
     const nationalite = player.nationalite || player.nationalité || player.nationality || player.nationalityLabel || player.country || player.countryName || player.pays || hint.nationalite || hint.nationality || '';
@@ -2144,7 +2203,10 @@ async function adminListPlayers(filters={}){
   if(!guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = playersService();
-  const hints = await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints());
+  const hints = mergeTechnicalPlayerFootHints([
+    ...await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints()),
+    ...await technicalFirestorePlayerFootHints().catch(() => [])
+  ]);
   if(service?.listPlayers) return enrichPlayersWithTechnicalFootHints(await service.listPlayers(firestoreServiceContext(), filters), hints);
   if(service?.readFirestorePlayers) return enrichPlayersWithTechnicalFootHints(await service.readFirestorePlayers(firestoreServiceContext(), filters), hints);
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
