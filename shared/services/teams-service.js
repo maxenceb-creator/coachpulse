@@ -99,7 +99,19 @@
 
   function mergeWithOfficialTeams(teams=[]){
     const byId = new Map(officialTeamRows().map(team => [team.teamId, team]));
-    teams.map(normalizeTeam).filter(team => byId.has(team.teamId)).forEach(team => byId.set(team.teamId, {...(byId.get(team.teamId) || {}), ...team, name:byId.get(team.teamId)?.name || team.name}));
+    const sourceRank = team => {
+      const originalId = asText(team._originalId || team.id || team.teamId);
+      const canonical = asText(team.teamId);
+      if(team.status !== 'archived' && originalId === canonical) return 4;
+      if(team.status !== 'archived') return 3;
+      if(originalId === canonical) return 2;
+      return 1;
+    };
+    teams.map(raw => normalizeTeam({...raw, _originalId:raw.id || raw.teamId})).filter(team => byId.has(team.teamId)).forEach(team => {
+      const current = byId.get(team.teamId) || {};
+      const shouldReplace = sourceRank(team) >= sourceRank(current);
+      byId.set(team.teamId, shouldReplace ? {...current, ...team, name:current.name || team.name} : current);
+    });
     return [...byId.values()].sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr', {numeric:true}));
   }
 
@@ -143,7 +155,7 @@
     const {firebaseFns, db} = firestoreContext(ctx);
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION));
     const teams = [];
-    snap.forEach(docSnap => teams.push(normalizeTeam({id:docSnap.id, teamId:docSnap.id, ...docSnap.data()})));
+    snap.forEach(docSnap => teams.push(normalizeTeam({id:docSnap.id, teamId:docSnap.id, ...docSnap.data(), _originalId:docSnap.id})));
     const merged = mergeWithOfficialTeams(teams);
     return options.includeArchived ? merged : merged.filter(team => team.status !== 'archived');
   }
