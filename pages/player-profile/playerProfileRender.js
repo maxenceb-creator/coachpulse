@@ -44,14 +44,14 @@
     const teams = [...new Set(state.players.map(player => Data.teamLabel(Data.playerForSeason(player, displaySeason))).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'fr'));
     const players = filteredPlayers(state);
     const seasons = state.seasons;
-    const selected = state.selectedPlayerId || players[0]?.playerId || '';
+    const selected = state.selectedPlayerId || '';
     return `<section class="profile-topbar">
       <div class="identity" id="identityCard"></div>
       <div class="filters">
         <h2>Filtres de fiche</h2>
         <div class="filter-grid">
           <div class="field"><label>Équipe</label><select id="teamFilter">${option('','Toutes',state.filters.team || '')}${teams.map(team => option(team, team, state.filters.team || '')).join('')}</select></div>
-          <div class="field"><label>Joueuse</label><select id="playerSelect">${players.map(p => option(p.playerId, Data.displayName(p), selected)).join('')}</select></div>
+          <div class="field"><label>Joueuse</label><select id="playerSelect">${option('','Sélectionner une joueuse',selected)}${players.map(p => option(p.playerId, Data.displayName(p), selected)).join('')}</select></div>
           <div class="field"><label>Période</label><select id="periodMode">${option('season','Saison',state.filters.periodMode)}${option('all','Toutes saisons',state.filters.periodMode)}${option('custom','Période personnalisée',state.filters.periodMode)}</select></div>
           <div class="field"><label>Saison</label><select id="seasonSelect">${seasons.map(s => option(s,s,state.filters.season)).join('')}</select></div>
           <div class="field"><label>Début</label><input id="startDate" type="date" value="${esc(state.filters.startDate || '')}"></div>
@@ -67,6 +67,21 @@
     </section>`;
   }
   function renderIdentity(player={}, period){
+    if(!player.playerId && !player.id){
+      return `<div class="avatar">?</div>
+        <div class="identity-main">
+          <p class="eyebrow">Fiche individuelle</p>
+          <h1>Aucune joueuse sélectionnée</h1>
+          <div class="identity-meta">
+            <span><b>Equipe</b>-</span>
+            <span><b>Categorie</b>-</span>
+            <span><b>Sous-cat.</b>-</span>
+            <span><b>Poste</b>-</span>
+            <span><b>Saison</b>${esc(period.label)}</span>
+          </div>
+          <div class="player-id-line">Sélectionne une joueuse pour charger sa fiche complète.</div>
+        </div>`;
+    }
     const photo = player.photo || player.avatar || player.photoUrl || '';
     const initials = Data.displayName(player).split(/\s+/).map(x => x[0]).join('').slice(0,2) || '?';
     const meta = [

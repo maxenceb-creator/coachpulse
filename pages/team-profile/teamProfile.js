@@ -11,8 +11,11 @@
     collections:null,
     seasons:[Data.currentSeason()],
     view:'overview',
-    filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', competition:'', venue:'', result:'', opponent:''}
+    filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', competition:'', venue:'', result:'', opponent:''},
+    renderToken:0
   };
+  function debugPerf(){ try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; } }
+  function logPerf(label, start){ if(debugPerf()) console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
   function selectedTeam(){ return state.teams.find(team => Data.teamIdOf(team) === state.selectedTeamId) || state.teams[0] || null; }
   async function loadSelected(){
     if(!state.selectedTeamId) return;
@@ -52,12 +55,16 @@
     document.querySelectorAll('[data-player-id]').forEach(btn => btn.addEventListener('click', () => Data.openPlayerProfile(btn.dataset.playerId)));
   }
   function render(){
+    const renderToken = ++state.renderToken;
+    const start = performance.now();
     const team = selectedTeam();
     if(!team){ root.innerHTML = '<div class="empty-state">Équipe introuvable.</div>'; return; }
     const summary = Metrics.summarize(team, state.collections || {}, state);
+    if(renderToken !== state.renderToken) return;
     summary.collections = state.collections || {};
     root.innerHTML = UI.renderControls(state) + UI.renderHeader(summary) + UI.renderTabs(state) + UI.renderKpis(summary.kpis) + UI.renderBody(summary, state);
     bind();
+    logPerf('teamProfile.render', start);
   }
   window.addEventListener('message', e => {
     if(e.data?.type === 'coachpulse-cloud-updated') init();
