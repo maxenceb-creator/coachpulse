@@ -30,18 +30,42 @@
     const value = String(player.nationalite || player.nationalité || player.nationality || player.country || player.pays || '').trim();
     return value ? `${nationalityFlag(value)} ${value}` : '';
   }
+  function playerId(player={}){
+    return player.playerId || player.id || '';
+  }
+  function catRank(value){
+    const text = String(value || '').toUpperCase();
+    if(text.includes('SÉNIOR') || text.includes('SENIOR')) return 999;
+    const match = text.match(/(\d+)/);
+    return match ? Number(match[1]) : 998;
+  }
+  function playerForDropdown(player, season){
+    const seasonal = Data.playerForSeason(player, season) || player;
+    const id = playerId(player) || playerId(seasonal);
+    return {...player, ...seasonal, id, playerId:id};
+  }
   function filteredPlayers(state){
     const team = state.filters.team || '';
     const displaySeason = state.filters.periodMode === 'season' ? state.filters.season : Data.currentSeason();
     return state.players
-      .map(player => Data.playerForSeason(player, displaySeason))
+      .map(player => playerForDropdown(player, displaySeason))
       .filter(player => !team || Data.teamLabel(player) === team)
       .slice()
-      .sort((a,b) => Data.displayName(a).localeCompare(Data.displayName(b), 'fr'));
+      .sort((a,b) => catRank(Data.teamLabel(a) || a.categorie || a.category) - catRank(Data.teamLabel(b) || b.categorie || b.category) || Data.displayName(a).localeCompare(Data.displayName(b), 'fr', {numeric:true}));
+  }
+  function groupedPlayerOptions(players, selected){
+    const groups = [...new Set(players.map(player => Data.teamLabel(player) || player.categorie || player.category || 'Sans catégorie'))];
+    return groups.map(group => {
+      const options = players
+        .filter(player => (Data.teamLabel(player) || player.categorie || player.category || 'Sans catégorie') === group)
+        .map(player => option(playerId(player), Data.displayName(player), selected))
+        .join('');
+      return `<optgroup label="${esc(group)}">${options}</optgroup>`;
+    }).join('');
   }
   function renderControls(state){
     const displaySeason = state.filters.periodMode === 'season' ? state.filters.season : Data.currentSeason();
-    const teams = [...new Set(state.players.map(player => Data.teamLabel(Data.playerForSeason(player, displaySeason))).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'fr'));
+    const teams = [...new Set(state.players.map(player => Data.teamLabel(playerForDropdown(player, displaySeason))).filter(Boolean))].sort((a,b) => catRank(a) - catRank(b) || a.localeCompare(b, 'fr', {numeric:true}));
     const players = filteredPlayers(state);
     const seasons = state.seasons;
     const selected = state.selectedPlayerId || '';
@@ -51,7 +75,7 @@
         <h2>Filtres de fiche</h2>
         <div class="filter-grid">
           <div class="field"><label>Équipe</label><select id="teamFilter">${option('','Toutes',state.filters.team || '')}${teams.map(team => option(team, team, state.filters.team || '')).join('')}</select></div>
-          <div class="field"><label>Joueuse</label><select id="playerSelect">${option('','Sélectionner une joueuse',selected)}${players.map(p => option(p.playerId, Data.displayName(p), selected)).join('')}</select></div>
+          <div class="field"><label>Joueuse</label><select id="playerSelect">${option('','Sélectionner une joueuse',selected)}${groupedPlayerOptions(players, selected)}</select></div>
           <div class="field"><label>Période</label><select id="periodMode">${option('season','Saison',state.filters.periodMode)}${option('all','Toutes saisons',state.filters.periodMode)}${option('custom','Période personnalisée',state.filters.periodMode)}</select></div>
           <div class="field"><label>Saison</label><select id="seasonSelect">${seasons.map(s => option(s,s,state.filters.season)).join('')}</select></div>
           <div class="field"><label>Début</label><input id="startDate" type="date" value="${esc(state.filters.startDate || '')}"></div>
