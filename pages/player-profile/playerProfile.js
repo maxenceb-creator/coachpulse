@@ -17,7 +17,8 @@
     filters:{team:'', periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]},
     renderToken:0,
     loadingPlayerId:'',
-    firstSelectionTeamPreloadStarted:false
+    firstSelectedPlayerId:'',
+    preloadedTeams:new Set()
   };
   function debugPerf(){ try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; } }
   function logPerf(label, start){ if(debugPerf()) console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
@@ -25,7 +26,8 @@
     return state.filters.periodMode === 'season' ? state.filters.season : Data.currentSeason();
   }
   function player(){
-    const selected = state.players.find(p => p.playerId === state.selectedPlayerId) || state.players[0] || {};
+    if(!state.selectedPlayerId) return {};
+    const selected = state.players.find(p => p.playerId === state.selectedPlayerId) || {};
     return Data.playerForSeason(selected, displaySeason());
   }
   function firstText(){
@@ -84,10 +86,8 @@
   }
   async function ensureSelectedPlayer(){
     const visible = playersForTeam();
-    if(!visible.length) return;
-    if(!visible.some(p => p.playerId === state.selectedPlayerId)){
-      state.selectedPlayerId = visible[0].playerId;
-    }
+    if(!visible.length || !state.selectedPlayerId) return;
+    if(!visible.some(p => p.playerId === state.selectedPlayerId)) state.selectedPlayerId = '';
   }
   async function loadPlayerData(playerId){
     const selected = state.players.find(p => p.playerId === playerId) || {playerId};
@@ -118,32 +118,69 @@
     if(!state.filters.compareSeasonA) state.filters.compareSeasonA = state.seasons[0] || Data.currentSeason();
     if(!state.filters.compareSeasonB) state.filters.compareSeasonB = Data.currentSeason();
   }
-  function preloadTeamPlayersForFirstSelection(playerId){
-    if(state.firstSelectionTeamPreloadStarted || !playerId) return;
+  function teamRank(team=''){
+    const numbers = String(team || '').match(/\d+/g)?.map(Number).filter(Number.isFinite) || [];
+    if(numbers.length) return Math.min(...numbers);
+    return Number.POSITIVE_INFINITY;
+  }
+  function sortedTeamLabels(){
+    const season = displaySeason();
+    return [...new Set(state.players.map(p => Data.teamLabel(Data.playerForSeason(p, season))).filter(Boolean))]
+      .sort((a,b) => {
+        const rankDiff = teamRank(a) - teamRank(b);
+        return rankDiff || a.localeCompare(b, 'fr');
+      });
+  }
+  function teamsByDistanceFrom(team){
+    const selectedRank = teamRank(team);
+    return sortedTeamLabels()
+      .filter(label => label !== team)
+      .map(label => ({label, distance:Math.abs(teamRank(label) - selectedRank)}))
+      .sort((a,b) => a.distance - b.distance || a.label.localeCompare(b.label, 'fr'))
+      .map(item => item.label);
+  }
+  async function preloadTeam(team, excludedPlayerIds=new Set()){
+    if(!team || state.preloadedTeams.has(team)) return;
+    state.preloadedTeams.add(team);
+    const season = displaySeason();
+    const teamPlayers = state.players.filter(p => (
+      !excludedPlayerIds.has(p.playerId) &&
+      Data.teamLabel(Data.playerForSeason(p, season)) === team &&
+      !state.collectionCache[p.playerId]
+    ));
+    const start = performance.now();
+    for(const teammate of teamPlayers){
+      try{
+        await loadPlayerData(teammate.playerId);
+      }catch(error){
+        if(debugPerf()) console.warn('[CoachPulse perf] preload team player failed', teammate.playerId, error);
+      }
+    }
+    logPerf(`playerProfile.preloadTeam.${team}.${teamPlayers.length}`, start);
+  }
+  function preloadProgressiveTeamsForFirstSelection(playerId){
+    if(state.firstSelectedPlayerId || !playerId) return;
+    state.firstSelectedPlayerId = playerId;
     const selected = state.players.find(p => p.playerId === playerId);
     const team = Data.teamLabel(Data.playerForSeason(selected, displaySeason()));
     if(!team) return;
-    const teamPlayers = state.players.filter(p => (
-      p.playerId !== playerId &&
-      Data.teamLabel(Data.playerForSeason(p, displaySeason())) === team &&
-      !state.collectionCache[p.playerId]
-    ));
-    if(!teamPlayers.length) return;
-    state.firstSelectionTeamPreloadStarted = true;
     setTimeout(async () => {
-      const start = performance.now();
-      for(const teammate of teamPlayers){
-        try{
-          await loadPlayerData(teammate.playerId);
-        }catch(error){
-          if(debugPerf()) console.warn('[CoachPulse perf] preload team player failed', teammate.playerId, error);
-        }
+      await preloadTeam(team, new Set([playerId]));
+      for(const nextTeam of teamsByDistanceFrom(team)){
+        await preloadTeam(nextTeam);
       }
-      logPerf(`playerProfile.preloadTeam.${team}.${teamPlayers.length}`, start);
     }, 0);
   }
   async function selectPlayer(playerId, options={}){
-    if(!playerId) return;
+    if(!playerId){
+      state.selectedPlayerId = '';
+      state.payload = null;
+      state.collections = null;
+      state.loadingPlayerId = '';
+      try{ localStorage.removeItem('coachpulse:playerProfile:selectedPlayerId'); }catch(_e){}
+      await render();
+      return;
+    }
     state.selectedPlayerId = playerId;
     try{ localStorage.setItem('coachpulse:playerProfile:selectedPlayerId', playerId); }catch(_e){}
     const alreadyLoaded = !!state.collectionCache[playerId];
@@ -160,17 +197,13 @@
       state.seasons = Filters.seasonsFromCollections(state.collections);
       await render();
     }
-    if(options.userSelected) preloadTeamPlayersForFirstSelection(playerId);
+    if(options.userSelected) preloadProgressiveTeamsForFirstSelection(playerId);
   }
   async function init(){
     try{
       state.players = await Data.listPlayers();
-      const requestedPlayerId = localStorage.getItem('coachpulse:playerProfile:selectedPlayerId') || '';
-      state.selectedPlayerId = state.players.some(player => player.playerId === requestedPlayerId) ? requestedPlayerId : (state.players[0]?.playerId || '');
+      state.selectedPlayerId = '';
       await render();
-      if(state.selectedPlayerId) setTimeout(() => selectPlayer(state.selectedPlayerId).catch(error => {
-        root.innerHTML = `<div class="empty-state">Chargement impossible : ${Render.esc(error.message || error)}</div>`;
-      }), 0);
     }catch(error){
       root.innerHTML = `<div class="empty-state">Chargement impossible : ${Render.esc(error.message || error)}</div>`;
     }
@@ -181,7 +214,6 @@
       state.filters.comparePlayerIds = state.filters.comparePlayerIds.filter(id => playersForTeam().some(p => p.playerId === id));
       await ensureSelectedPlayer();
       await render();
-      if(state.selectedPlayerId && !state.collectionCache[state.selectedPlayerId]) selectPlayer(state.selectedPlayerId).catch(error => console.error(error));
     });
     document.getElementById('playerSelect')?.addEventListener('change', async event => { await selectPlayer(event.target.value, {userSelected:true}); });
     document.getElementById('periodMode')?.addEventListener('change', async event => { state.filters.periodMode = event.target.value; await render(); });
@@ -234,14 +266,15 @@
     const period = Filters.periodFromState(state);
     const selectedCollections = collectionsForPlayer(state.selectedPlayerId);
     const summary = Stats.summarize(selectedPlayer, selectedCollections, state);
-    const hasSelectedData = !!state.collectionCache[state.selectedPlayerId];
+    const hasSelectedPlayer = !!state.selectedPlayerId;
+    const hasSelectedData = hasSelectedPlayer && !!state.collectionCache[state.selectedPlayerId];
     const isLoadingSelected = state.loadingPlayerId === state.selectedPlayerId;
     let body = hasSelectedData
       ? Render.renderOverview(summary)
-      : `<section class="panel"><div class="empty-state">${isLoadingSelected ? 'Chargement des données de la joueuse...' : 'Sélectionne une joueuse pour charger sa fiche.'}</div></section>`;
-    if(state.view === 'timeline') body = `<section class="grid"><article class="panel"><h2>Présences et charge</h2>${summary.attendance.length ? Render.renderEvents(summary.attendance,'status','minutes') : '<div class="empty-state">Aucune présence sur cette période.</div>'}</article><article class="panel"><h2>Evolution saison</h2>${Render.renderEvents([...summary.physicalTests,...summary.technicalTests,...summary.matchEvents,...summary.injuries],'source','value')}</article></section>`;
-    if(state.view === 'seasonCompare') body = Render.renderSeasonCompare(Compare.compareSeasons(selectedPlayer, selectedCollections, state), state);
-    if(state.view === 'playerCompare'){
+      : `<section class="panel"><div class="empty-state">${isLoadingSelected ? 'Chargement complet de la fiche joueuse...' : 'Sélectionne une joueuse pour charger sa fiche complète.'}</div></section>`;
+    if(hasSelectedData && state.view === 'timeline') body = `<section class="grid"><article class="panel"><h2>Présences et charge</h2>${summary.attendance.length ? Render.renderEvents(summary.attendance,'status','minutes') : '<div class="empty-state">Aucune présence sur cette période.</div>'}</article><article class="panel"><h2>Evolution saison</h2>${Render.renderEvents([...summary.physicalTests,...summary.technicalTests,...summary.matchEvents,...summary.injuries],'source','value')}</article></section>`;
+    if(hasSelectedData && state.view === 'seasonCompare') body = Render.renderSeasonCompare(Compare.compareSeasons(selectedPlayer, selectedCollections, state), state);
+    if(hasSelectedData && state.view === 'playerCompare'){
       if(!state.filters.comparePlayerIds.length) state.filters.comparePlayerIds = [state.selectedPlayerId];
       const teamIds = new Set(playersForTeam().map(p => p.playerId));
       const selectedIds = state.filters.comparePlayerIds.filter(id => teamIds.has(id) || id === state.selectedPlayerId);
