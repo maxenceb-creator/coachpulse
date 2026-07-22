@@ -11,10 +11,14 @@
     payload:null,
     collections:null,
     collectionCache:{},
+    filteredCollectionCache:{},
     seasons:[Data.currentSeason()],
     view:'overview',
-    filters:{team:'', periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]}
+    filters:{team:'', periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]},
+    renderToken:0
   };
+  function debugPerf(){ try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; } }
+  function logPerf(label, start){ if(debugPerf()) console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
   function displaySeason(){
     return state.filters.periodMode === 'season' ? state.filters.season : Data.currentSeason();
   }
@@ -39,6 +43,7 @@
     const payload = await Data.loadProfileData(selected);
     const collections = Data.normalizeCollections(payload);
     state.collectionCache[playerId] = {payload, collections};
+    delete state.filteredCollectionCache[playerId];
     return state.collectionCache[playerId];
   }
   async function loadSelected(){
@@ -82,6 +87,7 @@
     }));
   }
   function collectionsForPlayer(playerId){
+    if(state.filteredCollectionCache[playerId]) return state.filteredCollectionCache[playerId];
     const base = state.collectionCache[playerId]?.collections || state.collections || {};
     const selected = state.players.find(p => p.playerId === playerId) || {};
     const aliases = Data.playerAliases(selected);
@@ -104,11 +110,15 @@
     out.sessions = (base.sessions || []).filter(row => sessionIds.has(row.sessionId || row.id));
     const matchIds = new Set(out.matchEvents.map(row => row.matchId).filter(Boolean));
     out.matches = (base.matches || []).filter(row => matchIds.has(row.matchId || row.id));
+    state.filteredCollectionCache[playerId] = out;
     return out;
   }
   async function render(){
+    const renderToken = ++state.renderToken;
+    const start = performance.now();
     if(!state.players.length){ root.innerHTML = '<div class="empty-state">Aucune joueuse disponible dans la base commune.</div>'; return; }
     await ensureSelectedPlayer();
+    if(renderToken !== state.renderToken) return;
     const selectedPlayer = player();
     const period = Filters.periodFromState(state);
     const selectedCollections = collectionsForPlayer(state.selectedPlayerId);
@@ -122,13 +132,16 @@
       const selectedIds = state.filters.comparePlayerIds.filter(id => teamIds.has(id) || id === state.selectedPlayerId);
       const comparePlayers = state.players.filter(p => selectedIds.includes(p.playerId));
       await Promise.all(comparePlayers.map(p => loadPlayerData(p.playerId)));
+      if(renderToken !== state.renderToken) return;
       const collectionMap = Object.fromEntries(comparePlayers.map(p => [p.playerId, collectionsForPlayer(p.playerId)]));
       body = Render.renderPlayerCompare(Compare.comparePlayers(comparePlayers, collectionMap, state), state);
     }
+    if(renderToken !== state.renderToken) return;
     root.innerHTML = Render.renderControls(state) + Render.renderKpis(summary) + body;
     document.getElementById('identityCard').innerHTML = Render.renderIdentity(selectedPlayer, period);
     document.querySelectorAll('[data-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.view === state.view));
     bind();
+    logPerf('playerProfile.render', start);
   }
   init();
 })(window);

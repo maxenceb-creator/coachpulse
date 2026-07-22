@@ -61,6 +61,34 @@ let cloudWriteTimer = null;
 let applyingCloud = false;
 let lastCloudItemsHash = '';
 let adminAccessChoiceCache = null;
+const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
+const appDataCache = {
+  athleticRows:{rows:null, loadedAt:0},
+  playerProfiles:new Map(),
+  teamProfiles:new Map()
+};
+function cloneData(value){
+  if(typeof structuredClone === 'function') return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+}
+function debugPerfEnabled(){
+  try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; }
+}
+async function measureAsync(label, work){
+  if(!debugPerfEnabled()) return work();
+  const start = performance.now();
+  try{ return await work(); }
+  finally{ console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
+}
+function invalidateAppDataCaches(scope='all'){
+  if(scope === 'all' || scope === 'players') playersService()?.invalidatePlayersCache?.();
+  if(scope === 'all' || scope === 'athletic'){
+    appDataCache.athleticRows.rows = null;
+    appDataCache.athleticRows.loadedAt = 0;
+  }
+  if(scope === 'all' || scope === 'players' || scope === 'playerProfiles') appDataCache.playerProfiles.clear();
+  if(scope === 'all' || scope === 'players' || scope === 'teams' || scope === 'teamProfiles') appDataCache.teamProfiles.clear();
+}
 const CLIENT_ID = (() => {
   let id = localStorage.getItem('coachpulse:clientId');
   if(!id){ id = 'cp-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36); localStorage.setItem('coachpulse:clientId', id); }
@@ -644,10 +672,12 @@ function startRealtimeSync(){
   });
 }
 function notifyFramesCloudUpdated(){
+  invalidateAppDataCaches('all');
   try{ frame?.contentWindow?.postMessage({type:'coachpulse-cloud-updated'}, '*'); }catch(_e){}
   notifyFramesAccessUpdated();
 }
 function notifyFramesPlayersUpdated(){
+  invalidateAppDataCaches('all');
   try{ frame?.contentWindow?.postMessage({type:'coachpulse-players-updated'}, '*'); }catch(_e){}
   try{ frame?.contentWindow?.postMessage({type:'coachpulse-cloud-updated'}, '*'); }catch(_e){}
   notifyFramesAccessUpdated();
@@ -986,17 +1016,26 @@ async function readCentralFirestoreExport(){
   return payload;
 }
 async function playerProfileLoadData(options={}){
+  return measureAsync('playerProfileLoadData', async () => {
   if(!canViewModule('playerProfile')) throw new Error('Accès non autorisé.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const playerId = String(options.playerId || '').trim();
   const aliases = [...new Set([playerId, ...(Array.isArray(options.aliases) ? options.aliases : [])].map(value => String(value || '').trim()).filter(Boolean))];
+  const cacheKey = playerId || aliases.join('|');
+  const cached = appDataCache.playerProfiles.get(cacheKey);
+  if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS) return cloneData(cached.payload);
   const directCollections = ['attendance','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps','convocations','individualReports'];
   const payload = {app:'CoachPulse', module:'playerProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), collections:{players:[],sessions:[],matches:[]}};
   directCollections.forEach(name => { payload.collections[name] = []; });
-  const chunks = [];
-  for(let i = 0; i < aliases.length; i += 10) chunks.push(aliases.slice(i, i + 10));
-  async function readWhereIn(collectionName, field='playerId'){
-    const snaps = await Promise.all(chunks.filter(chunk => chunk.length).map(chunk => {
+  function chunksForValues(values=[]){
+    const out = [];
+    for(let i = 0; i < values.length; i += 10) out.push(values.slice(i, i + 10));
+    return out;
+  }
+  const chunks = chunksForValues(aliases);
+  const playerIdChunks = chunksForValues(playerId ? [playerId] : aliases);
+  async function readWhereIn(collectionName, field='playerId', queryChunks=chunks){
+    const snaps = await Promise.all(queryChunks.filter(chunk => chunk.length).map(chunk => {
       const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
       return firebaseFns.getDocs(q);
     }));
@@ -1014,7 +1053,8 @@ async function playerProfileLoadData(options={}){
     return [...new Map(rows.map(row => [row.id, row])).values()];
   }
   async function readPlayerLinkedCollection(collectionName){
-    const primary = await readWhereIn(collectionName, 'playerId');
+    const primary = await readWhereIn(collectionName, 'playerId', playerIdChunks);
+    if(options.includeLegacyFallback !== true) return primary;
     const fallbackCollections = new Set(['attendance','matchEvents','technicalTests','physicalTests','injuries','medicalFollowUps']);
     if(!fallbackCollections.has(collectionName)) return primary;
     const idFields = ['playerID','player_id','legacyPlayerId','oldPlayerId','previousPlayerId','playerKey','playerRef','externalId','playerSnapshot.playerId','playerSnapshot.id','playerSnapshot.playerName','playerSnapshot.displayName','playerSnapshot.nom','playerSnapshot.prenom','player.playerId','player.id','player.playerName','player.displayName','playerName','joueuse','nom','prenom','name','displayName','fullName'];
@@ -1062,7 +1102,8 @@ async function playerProfileLoadData(options={}){
   if(playerId && !payload.collections.players.some(player => (player.playerId || player.id) === playerId)) throw new Error('Accès non autorisé à cette joueuse.');
   await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
   const seedTechnicalTests = await seedTechnicalTestsForProfile(aliases);
-  const profilePhysicalTests = canUseAthletic('read') ? await athleticListData({playerId, season:'all'}).catch(() => []) : [];
+  const needsAthleticFallback = canUseAthletic('read') && !(payload.collections.physicalTests || []).length;
+  const profilePhysicalTests = needsAthleticFallback ? await athleticListData({playerId, season:'all'}).catch(() => []) : [];
   payload.collections.technicalTests = [...new Map([
     ...(payload.collections.technicalTests || []),
     ...localTechnicalTestsForProfile(aliases),
@@ -1089,7 +1130,9 @@ async function playerProfileLoadData(options={}){
   ]);
   payload.collections.sessions = sessions;
   payload.collections.matches = matches;
+  if(cacheKey) appDataCache.playerProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
   return payload;
+  });
 }
 function rowTeamIds(row={}){
   return [
@@ -1113,9 +1156,13 @@ function playerMatchesTeamIdForAnySeason(player={}, teamId=''){
   return Object.values(history || {}).some(snapshot => rowMatchesTeamId(snapshot, teamId));
 }
 async function teamProfileLoadData(options={}){
+  return measureAsync('teamProfileLoadData', async () => {
   if(!canViewModule('teamProfile')) throw new Error('Accès non autorisé.');
   const teamId = String(options.teamId || '').trim();
   if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
+  const cacheKey = teamId || 'all';
+  const cached = appDataCache.teamProfiles.get(cacheKey);
+  if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS) return cloneData(cached.payload);
   const payload = {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), teamId, collections:{}};
   const names = ['teams','players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
   names.forEach(name => { payload.collections[name] = []; });
@@ -1135,6 +1182,7 @@ async function teamProfileLoadData(options={}){
     const sessionIds = new Set((payload.collections.sessions || []).filter(row => !teamId || rowMatchesTeamId(row, teamId)).map(row => row.sessionId || row.id).filter(Boolean));
     payload.collections.sessions = payload.collections.sessions.filter(row => !teamId || rowMatchesTeamId(row, teamId));
     payload.collections.attendance = payload.collections.attendance.filter(row => rowMatchesTeamId(row, teamId) || playerIds.has(row.playerId) || sessionIds.has(row.sessionId));
+    if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
     return payload;
   }
 
@@ -1196,7 +1244,9 @@ async function teamProfileLoadData(options={}){
       ...await readWhere(name, 'playerSnapshot.teamId', '==', teamId)
     ]);
   }
+  if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
   return payload;
+  });
 }
 function csvEscape(v){
   const s = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? '');
@@ -2908,10 +2958,12 @@ async function moduleListPlayers(){
   return sortPlayersForApp([...byId.values()]);
 }
 async function listPlayers(filters={}){
-  const players = await moduleListPlayers();
-  const service = playersService();
-  const filtered = service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
-  return filterAuthorizedPlayers(filtered);
+  return measureAsync('listPlayers', async () => {
+    const players = await moduleListPlayers();
+    const service = playersService();
+    const filtered = service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
+    return filterAuthorizedPlayers(filtered);
+  });
 }
 async function listTeams(filters={}){
   const service = teamsService();
@@ -3063,7 +3115,17 @@ async function medicalExport(format='json'){
   }else exportJson(payload, 'coachpulse_suivi_medical.json');
 }
 async function athleticListData(filters={}){
+  return measureAsync('athleticListData', async () => {
   if(!guardAthletic('read')) return [];
+  const now = Date.now();
+  const filterRows = rows => rows.filter(row =>
+    (!filters.playerId || row.playerId === filters.playerId)
+    && (!filters.season || filters.season === 'all' || row.season === filters.season)
+    && (!filters.date || row.date === filters.date)
+  );
+  if(!filters.forceRefresh && appDataCache.athleticRows.rows && now - appDataCache.athleticRows.loadedAt < DATA_CACHE_TTL_MS){
+    return filterRows(appDataCache.athleticRows.rows);
+  }
   const local = localAthleticPayload();
   const rawById = new Map();
   const bundled = await bundledAthleticPayload();
@@ -3077,11 +3139,10 @@ async function athleticListData(filters={}){
   const rawRows = [...rawById.values()];
   const players = await listPlayers({season:'all', includeArchived:true});
   const rows = normalizeAthleticRows(rawRows, players);
-  return rows.filter(row =>
-    (!filters.playerId || row.playerId === filters.playerId)
-    && (!filters.season || filters.season === 'all' || row.season === filters.season)
-    && (!filters.date || row.date === filters.date)
-  );
+  appDataCache.athleticRows.rows = rows;
+  appDataCache.athleticRows.loadedAt = now;
+  return filterRows(rows);
+  });
 }
 async function athleticSaveTest(test={}){
   if(!guardAthletic('write')) return null;
@@ -3144,6 +3205,7 @@ async function athleticSaveTest(test={}){
   if(idx >= 0) local[idx] = {...local[idx], ...clean};
   else local.push(clean);
   saveLocalAthleticPayload(local);
+  invalidateAppDataCaches('athletic');
   snapshotLocalData();
   if(db && currentUser){
     const payload = {

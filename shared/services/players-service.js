@@ -8,6 +8,8 @@
   const ACTIVE_STATUSES = ['active', 'injured', 'left', 'archived'];
   const PLAYER_REF_COLLECTIONS = ['matchEvents', 'attendance', 'technicalTests', 'physicalTests', 'injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines', 'workloads', 'medicalFollowUps', 'convocations', 'individualReports'];
   const OFFICIAL_TEAMS = ['U7 A','U9 A','U11 A','U13 A','U13 B','U16 A','U19','R1'];
+  const FIRESTORE_CACHE_TTL_MS = 5 * 60 * 1000;
+  const firestorePlayersCache = {rows:null, loadedAt:0};
   const TEAM_CATEGORY_RULES = [
     {team:'U7 A', category:'U7', subCategories:['U6','U7']},
     {team:'U9 A', category:'U9', subCategories:['U8','U9']},
@@ -22,6 +24,10 @@
   function asText(value){ return String(value ?? '').trim(); }
   function normalizeUpper(value){ return asText(value).toUpperCase(); }
   function nowIso(){ return new Date().toISOString(); }
+  function invalidatePlayersCache(){
+    firestorePlayersCache.rows = null;
+    firestorePlayersCache.loadedAt = 0;
+  }
 
   function stableId(){
     const raw = Array.from(arguments).map(part =>
@@ -379,9 +385,15 @@
   async function listPlayers(ctx={}, filters={}){
     if(!ctx.firebaseFns || !ctx.db) return filterPlayers(readCachedPlayers(), filters);
     const {firebaseFns, db} = firestoreContext(ctx);
+    const now = Date.now();
+    if(!ctx.forceRefresh && firestorePlayersCache.rows && now - firestorePlayersCache.loadedAt < FIRESTORE_CACHE_TTL_MS){
+      return filterPlayers(writeCache([...firestorePlayersCache.rows, ...parseCache(CUSTOM_CACHE_KEY)]), filters);
+    }
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION));
     const rows = [];
     snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()})));
+    firestorePlayersCache.rows = rows;
+    firestorePlayersCache.loadedAt = now;
     const normalized = writeCache([...rows, ...parseCache(CUSTOM_CACHE_KEY)]);
     return filterPlayers(normalized, filters);
   }
@@ -416,6 +428,7 @@
         updatedAtIso:payload.updatedAtIso
       }, {merge:true});
     }
+    invalidatePlayersCache();
     await listPlayers(ctx).catch(()=>{});
     return {player:clean, before, created:!before};
   }
@@ -504,7 +517,7 @@
     teamCategoryRuleForSubCategory, teamCategoryRuleForTeam, displayName, splitName,
     normalizePlayer, normalizePlayerForWrite, identityKey, personKey, dedupePlayers,
     readCachedPlayers, writeCache, filterPlayers,
-    listPlayers, readFirestorePlayers, getPlayer, savePlayer, archivePlayer,
+    listPlayers, readFirestorePlayers, getPlayer, savePlayer, archivePlayer, invalidatePlayersCache,
     updatePlayerRefs, mergePlayers
   };
 
