@@ -2158,7 +2158,7 @@ async function adminListRawPlayers(){
   return players.sort((a,b) => String(a.nom||a.displayName||'').localeCompare(String(b.nom||b.displayName||''), 'fr'));
 }
 function playerAdminDiff(before={}, after={}){
-  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','photo','status','commentaireInterne'];
+  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','foot','pied','meilleurPiedLabel','nationalite','nationality','photo','status','commentaireInterne'];
   const changes = {};
   editable.forEach(key => {
     const next = after[key];
@@ -2204,6 +2204,11 @@ async function adminCreatePlayer(data={}){
   clean.dateNaissance = clean.birth;
   clean.poste = String(clean.poste || '').trim();
   clean.numero = String(clean.numero || '').trim();
+  clean.foot = String(clean.foot || clean.pied || clean.meilleurPiedLabel || '').trim();
+  clean.pied = clean.foot;
+  clean.meilleurPiedLabel = clean.foot;
+  clean.nationalite = String(clean.nationalite || clean.nationality || '').trim();
+  clean.nationality = clean.nationalite;
   clean.photo = String(clean.photo || '').trim();
   clean.status = String(clean.status || 'active').trim() || 'active';
   clean.commentaireInterne = String(clean.commentaireInterne || '').trim();
@@ -2259,6 +2264,15 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   if(clean.prenom) clean.prenom = String(clean.prenom).trim();
   if((clean.categorie || clean.subCategory) && !clean.team) clean.team = service?.defaultClubTeamFromSubCategory?.(clean.subCategory || clean.categorie) || normalizeTeamFromCategory(clean.categorie || clean.subCategory);
   if(clean.team) clean.teamId = teamService?.canonicalTeamId?.(clean.team) || stableFirestoreId('team', clean.team);
+  if(clean.foot || clean.pied || clean.meilleurPiedLabel){
+    clean.foot = String(clean.foot || clean.pied || clean.meilleurPiedLabel || '').trim();
+    clean.pied = clean.foot;
+    clean.meilleurPiedLabel = clean.foot;
+  }
+  if(clean.nationalite || clean.nationality){
+    clean.nationalite = String(clean.nationalite || clean.nationality || '').trim();
+    clean.nationality = clean.nationalite;
+  }
   clean.displayName = [String(clean.nom ?? before.nom ?? '').toUpperCase(), String(clean.prenom ?? before.prenom ?? '')].filter(Boolean).join(' ').trim();
   clean.updatedAt = firebaseFns.serverTimestamp();
   clean.updatedAtIso = new Date().toISOString();
@@ -3713,30 +3727,43 @@ function openPlayerModal(){
   if(!guardAdminAction('La gestion manuelle des joueuses est réservée aux administrateurs.')) return;
   $('#playerModal')?.classList.add('open');
   renderCustomPlayers();
-  updatePlayerPreview();
+  updateManualPlayerDerivedCategory();
 }
 function closePlayerModal(){ $('#playerModal')?.classList.remove('open'); }
 function resetPlayerForm(){
-  ['playerFirstName','playerLastName','playerBirth'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
-  if($('#playerCategory')) $('#playerCategory').value='U12';
+  ['playerFirstName','playerLastName','playerBirth','playerPoste','playerNumero','playerCategory','playerSubCategory'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
   if($('#playerTeam')) $('#playerTeam').value='U13 A';
   if($('#playerFoot')) $('#playerFoot').value='';
+  if($('#playerNationalite')) $('#playerNationalite').value='';
   if($('#playerPhoto')) $('#playerPhoto').value='';
   if($('#playerMsg')) $('#playerMsg').textContent='';
-  updatePlayerPreview();
+  updateManualPlayerDerivedCategory();
 }
 function playerDisplayName(p){
   return `${String(p.prenom||'').trim()} ${String(p.nom||'').toUpperCase()}`.trim().toUpperCase();
+}
+function updateManualPlayerDerivedCategory(){
+  const birth=$('#playerBirth')?.value.trim() || '';
+  const team=$('#playerTeam')?.value || '';
+  const snapshot=categorySnapshotForSeason({birth,dateNaissance:birth,team,equipe:team}, currentSeason());
+  if($('#playerCategory')) $('#playerCategory').value=snapshot.categorie || '';
+  if($('#playerSubCategory')) $('#playerSubCategory').value=snapshot.subCategory || snapshot.sousCategorie || '';
+  updatePlayerPreview();
 }
 function updatePlayerPreview(){
   const first=$('#playerFirstName')?.value.trim() || '';
   const last=$('#playerLastName')?.value.trim() || '';
   const cat=$('#playerCategory')?.value || '';
+  const sub=$('#playerSubCategory')?.value || '';
   const team=$('#playerTeam')?.value || '';
+  const poste=$('#playerPoste')?.value.trim() || '';
+  const numero=$('#playerNumero')?.value.trim() || '';
+  const foot=$('#playerFoot')?.value || '';
+  const nationalite=$('#playerNationalite')?.value.trim() || '';
   const name=`${first} ${last.toUpperCase()}`.trim().toUpperCase() || 'Nouvelle joueuse';
   const initials=(first||last||'?').split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase() || '?';
   const box=$('#playerPreview'); if(!box) return;
-  box.innerHTML=`<div class="player-avatar-preview">${escapeHtml(initials)}</div><div><b>${escapeHtml(name)}</b><br><span>${escapeHtml([team,cat].filter(Boolean).join(' · ') || 'Complète le formulaire.')}</span></div>`;
+  box.innerHTML=`<div class="player-avatar-preview">${escapeHtml(initials)}</div><div><b>${escapeHtml(name)}</b><br><span>${escapeHtml([team,cat,sub,poste,numero?`N° ${numero}`:'',foot,nationalite].filter(Boolean).join(' · ') || 'Complète le formulaire.')}</span></div>`;
 }
 async function saveManualPlayer(){
   if(!guardAdminAction('La gestion manuelle des joueuses est réservée aux administrateurs.')) return;
@@ -3749,7 +3776,12 @@ async function saveManualPlayer(){
   }
   const photo = await readPlayerPhoto();
   const categorie=$('#playerCategory')?.value || '';
+  const subCategory=$('#playerSubCategory')?.value || categorie;
   const team=$('#playerTeam')?.value || '';
+  const poste=$('#playerPoste')?.value.trim() || '';
+  const numero=$('#playerNumero')?.value.trim() || '';
+  const foot=$('#playerFoot')?.value || '';
+  const nationalite=$('#playerNationalite')?.value.trim() || '';
   const birth=$('#playerBirth')?.value.trim() || '';
   if(!birth){
     if(msg){ msg.textContent='Date de naissance obligatoire pour générer le playerId unique.'; msg.classList.add('bad'); }
@@ -3765,8 +3797,8 @@ async function saveManualPlayer(){
   }
   const rawPlayer={
     id:baseId, playerId:baseId,
-    prenom:prenom.toUpperCase(), nom:nom.toUpperCase(), categorie, subCategory:categorie, team,
-    foot:$('#playerFoot')?.value || '', birth, age:/^\d{1,2}$/.test(birth)?birth:'',
+    prenom:prenom.toUpperCase(), nom:nom.toUpperCase(), categorie, subCategory, team, poste, numero,
+    foot, pied:foot, meilleurPiedLabel:foot, nationalite, nationality:nationalite, birth, age:/^\d{1,2}$/.test(birth)?birth:'',
     photo, source:'Saisie manuelle CoachPulse', createdAt:new Date().toISOString()
   };
   const player=service?.normalizePlayer ? service.normalizePlayer(rawPlayer) : rawPlayer;
@@ -3783,7 +3815,7 @@ function deleteManualPlayer(id){
 function renderCustomPlayers(){
   const box=$('#customPlayerList'); if(!box) return;
   const players=customPlayers();
-  box.innerHTML = players.length ? players.slice().reverse().map(p => `<div class="player-list-row"><div><b>${escapeHtml(playerDisplayName(p))}</b><br><span>${escapeHtml([p.team,p.categorie,p.foot].filter(Boolean).join(' · ') || 'Infos non renseignées')}</span></div><button data-delete-player="${escapeHtml(p.id)}">Retirer</button></div>`).join('') : '<div class="player-list-row"><span>Aucune joueuse ajoutée manuellement.</span></div>';
+  box.innerHTML = players.length ? players.slice().reverse().map(p => `<div class="player-list-row"><div><b>${escapeHtml(playerDisplayName(p))}</b><br><span>${escapeHtml([p.team,p.categorie,p.foot,p.nationalite||p.nationality].filter(Boolean).join(' · ') || 'Infos non renseignées')}</span></div><button data-delete-player="${escapeHtml(p.id)}">Retirer</button></div>`).join('') : '<div class="player-list-row"><span>Aucune joueuse ajoutée manuellement.</span></div>';
 }
 async function adminTableClick(e){
   const resetEmail = e.target?.dataset?.reset;
@@ -3853,7 +3885,8 @@ $('#closePlayerBtn').addEventListener('click', closePlayerModal);
 $('#resetPlayerBtn').addEventListener('click', resetPlayerForm);
 $('#savePlayerBtn').addEventListener('click', saveManualPlayer);
 $('#playerModal').addEventListener('click', e => { if(e.target?.id === 'playerModal') closePlayerModal(); if(e.target?.dataset?.deletePlayer) deleteManualPlayer(e.target.dataset.deletePlayer); });
-['playerFirstName','playerLastName','playerCategory','playerTeam','playerFoot','playerBirth'].forEach(id => $('#'+id)?.addEventListener('input', updatePlayerPreview));
+['playerBirth','playerTeam'].forEach(id => { $('#'+id)?.addEventListener('input', updateManualPlayerDerivedCategory); $('#'+id)?.addEventListener('change', updateManualPlayerDerivedCategory); });
+['playerFirstName','playerLastName','playerPoste','playerNumero','playerFoot','playerNationalite'].forEach(id => $('#'+id)?.addEventListener('input', updatePlayerPreview));
 $('#loginBtn').addEventListener('click', signInStaff);
 $('#loginPassword').addEventListener('keydown', e => { if(e.key === 'Enter') signInStaff(); });
 $('#logoutBtn').addEventListener('click', logout);
