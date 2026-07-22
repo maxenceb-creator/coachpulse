@@ -22,6 +22,38 @@
     const selected = state.players.find(p => p.playerId === state.selectedPlayerId) || state.players[0] || {};
     return Data.playerForSeason(selected, displaySeason());
   }
+  function firstText(){
+    for(const value of arguments){
+      const text = String(value ?? '').trim();
+      if(text) return text;
+    }
+    return '';
+  }
+  function enrichPlayerFromCollections(player={}, collections={}){
+    const aliases = Data.playerAliases(player);
+    const candidates = [
+      ...(collections.players || []),
+      ...(collections.technicalTests || []),
+      ...(collections.technicalTests || []).map(row => row.playerSnapshot || {}),
+      ...(collections.technicalTests || []).map(row => row.player || {})
+    ].filter(row => row && (!Data.rowMatchesPlayer || Data.rowMatchesPlayer(row, aliases) || aliases.includes(row.playerId || row.id)));
+    const foot = firstText(
+      player.foot, player.pied, player.meilleurPiedLabel, player.preferredFoot, player.strongFoot,
+      ...candidates.flatMap(row => [row.foot, row.pied, row.meilleurPiedLabel, row.preferredFoot, row.strongFoot])
+    );
+    const nationalite = firstText(
+      player.nationalite, player.nationalité, player.nationality, player.country, player.pays,
+      ...candidates.flatMap(row => [row.nationalite, row.nationalité, row.nationality, row.country, row.pays])
+    );
+    return {
+      ...player,
+      foot:foot || player.foot || '',
+      pied:firstText(player.pied, foot),
+      meilleurPiedLabel:firstText(player.meilleurPiedLabel, foot),
+      nationalite:nationalite || player.nationalite || '',
+      nationality:firstText(player.nationality, nationalite)
+    };
+  }
   function playersForTeam(){
     return state.players.filter(p => !state.filters.team || Data.teamLabel(Data.playerForSeason(p, displaySeason())) === state.filters.team);
   }
@@ -46,6 +78,16 @@
     const payload = loaded.payload;
     state.payload = payload;
     state.collections = loaded.collections;
+    const selected = state.players.find(p => p.playerId === state.selectedPlayerId);
+    if(selected){
+      const enriched = enrichPlayerFromCollections(selected, state.collections);
+      state.players = state.players.map(player => player.playerId === state.selectedPlayerId ? enriched : player);
+      state.collections.players = [
+        enriched,
+        ...(state.collections.players || []).filter(player => (player.playerId || player.id) !== state.selectedPlayerId)
+      ];
+      loaded.collections = state.collections;
+    }
     state.seasons = Filters.seasonsFromCollections(state.collections);
     if(!state.filters.compareSeasonA) state.filters.compareSeasonA = state.seasons[0] || Data.currentSeason();
     if(!state.filters.compareSeasonB) state.filters.compareSeasonB = Data.currentSeason();

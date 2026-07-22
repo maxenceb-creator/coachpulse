@@ -4,7 +4,7 @@
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function option(value, label, selected){ return `<option value="${esc(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${esc(label || value)}</option>`; }
   function playerFoot(player={}){
-    const value = String(player.foot || player.pied || player.preferredFoot || player.strongFoot || '').trim();
+    const value = String(player.foot || player.pied || player.meilleurPiedLabel || player.piedFort || player.preferredFoot || player.strongFoot || '').trim();
     if(!value) return '';
     const normalized = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     if(normalized.includes('droit') || normalized === 'right' || normalized === 'r') return 'Droit';

@@ -50,7 +50,11 @@ function syncCommonType(){const t=$('commonTestType').value;$('commonJongleField
 function commonCatChanged(){fillPlayerSelect($('commonPlayer'),{empty:'Choisir une joueuse',cat:$('commonCat').value,grouped:true,showCat:false});}
 function commonPlayerChanged(){const p=DATA.players.find(x=>x.id===$('commonPlayer').value);const ps=p?playerForTestSeason(p,$('commonDate').value):p;if(ps)$('commonCat').value=ps.categorie||'';}
 function playerForTestSeason(p,date){const season=seasonFromDate(date);try{return window.parent?.CoachPulseCentralData?.playerForSeason?.(p,season)||p}catch(_){return p}}
-function saveCommon(){if($('commonTestType').value!=='jongles'){$('commonMsg').textContent='Module prêt, champs spécifiques à définir.';return;}const id=$('commonPlayer').value,d=$('commonDate').value,p=DATA.players.find(x=>x.id===id);if(!id||!d){$('commonMsg').textContent='Choisis une joueuse et une date.';return;}const ps=playerForTestSeason(p,d),cat=ps?.categorie||p?.categorie||$('commonCat').value,sub=ps?.subCategory||ps?.sousCategorie||p?.sousCategorie||cat;const tests={};TESTS.forEach(([k])=>{const f=$('c_'+k);tests[k]=f&&f.value!==''?Number(f.value):'';});const rows=localRows();rows.push({playerId:id,joueuse:id,playerName:p?.label||id,categorie:cat,categorieListe:cat,sousCategorie:sub,date:d,saison:seasonFromDate(d),tests,objectifs:objectives()[cat]||{},source:'Saisie V15'});setLocalRows(rows);$('player').value=id;if(p)$('cat').value=cat;fillSeasons();updateJongles();renderBilan();$('commonMsg').textContent='Test enregistré. Onglet Jongle mis à jour.';}
+function playerFieldValue(player={},keys=[]){for(const key of keys){const value=String(player?.[key]??'').trim();if(value)return value;}return '';}
+function playerFootValue(player={}){return playerFieldValue(player,['foot','pied','meilleurPiedLabel','preferredFoot','strongFoot']);}
+function playerNationalityValue(player={}){return playerFieldValue(player,['nationalite','nationalité','nationality','country','pays']);}
+function playerSnapshotForTest(player={},seasonPlayer={},extra={}){const source={...player,...seasonPlayer};const foot=playerFootValue(source)||playerFootValue(player);const nationalite=playerNationalityValue(source)||playerNationalityValue(player);return {playerId:source.playerId||source.id||extra.playerId||'',id:source.playerId||source.id||extra.playerId||'',displayName:source.label||source.displayName||extra.playerName||'',nom:source.nom||source.lastName||'',prenom:source.prenom||source.firstName||'',categorie:extra.categorie||source.categorie||'',subCategory:extra.subCategory||source.subCategory||source.sousCategorie||'',sousCategorie:extra.subCategory||source.sousCategorie||source.subCategory||'',team:source.team||source.equipe||'',teamId:source.teamId||'',foot,pied:foot,meilleurPiedLabel:foot,nationalite,nationality:nationalite};}
+function saveCommon(){if($('commonTestType').value!=='jongles'){$('commonMsg').textContent='Module prêt, champs spécifiques à définir.';return;}const id=$('commonPlayer').value,d=$('commonDate').value,p=DATA.players.find(x=>x.id===id);if(!id||!d){$('commonMsg').textContent='Choisis une joueuse et une date.';return;}const ps=playerForTestSeason(p,d),cat=ps?.categorie||p?.categorie||$('commonCat').value,sub=ps?.subCategory||ps?.sousCategorie||p?.sousCategorie||cat;const tests={};TESTS.forEach(([k])=>{const f=$('c_'+k);tests[k]=f&&f.value!==''?Number(f.value):'';});const foot=playerFootValue(ps)||playerFootValue(p),nationalite=playerNationalityValue(ps)||playerNationalityValue(p);const rows=localRows();rows.push({playerId:id,joueuse:id,playerName:p?.label||id,categorie:cat,categorieListe:cat,sousCategorie:sub,date:d,saison:seasonFromDate(d),foot,pied:foot,meilleurPiedLabel:foot,nationalite,nationality:nationalite,playerSnapshot:playerSnapshotForTest(p,ps,{playerId:id,playerName:p?.label||id,categorie:cat,subCategory:sub}),tests,objectifs:objectives()[cat]||{},source:'Saisie V15'});setLocalRows(rows);$('player').value=id;if(p)$('cat').value=cat;fillSeasons();updateJongles();renderBilan();$('commonMsg').textContent='Test enregistré. Onglet Jongle mis à jour.';}
 function clearCommon(){TESTS.forEach(([k])=>{const f=$('c_'+k);if(f)f.value='';});$('commonDate').valueAsDate=new Date();syncCommonSeason();$('commonMsg').textContent='Saisie annulée.';}
 function filterChanged(){fillPlayerSelect($('player'),{empty:'Toutes les joueuses',cat:$('cat').value,grouped:true,showCat:false});updateJongles();if(document.querySelector('.tab.active')?.dataset.tab==='bilan')renderBilanRadar();}
 	function selectedSeasonValue(id){const v=$(id).value||'__current';return v==='__current'?appCurrentSeason():v}
@@ -70,9 +74,9 @@ function updateProfile(rows){
   $('profileCategory').textContent='Catégorie '+(ps?.categorieListe||ps?.categorie||last?.categorieListe||last?.categorie||$('cat').value||'-');
   $('profileSubCategory').textContent='Sous-cat. '+(ps?.subCategory||ps?.sousCategorie||last?.sousCategorie||last?.categorie||'-');
   $('profileTeam').textContent='Équipe '+(ps?.team||ps?.equipe||'-');
-  const nat=(p?.nationalite||'-')+(p?.drapeau?' '+p.drapeau:'');
+  const nat=(p?.nationalite||p?.nationality||'-')+(p?.drapeau?' '+p.drapeau:'');
   $('profileNationality').textContent='Nationalité '+nat;
-  $('profileFoot').textContent=p?.meilleurPiedLabel||'🦶 -';
+  $('profileFoot').textContent=p?.meilleurPiedLabel||p?.foot||p?.pied||'🦶 -';
   $('profileArrival').textContent='Arrivée '+(p?.saisonArrivee||'-');
   $('profileSeason').textContent='Saison '+(season||p?.saison||last?.saison||'-');
   $('profileTests').textContent='Tests '+(rows.length||'-');
@@ -192,9 +196,12 @@ document.addEventListener('DOMContentLoaded',init);
       sousCategorie:subCategory||categoryList,
       equipe:p.team||existing?.equipe||categoryList,
       teamId:p.teamId||existing?.teamId||"",
-      nationalite:p.nationalite||p.nationality||existing?.nationalite||"France",
+      foot:p.foot||p.pied||existing?.foot||existing?.pied||existing?.meilleurPiedLabel||"",
+      pied:p.pied||p.foot||existing?.pied||existing?.foot||existing?.meilleurPiedLabel||"",
+      nationalite:p.nationalite||p.nationalité||p.nationality||p.country||p.pays||existing?.nationalite||existing?.nationality||"France",
+      nationality:p.nationality||p.nationalite||existing?.nationality||existing?.nationalite||"",
       drapeau:existing?.drapeau||"🇫🇷",
-      meilleurPiedLabel:p.foot||existing?.meilleurPiedLabel||"",
+      meilleurPiedLabel:p.foot||p.pied||existing?.meilleurPiedLabel||existing?.foot||existing?.pied||"",
       saisonArrivee:existing?.saisonArrivee||"",
       saison:existing?.saison||"2026-2027",
       photo:p.photo||existing?.photo||""
@@ -218,12 +225,18 @@ document.addEventListener('DOMContentLoaded',init);
     if(!central.length)return;
     const seen=new Set();
     const next=[];
+    const footHints=[];
     central.forEach(p=>{
       const key=personKey(p);
       if(!key||seen.has(key))return;
-      next.push(toTestPlayer(p,previousByPerson.get(key)));
+      const existing=previousByPerson.get(key);
+      const player=toTestPlayer(p,existing);
+      next.push(player);
+      const foot=playerFootValue(player)||playerFootValue(existing);
+      if(foot) footHints.push({playerId:player.playerId||player.id, id:player.playerId||player.id, nom:player.nom, prenom:player.prenom, displayName:player.label, dateNaissance:player.dateNaissance||existing?.dateNaissance||'', foot, pied:foot, meilleurPiedLabel:foot, nationalite:player.nationalite||existing?.nationalite||''});
       seen.add(key);
     });
+    try{localStorage.setItem('coachpulse:technicalPlayerFootHints',JSON.stringify(footHints));window.parent?.CoachPulseCentralData?.mergeTechnicalPlayerFootHints?.(footHints);}catch(_){}
     DATA.players.splice(0,DATA.players.length,...next);
     const cats=[...new Set(next.map(p=>p.categorie).filter(Boolean))].sort((a,b)=>catRank(a)-catRank(b)||String(a).localeCompare(String(b),'fr',{numeric:true}));
     DATA.cats.splice(0,DATA.cats.length,...cats);
