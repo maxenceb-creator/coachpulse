@@ -2319,6 +2319,7 @@ const DEFAULT_DB_OPTIONS = {
   subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','SENIORS'],
   teams:['U7 A','U9 A','U11 A','U13 A','U13 B','U16 A','U19','R1']
 };
+let teamIdRepairScheduled = false;
 function resolveOfficialTeamForApp(value, fallback=''){
   const service = teamsService();
   const official = service?.resolveOfficialTeam?.(value, fallback);
@@ -2370,7 +2371,10 @@ async function adminListTeamsAndSettings(){
   const service = teamsService();
   if(service?.listTeams && service?.readDatabaseOptions){
     if(service.ensureOfficialTeams) await service.ensureOfficialTeams(firestoreServiceContext());
-    await adminRepairTeamIds();
+    if(!teamIdRepairScheduled){
+      teamIdRepairScheduled = true;
+      adminRepairTeamIds().catch(err => console.warn('Team ID repair skipped', err));
+    }
     return {
       teams:await service.listTeams(firestoreServiceContext(), {includeArchived:true}),
       settings:await service.readDatabaseOptions(firestoreServiceContext())
@@ -2426,18 +2430,58 @@ async function adminArchiveTeam(teamId, archived=true){
   if(!teamId) throw new Error('teamId obligatoire.');
   let before = {};
   let after = {};
-  if(service?.archiveTeam){
-    const result = await service.archiveTeam(teamId, archived, firestoreServiceContext());
-    before = result.before || {};
-    after = result.team || {};
-  }else{
-    const ref = firebaseFns.doc(db, 'teams', teamId);
-    const snap = await firebaseFns.getDoc(ref);
-    before = snap.exists() ? {id:snap.id, teamId:snap.id, ...snap.data()} : {};
-    after = {...before, teamId, status:archived ? 'archived' : 'active', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''};
-    await firebaseFns.setDoc(ref, after, {merge:true});
+  const initialRef = firebaseFns.doc(db, 'teams', teamId);
+  const initialSnap = await firebaseFns.getDoc(initialRef);
+  before = initialSnap.exists() ? {id:initialSnap.id, teamId:initialSnap.id, ...initialSnap.data()} : {};
+  const official = service?.resolveOfficialTeam?.(before.name || before.team || before.category || teamId, before.category || before.categorie || '');
+  const targetName = official?.name || before.name || teamId;
+  const targetTeamId = official && service?.canonicalTeamId ? service.canonicalTeamId(official.name) : teamId;
+  const targetRef = firebaseFns.doc(db, 'teams', targetTeamId);
+  const targetSnap = targetTeamId === teamId ? initialSnap : await firebaseFns.getDoc(targetRef);
+  const targetBefore = targetSnap.exists() ? {id:targetSnap.id, teamId:targetSnap.id, ...targetSnap.data()} : {};
+  before = Object.keys(targetBefore).length ? targetBefore : before;
+  after = {
+    ...before,
+    teamId:targetTeamId,
+    name:official?.name || before.name || targetName,
+    category:official?.category || before.category || before.categorie || '',
+    subCategories:official?.subCategories || before.subCategories || [],
+    source:before.source || 'CoachPulse officiel',
+    status:archived ? 'archived' : 'active',
+    updatedAt:firebaseFns.serverTimestamp(),
+    updatedAtIso:new Date().toISOString(),
+    updatedBy:currentUser.uid,
+    updatedByEmail:currentUser.email || ''
+  };
+  await firebaseFns.setDoc(targetRef, after, {merge:true});
+  if(!archived){
+    const teamsSnap = await firebaseFns.getDocs(firebaseFns.collection(db, 'teams'));
+    const aliasWrites = [];
+    teamsSnap.forEach(docSnap => {
+      if(docSnap.id === targetTeamId) return;
+      const data = docSnap.data() || {};
+      const aliasOfficial = service?.resolveOfficialTeam?.(data.name || data.team || data.category || docSnap.id, data.category || data.categorie || '');
+      const aliasTeamId = aliasOfficial && service?.canonicalTeamId ? service.canonicalTeamId(aliasOfficial.name) : '';
+      if(aliasTeamId !== targetTeamId) return;
+      aliasWrites.push(firebaseFns.setDoc(firebaseFns.doc(db, 'teams', docSnap.id), {
+        ...data,
+        teamId:targetTeamId,
+        replacedByTeamId:targetTeamId,
+        status:'active',
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:new Date().toISOString(),
+        updatedBy:currentUser.uid,
+        updatedByEmail:currentUser.email || ''
+      }, {merge:true}));
+    });
+    await Promise.all(aliasWrites);
   }
-  await writeChangeLog({collectionName:'teams', documentId:teamId, action:archived?'archive':'reactivate', before, after:{...before,...after}, changes:objectDiff(before, after, ['status']), summary:`Équipe ${archived?'archivée':'réactivée'} : ${after.name || before.name || teamId}`});
+  const checkSnap = await firebaseFns.getDoc(targetRef);
+  const check = checkSnap.exists() ? checkSnap.data() : {};
+  if(String(check.status || '').toLowerCase() !== String(after.status).toLowerCase()){
+    throw new Error(`Statut équipe non modifié après écriture (${check.status || 'vide'}).`);
+  }
+  await writeChangeLog({collectionName:'teams', documentId:targetTeamId, action:archived?'archive':'reactivate', before, after:{...before,...after}, changes:objectDiff(before, after, ['status']), summary:`Équipe ${archived?'archivée':'réactivée'} : ${after.name || before.name || targetTeamId}`});
   return after;
 }
 function cleanOptionList(values){
