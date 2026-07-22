@@ -876,13 +876,15 @@ function enrichPlayersWithTechnicalFootHints(players=[], hints=readTechnicalPlay
     const id = player.playerId || player.id || playerHintKey(player);
     const hint = byId.get(id) || byId.get(playerHintKey(player));
     if(!hint) return player;
+    const foot = player.foot || player.pied || player.meilleurPiedLabel || player.meilleurPied || player.piedFort || player.piedFortLabel || player.preferredFoot || player.preferredFootLabel || player.strongFoot || player.strongFootLabel || player.dominantFoot || hint.foot || hint.pied || hint.meilleurPiedLabel || hint.piedFort || '';
+    const nationalite = player.nationalite || player.nationalité || player.nationality || player.nationalityLabel || player.country || player.countryName || player.pays || hint.nationalite || hint.nationality || '';
     return {
       ...player,
-      foot:player.foot || player.pied || player.meilleurPiedLabel || hint.foot || '',
-      pied:player.pied || player.foot || player.meilleurPiedLabel || hint.pied || '',
-      meilleurPiedLabel:player.meilleurPiedLabel || player.foot || player.pied || hint.meilleurPiedLabel || '',
-      nationalite:player.nationalite || player.nationality || hint.nationalite || '',
-      nationality:player.nationality || player.nationalite || hint.nationalite || ''
+      foot,
+      pied:player.pied || foot,
+      meilleurPiedLabel:player.meilleurPiedLabel || foot,
+      nationalite,
+      nationality:player.nationality || nationalite
     };
   });
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-64-20260722-player-hard-delete';
+const CACHE_NAME = 'coachpulse-v6-4-65-20260722-player-list-extras';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
