@@ -790,10 +790,10 @@ function normalizePlayer(raw={}){
 }
 const TECHNICAL_PLAYER_HINTS_KEY = 'coachpulse:technicalPlayerFootHints';
 function technicalFootValue(raw={}){
-  return String(raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.preferredFoot || raw.strongFoot || '').trim();
+  return String(raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.piedFortLabel || raw.preferredFoot || raw.preferredFootLabel || raw.strongFoot || raw.strongFootLabel || raw.dominantFoot || '').trim();
 }
 function technicalNationalityValue(raw={}){
-  return String(raw.nationalite || raw.nationalité || raw.nationality || raw.country || raw.pays || '').trim();
+  return String(raw.nationalite || raw.nationalité || raw.nationality || raw.nationalityLabel || raw.country || raw.countryName || raw.pays || '').trim();
 }
 function normalizeTechnicalPlayerHint(raw={}){
   const foot = technicalFootValue(raw);
