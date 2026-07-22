@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-65-20260722-unified-tabs-pass-two';
+const CACHE_NAME = 'coachpulse-v6-4-66-20260722-force-standard-tabs';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
