@@ -182,6 +182,9 @@ th,td{overflow-wrap:anywhere}
     grid-template-columns:var(--side) minmax(0,1fr)!important;
     height:100dvh;
   }
+  .app.collapsed{
+    grid-template-columns:var(--side-collapsed) minmax(0,1fr)!important;
+  }
   .sidebar{
     position:static!important;
     z-index:auto!important;
@@ -206,6 +209,12 @@ th,td{overflow-wrap:anywhere}
   .frame{
     max-width:100vw!important;
     min-width:0!important;
+  }
+  .app.collapsed .main,
+  .app.collapsed .workspace,
+  .app.collapsed .frame{
+    width:100%!important;
+    max-width:calc(100vw - var(--side-collapsed))!important;
   }
   .topbar{
     height:auto!important;
