@@ -3,6 +3,33 @@
   const Filters = global.PlayerProfileFilters;
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function option(value, label, selected){ return `<option value="${esc(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${esc(label || value)}</option>`; }
+  function playerFoot(player={}){
+    const value = String(player.foot || player.pied || player.preferredFoot || player.strongFoot || '').trim();
+    if(!value) return '';
+    const normalized = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if(normalized.includes('droit') || normalized === 'right' || normalized === 'r') return 'Droit';
+    if(normalized.includes('gauch') || normalized === 'left' || normalized === 'l') return 'Gauche';
+    return value;
+  }
+  function nationalityFlag(value=''){
+    const normalized = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const flags = {
+      france:'🇫🇷', francaise:'🇫🇷', francais:'🇫🇷', french:'🇫🇷', fr:'🇫🇷',
+      espagne:'🇪🇸', espagnole:'🇪🇸', espagnol:'🇪🇸', spain:'🇪🇸', es:'🇪🇸',
+      portugal:'🇵🇹', portugaise:'🇵🇹', portugais:'🇵🇹', pt:'🇵🇹',
+      italie:'🇮🇹', italienne:'🇮🇹', italien:'🇮🇹', italy:'🇮🇹', it:'🇮🇹',
+      algerie:'🇩🇿', algerienne:'🇩🇿', algerien:'🇩🇿', dz:'🇩🇿',
+      maroc:'🇲🇦', marocaine:'🇲🇦', marocain:'🇲🇦', ma:'🇲🇦',
+      tunisie:'🇹🇳', tunisienne:'🇹🇳', tunisien:'🇹🇳', tn:'🇹🇳',
+      belgique:'🇧🇪', belge:'🇧🇪', be:'🇧🇪',
+      suisse:'🇨🇭', ch:'🇨🇭'
+    };
+    return flags[normalized] || '🏳️';
+  }
+  function playerNationality(player={}){
+    const value = String(player.nationalite || player.nationalité || player.nationality || player.country || player.pays || '').trim();
+    return value ? `${nationalityFlag(value)} ${value}` : '';
+  }
   function filteredPlayers(state){
     const team = state.filters.team || '';
     const displaySeason = state.filters.periodMode === 'season' ? state.filters.season : Data.currentSeason();
@@ -47,6 +74,8 @@
       ['Categorie', player.categorie || player.category || '-'],
       ['Sous-cat.', player.subCategory || player.sousCategorie || '-'],
       ['Poste', player.poste || player.position || '-'],
+      ['Pied fort', playerFoot(player) || 'À remplir'],
+      ['Nationalité', playerNationality(player) || 'À remplir'],
       ['Saison', period.label]
     ];
     return `<div class="avatar">${photo ? `<img src="${esc(photo)}" alt="">` : esc(initials)}</div>
