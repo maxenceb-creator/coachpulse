@@ -240,7 +240,8 @@ function firestoreServiceContext(){
 function sortPlayersForApp(players){
   const service = playersService();
   if(service?.dedupePlayers) return service.dedupePlayers(players);
-  return [...players].sort((a,b) => String(a.nom||a.displayName||'').localeCompare(String(b.nom||b.displayName||''), 'fr'));
+  const label = p => String(`${p.prenom || ''} ${p.nom || ''}`.trim() || p.displayName || '');
+  return [...players].sort((a,b) => label(a).localeCompare(label(b), 'fr'));
 }
 
 function visibleModules(section){
@@ -789,10 +790,10 @@ function normalizePlayer(raw={}){
 }
 const TECHNICAL_PLAYER_HINTS_KEY = 'coachpulse:technicalPlayerFootHints';
 function technicalFootValue(raw={}){
-  return String(raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.preferredFoot || raw.strongFoot || '').trim();
+  return String(raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.piedFortLabel || raw.preferredFoot || raw.preferredFootLabel || raw.strongFoot || raw.strongFootLabel || raw.dominantFoot || '').trim();
 }
 function technicalNationalityValue(raw={}){
-  return String(raw.nationalite || raw.nationalité || raw.nationality || raw.country || raw.pays || '').trim();
+  return String(raw.nationalite || raw.nationalité || raw.nationality || raw.nationalityLabel || raw.country || raw.countryName || raw.pays || '').trim();
 }
 function normalizeTechnicalPlayerHint(raw={}){
   const foot = technicalFootValue(raw);
@@ -812,18 +813,47 @@ function normalizeTechnicalPlayerHint(raw={}){
     nationalite
   };
 }
+function technicalHintText(value=''){
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+function technicalHintDate(value=''){
+  return String(value || '').replace(/\D+/g, '');
+}
+function technicalHintKeys(raw={}){
+  const normalized = normalizePlayer(raw);
+  const id = normalized.playerId || raw.playerId || raw.id || '';
+  const nom = technicalHintText(normalized.nom || raw.nom || raw.lastName);
+  const prenom = technicalHintText(normalized.prenom || raw.prenom || raw.firstName);
+  const birth = technicalHintDate(normalized.dateNaissance || normalized.birth || raw.dateNaissance || raw.birth || raw.birthDate);
+  return [
+    id,
+    raw.playerId,
+    raw.id,
+    nom && prenom && birth ? `identity:${nom}|${prenom}|${birth}` : '',
+    nom && prenom ? `person:${nom}|${prenom}` : ''
+  ].filter(Boolean).map(String);
+}
 function readTechnicalPlayerFootHints(){
   return parseStoredJson(TECHNICAL_PLAYER_HINTS_KEY, []).map(normalizeTechnicalPlayerHint).filter(Boolean);
 }
 function mergeTechnicalPlayerFootHints(hints=[]){
-  const byId = new Map(readTechnicalPlayerFootHints().map(hint => [hint.playerId || hint.id, hint]));
-  hints.map(normalizeTechnicalPlayerHint).filter(Boolean).forEach(hint => {
-    const id = hint.playerId || hint.id;
-    if(!id) return;
-    const previous = byId.get(id) || {};
-    byId.set(id, {...previous, ...hint, foot:hint.foot || previous.foot || '', pied:hint.pied || previous.pied || '', meilleurPiedLabel:hint.meilleurPiedLabel || previous.meilleurPiedLabel || '', nationalite:hint.nationalite || previous.nationalite || ''});
+  const byId = new Map();
+  readTechnicalPlayerFootHints().forEach(hint => {
+    technicalHintKeys(hint).forEach(key => {
+      if(key && !byId.has(key)) byId.set(key, hint);
+    });
   });
-  const merged = [...byId.values()];
+  hints.map(normalizeTechnicalPlayerHint).filter(Boolean).forEach(hint => {
+    const keys = technicalHintKeys(hint);
+    const primaryKey = keys.find(Boolean);
+    if(!primaryKey) return;
+    const previous = keys.map(key => byId.get(key)).find(Boolean) || {};
+    const merged = {...previous, ...hint, foot:hint.foot || previous.foot || '', pied:hint.pied || previous.pied || '', meilleurPiedLabel:hint.meilleurPiedLabel || previous.meilleurPiedLabel || '', nationalite:hint.nationalite || previous.nationalite || ''};
+    keys.forEach(key => {
+      if(key) byId.set(key, merged);
+    });
+  });
+  const merged = [...new Set(byId.values())];
   try{ localStorage.setItem(TECHNICAL_PLAYER_HINTS_KEY, JSON.stringify(merged)); }catch(_e){}
   return merged;
 }
@@ -865,23 +895,55 @@ async function technicalPlayerFootHints(){
   technicalPlayerFootHintsCache = hints;
   return hints;
 }
+async function technicalFirestorePlayerFootHints(){
+  if(!db || !firebaseFns?.getDocs || !firebaseFns?.collection) return [];
+  const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'technicalTests'));
+  const hints = [];
+  snap.forEach(docSnap => {
+    const data = docSnap.data() || {};
+    const snapshot = data.playerSnapshot || data.player || {};
+    const source = {...snapshot, ...data};
+    const foot = technicalFootValue(source) || technicalFootValue(snapshot);
+    const nationalite = technicalNationalityValue(source) || technicalNationalityValue(snapshot);
+    if(!foot && !nationalite) return;
+    hints.push({
+      playerId:data.playerId || snapshot.playerId || data.id || '',
+      id:data.playerId || snapshot.playerId || data.id || '',
+      nom:snapshot.nom || data.nom || data.lastName || '',
+      prenom:snapshot.prenom || data.prenom || data.firstName || '',
+      displayName:snapshot.displayName || data.playerName || data.displayName || '',
+      dateNaissance:snapshot.dateNaissance || data.dateNaissance || data.birth || data.birthDate || '',
+      foot,
+      pied:foot,
+      meilleurPiedLabel:foot,
+      nationalite
+    });
+  });
+  return mergeTechnicalPlayerFootHints(hints);
+}
 function playerHintKey(raw={}){
   const normalized = normalizePlayer(raw);
   return normalized.playerId || raw.playerId || raw.id || stableFirestoreId('player', raw.prenom || raw.firstName || '', raw.nom || raw.lastName || '', raw.dateNaissance || raw.birth || 'no-birth');
 }
 function enrichPlayersWithTechnicalFootHints(players=[], hints=readTechnicalPlayerFootHints()){
-  const byId = new Map(hints.map(hint => [hint.playerId || hint.id, hint]).filter(([id]) => id));
+  const byId = new Map();
+  hints.forEach(hint => {
+    technicalHintKeys(hint).forEach(key => {
+      if(key && !byId.has(key)) byId.set(key, hint);
+    });
+  });
   return players.map(player => {
-    const id = player.playerId || player.id || playerHintKey(player);
-    const hint = byId.get(id) || byId.get(playerHintKey(player));
+    const hint = technicalHintKeys(player).map(key => byId.get(key)).find(Boolean) || byId.get(playerHintKey(player));
     if(!hint) return player;
+    const foot = player.foot || player.pied || player.meilleurPiedLabel || player.meilleurPied || player.piedFort || player.piedFortLabel || player.preferredFoot || player.preferredFootLabel || player.strongFoot || player.strongFootLabel || player.dominantFoot || hint.foot || hint.pied || hint.meilleurPiedLabel || hint.piedFort || '';
+    const nationalite = player.nationalite || player.nationalité || player.nationality || player.nationalityLabel || player.country || player.countryName || player.pays || hint.nationalite || hint.nationality || '';
     return {
       ...player,
-      foot:player.foot || player.pied || player.meilleurPiedLabel || hint.foot || '',
-      pied:player.pied || player.foot || player.meilleurPiedLabel || hint.pied || '',
-      meilleurPiedLabel:player.meilleurPiedLabel || player.foot || player.pied || hint.meilleurPiedLabel || '',
-      nationalite:player.nationalite || player.nationality || hint.nationalite || '',
-      nationality:player.nationality || player.nationalite || hint.nationalite || ''
+      foot,
+      pied:player.pied || foot,
+      meilleurPiedLabel:player.meilleurPiedLabel || foot,
+      nationalite,
+      nationality:player.nationality || nationalite
     };
   });
 }
@@ -2141,7 +2203,10 @@ async function adminListPlayers(filters={}){
   if(!guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = playersService();
-  const hints = await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints());
+  const hints = mergeTechnicalPlayerFootHints([
+    ...await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints()),
+    ...await technicalFirestorePlayerFootHints().catch(() => [])
+  ]);
   if(service?.listPlayers) return enrichPlayersWithTechnicalFootHints(await service.listPlayers(firestoreServiceContext(), filters), hints);
   if(service?.readFirestorePlayers) return enrichPlayersWithTechnicalFootHints(await service.readFirestorePlayers(firestoreServiceContext(), filters), hints);
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
@@ -2155,7 +2220,8 @@ async function adminListRawPlayers(){
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
   const players = [];
   snap.forEach(docSnap => players.push({...docSnap.data(), id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id}));
-  return players.sort((a,b) => String(a.nom||a.displayName||'').localeCompare(String(b.nom||b.displayName||''), 'fr'));
+  const label = p => String(`${p.prenom || ''} ${p.nom || ''}`.trim() || p.displayName || '');
+  return players.sort((a,b) => label(a).localeCompare(label(b), 'fr'));
 }
 function playerAdminDiff(before={}, after={}){
   const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','foot','pied','meilleurPiedLabel','nationalite','nationality','photo','status','commentaireInterne'];
@@ -2273,7 +2339,10 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
     clean.nationalite = String(clean.nationalite || clean.nationality || '').trim();
     clean.nationality = clean.nationalite;
   }
-  clean.displayName = [String(clean.nom ?? before.nom ?? '').toUpperCase(), String(clean.prenom ?? before.prenom ?? '')].filter(Boolean).join(' ').trim();
+  clean.playerId = playerId;
+  clean.id = playerId;
+  clean.documentId = playerId;
+  clean.displayName = [String(clean.prenom ?? before.prenom ?? ''), String(clean.nom ?? before.nom ?? '').toUpperCase()].filter(Boolean).join(' ').trim().toUpperCase();
   clean.updatedAt = firebaseFns.serverTimestamp();
   clean.updatedAtIso = new Date().toISOString();
   clean.updatedBy = currentUser.uid;
@@ -2281,8 +2350,9 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   const after = {...before, ...clean};
   const changes = playerAdminDiff(before, after);
   if(!Object.keys(changes).length) return {changed:false, changes:{}};
-  if(service?.savePlayer) await service.savePlayer(after, firestoreServiceContext());
-  else await firebaseFns.setDoc(ref, clean, {merge:true});
+  const playerPayload = {...clean};
+  delete playerPayload.documentId;
+  await firebaseFns.setDoc(ref, playerPayload, {merge:true});
   const summary = Object.entries(changes).map(([field,v]) => `${field}: ${v.before || '-'} → ${v.after || '-'}`).join(' · ');
   await writeChangeLog({collectionName:'players', documentId:playerId, action, before, after, changes, summary});
   if(clean.teamId && clean.team) await firebaseFns.setDoc(firebaseFns.doc(db, 'teams', clean.teamId), {teamId:clean.teamId, name:clean.team, source:'Administration', updatedAt:firebaseFns.serverTimestamp()}, {merge:true});
@@ -2293,6 +2363,52 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
 async function adminArchivePlayer(playerId, archived=true){
   if(!guardAdminAction()) return;
   return adminUpdatePlayer(playerId, {status:archived ? 'archived' : 'active'}, archived ? 'archive' : 'update');
+}
+function isPlayerReference(data={}, playerId=''){
+  return data.playerId === playerId
+    || (Array.isArray(data.playerIds) && data.playerIds.includes(playerId))
+    || (data.playerSnapshot && typeof data.playerSnapshot === 'object' && data.playerSnapshot.playerId === playerId)
+    || (data.player && typeof data.player === 'object' && (data.player.playerId === playerId || data.player.id === playerId));
+}
+async function deletePlayerReferences(playerId){
+  const refCounts = {};
+  for(const collectionName of adminPlayerRefCollections()){
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, collectionName));
+    const deletes = [];
+    snap.forEach(docSnap => {
+      if(isPlayerReference(docSnap.data() || {}, playerId)){
+        deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, collectionName, docSnap.id)));
+      }
+    });
+    await Promise.all(deletes);
+    refCounts[collectionName] = deletes.length;
+  }
+  return refCounts;
+}
+async function adminDeletePlayer(playerId, confirmation=''){
+  if(!guardAdminAction()) return;
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  if(!playerId) throw new Error('playerId manquant.');
+  if(String(confirmation || '').trim() !== playerId) throw new Error('Confirmation playerId incorrecte.');
+  const ref = firebaseFns.doc(db, 'players', playerId);
+  const snap = await firebaseFns.getDoc(ref);
+  if(!snap.exists()) throw new Error('Joueuse introuvable.');
+  const before = {id:snap.id, playerId:snap.id, ...snap.data()};
+  const refCounts = await deletePlayerReferences(playerId);
+  await firebaseFns.deleteDoc(ref);
+  const deletedRefs = Object.entries(refCounts).filter(([,count]) => count).map(([collectionName,count]) => `${collectionName} ${count}`).join(' · ') || 'aucune donnée liée';
+  await writeChangeLog({
+    collectionName:'players',
+    documentId:playerId,
+    action:'delete',
+    before,
+    after:{deleted:true, playerId, refCounts},
+    changes:{deleted:{before:'non', after:'oui'}},
+    summary:`Suppression définitive joueuse : ${before.displayName || `${before.prenom || ''} ${before.nom || ''}`.trim() || playerId} · ${deletedRefs}`
+  });
+  await pullCentralPlayersToLocal(false).catch(()=>{});
+  notifyFramesPlayersUpdated();
+  return {deleted:true, playerId, refCounts};
 }
 async function adminReadChangeLogs(limit=50){
   if(!guardAdminAction()) return [];
@@ -3437,7 +3553,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedRecords});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
