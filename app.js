@@ -28,6 +28,7 @@ const DEFAULT_MODULE_REGISTRY = [
   {id:'methodologie', name:'Bilans & planning', icon:'🧭', section:'staff', active:true, collection:'sessions', relatedCollections:['settings','teams'], screen:{type:'iframe', src:'pages/methodologie.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Méthodologie, calendrier et attendus.'}},
   {id:'database', name:'Joueuses & base', icon:'🧩', section:'admin', active:true, collection:'players', relatedCollections:['teams','settings','changeLogs'], screen:{type:'iframe', src:'pages/admin-database.html'}, permissions:{read:ROLES.core, write:ROLES.core, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Corriger la base Firestore commune.'}},
   {id:'dataHub', name:'Data Hub', icon:'🗄️', section:'admin', active:true, collection:'syncLogs', relatedCollections:['players','teams','matches','sessions','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/data-hub.html'}, permissions:{read:ROLES.core, write:ROLES.core, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Importer, simuler et synchroniser.'}},
+  {id:'cloud', name:'Cloud', icon:'☁️', section:'admin', active:true, collection:'syncLogs', relatedCollections:['settings','changeLogs'], screen:{type:'internal'}, permissions:{read:ROLES.core, write:ROLES.core, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Synchronisation Firebase, statut cloud et sauvegardes.'}},
   {id:'admin', name:'Gestion utilisateurs', icon:'👥', section:'admin', active:true, collection:'staff_members', relatedCollections:['settings','changeLogs'], screen:{type:'internal'}, permissions:{read:['ADMIN'], write:['ADMIN'], importExport:['ADMIN']}, settings:{showInNav:true, showOnDashboard:true, description:'Rôles, équipes et comptes.'}},
   {id:'injuries', name:'Blessures', icon:'🩹', section:'future', active:false, collection:'injuries', relatedCollections:['players','teams','settings'], screen:{type:'iframe', src:'pages/blessures.html'}, permissions:{read:ROLES.medicalRead, write:ROLES.medicalWrite, importExport:ROLES.medicalWrite}, settings:{showInNav:false, showOnDashboard:false, description:'Suivi blessures et indisponibilités.'}},
   {id:'workload', name:'Charge de travail', icon:'📈', section:'future', active:false, collection:'workloads', relatedCollections:['players','teams','sessions'], screen:{type:'iframe', src:'pages/charge-travail.html'}, permissions:{read:ROLES.sportRead, write:ROLES.physicalWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Charge, volumes et ressentis.'}},
@@ -321,6 +322,7 @@ function setLocked(locked){
 function showHome(){
   frame.classList.add('hidden');
   frame.removeAttribute('src');
+  cloudPanel.classList.remove('open');
   homeView.classList.remove('hidden');
   if(adminView) adminView.classList.add('hidden');
 }
@@ -330,9 +332,23 @@ function showAdmin(){
   refreshAdminAccessPickers();
   frame.classList.add('hidden');
   frame.removeAttribute('src');
+  cloudPanel.classList.remove('open');
   homeView.classList.add('hidden');
   adminView.classList.remove('hidden');
   loadMembers();
+}
+function openCloudPanel(){
+  if(!requireAuth()) return setLocked(true);
+  if(!guardAdminAction('Le panneau Cloud est réservé aux administrateurs.')) return;
+  frame.classList.add('hidden');
+  frame.removeAttribute('src');
+  homeView.classList.add('hidden');
+  if(adminView) adminView.classList.add('hidden');
+  cloudPanel.classList.add('open');
+  $('#staffEmail').value = currentUser?.email || '';
+  $('#staffName').value = currentProfile?.name || '';
+  $('#staffRole').value = currentProfile?.role || '';
+  if(!window.matchMedia('(max-width:1100px)').matches) shell.classList.add('collapsed');
 }
 
 function routeTo(key){
@@ -349,7 +365,9 @@ function routeTo(key){
   $$('.nav-link,.quick-card').forEach(el => el.classList.toggle('active', el.dataset.tool === key));
   if(key === 'home') showHome();
   else if(key === 'admin') showAdmin();
+  else if(key === 'cloud') openCloudPanel();
   else {
+    cloudPanel.classList.remove('open');
     homeView.classList.add('hidden');
     if(adminView) adminView.classList.add('hidden');
     frame.classList.remove('hidden');
@@ -4065,8 +4083,8 @@ $('#importBackupInput').addEventListener('change', async e => {
   catch(err){ alert('Fichier de sauvegarde invalide.'); }
   e.target.value='';
 });
-$('#cloudBtn').addEventListener('click', () => { if(!requireAuth()) return setLocked(true); if(!guardAdminAction('Le panneau Cloud est réservé aux administrateurs.')) return; cloudPanel.classList.add('open'); $('#staffEmail').value = currentUser?.email || ''; $('#staffName').value = currentProfile?.name || ''; $('#staffRole').value = currentProfile?.role || ''; });
-$('#cloudClose').addEventListener('click', () => cloudPanel.classList.remove('open'));
+$('#cloudBtn')?.addEventListener('click', openCloudPanel);
+$('#cloudClose').addEventListener('click', () => routeTo('home'));
 $('#saveFirebaseConfig').addEventListener('click', () => alert('Firebase est déjà intégré dans CoachPulse V6.'));
 $('#staffLogin').addEventListener('click', async () => { $('#loginEmail').value=$('#staffEmail').value.trim(); $('#loginPassword').value=$('#staffPassword').value; await signInStaff(); });
 $('#openAdminFromCloud').addEventListener('click', () => { cloudPanel.classList.remove('open'); routeTo('admin'); });

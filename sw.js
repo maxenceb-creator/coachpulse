@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-66-20260722-player-list-required-fields';
+const CACHE_NAME = 'coachpulse-v6-4-66-20260723-tabs-player-fields';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
