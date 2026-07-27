@@ -1886,36 +1886,10 @@ if(typeof window.v51Season==='function'){
 })();
 </script>
 <style id="coachstats-layout-fixes">
-.matchTop.v310Compact{overflow:hidden!important}
-.matchTop.v310Compact .scoreRow{display:grid!important;grid-template-columns:minmax(520px,1.1fr) minmax(220px,.42fr) minmax(300px,.62fr)!important;grid-template-areas:"controls timer score"!important;gap:12px!important;align-items:center!important}
-.matchTop.v310Compact .scoreRow>div:first-child{grid-area:controls!important;display:grid!important;gap:8px!important;align-items:stretch!important;min-width:0!important}
-.matchTop.v310Compact .matchName,.matchTop.v310Compact .phaseBadge,.matchTop.v310Compact .liveSaveRow,.matchTop.v310Compact #systemQuickButtons{display:none!important}
-body:not(.match-mode) .matchTop.v310Compact .scoreRow>div:first-child{grid-template-columns:minmax(260px,1fr) minmax(250px,1fr)!important;grid-template-areas:"system mode" "chrono reset" "poss poss"!important}
-body:not(.match-mode) .matchTop.v310Compact .possessionSetup{display:none!important}
-body:not(.match-mode) .matchTop.v310Compact .liveSystemPanel{grid-area:system!important;position:static!important;display:grid!important;grid-template-columns:minmax(150px,1fr) minmax(120px,auto)!important;width:auto!important;max-width:none!important;height:auto!important;margin:0!important;gap:8px!important;align-items:stretch!important}
-body.match-mode .matchTop.v310Compact .liveSystemPanel{display:none!important}
-.matchTop.v310Compact .liveSystemPanel select,.matchTop.v310Compact .liveSystemPanel button{min-height:46px!important;height:auto!important;font-size:13px!important;border-radius:14px!important;white-space:normal!important}
-.matchTop.v310Compact .chronoControls{grid-area:chrono!important;display:grid!important;grid-template-columns:repeat(4,minmax(64px,1fr))!important;gap:8px!important;margin:0!important}
-.matchTop.v310Compact .matchModeRow{grid-area:mode!important;display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;margin:0!important}
-.matchTop.v310Compact .resetMatchRow{grid-area:reset!important;display:grid!important;grid-template-columns:repeat(3,minmax(70px,1fr))!important;gap:8px!important;margin:0!important}
-.matchTop.v310Compact .possessionSetup{grid-area:engage!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important;margin:0!important;min-width:0!important}
-body.match-mode .matchTop.v310Compact .possessionSetup{display:grid!important}
-.matchTop.v310Compact .chronoControls button,.matchTop.v310Compact .matchModeRow button,.matchTop.v310Compact .resetMatchRow button,.matchTop.v310Compact .possessionSetup button{min-height:46px!important;padding:8px 10px!important;font-size:13px!important;line-height:1.08!important;border-radius:14px!important;white-space:normal!important;overflow:hidden!important;text-overflow:clip!important}
-.matchTop.v310Compact .possessionStrip{grid-area:poss!important;display:grid!important;grid-template-columns:repeat(2,minmax(120px,1fr))!important;gap:8px!important;margin:0!important;min-width:0!important}
-.matchTop.v310Compact .possBox{min-width:0!important;padding:8px 9px!important;border-radius:14px!important;font-size:11px!important;line-height:1.08!important;overflow:hidden!important}
-.matchTop.v310Compact .possBox b{font-size:18px!important;line-height:1!important;white-space:nowrap!important}
-.matchTop.v310Compact .timer{grid-area:timer!important;min-width:0!important;width:100%!important;height:92px!important;margin:0!important}
-.matchTop.v310Compact .score{grid-area:score!important;width:100%!important;max-width:none!important;min-width:0!important;overflow:hidden!important}
-body.match-mode .matchTop.v310Compact .scoreRow{grid-template-columns:minmax(520px,1fr) minmax(210px,.35fr) minmax(260px,.45fr)!important;grid-template-areas:"controls timer score"!important}
-body.match-mode .matchTop.v310Compact .scoreRow>div:first-child{grid-template-columns:minmax(240px,1fr) minmax(150px,.62fr) minmax(180px,.74fr)!important;grid-template-areas:"chrono engage mode" "poss poss reset"!important}
-body.match-mode .matchTop.v310Compact .possessionStrip{grid-template-columns:repeat(2,minmax(115px,1fr))!important}
-body.match-mode .matchTop.v310Compact .score{overflow:hidden!important}
 .slot{overflow:visible!important}
 .slot .slotName{left:8px!important;right:8px!important;bottom:4px!important;max-width:none!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;padding:3px 5px!important;font-size:9px!important;line-height:1.05!important}
 .slot .pos{left:50%!important;bottom:-14px!important;transform:translateX(-50%)!important;max-width:72px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;text-align:center!important;z-index:4!important}
 body.match-mode .slot .slotName{font-size:8.5px!important;left:6px!important;right:6px!important}
 body.match-mode .slot .pos{bottom:-13px!important;font-size:8.5px!important;max-width:62px!important}
-@media(max-width:1100px){.matchTop.v310Compact .scoreRow,body.match-mode .matchTop.v310Compact .scoreRow{grid-template-columns:1fr minmax(180px,.38fr)!important;grid-template-areas:"controls controls" "timer score"!important}body:not(.match-mode) .matchTop.v310Compact .scoreRow>div:first-child{grid-template-columns:1fr 1fr!important;grid-template-areas:"system mode" "chrono reset" "poss poss"!important}body.match-mode .matchTop.v310Compact .scoreRow>div:first-child{grid-template-columns:1fr 1fr!important;grid-template-areas:"chrono engage" "mode reset" "poss poss"!important}.matchTop.v310Compact .timer{height:72px!important}.matchTop.v310Compact .score{height:72px!important;min-height:72px!important}.matchTop.v310Compact .possessionStrip{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
-@media(max-width:760px){.matchTop.v310Compact .scoreRow,body.match-mode .matchTop.v310Compact .scoreRow{grid-template-columns:1fr!important;grid-template-areas:"controls" "timer" "score"!important}body:not(.match-mode) .matchTop.v310Compact .scoreRow>div:first-child{grid-template-columns:1fr!important;grid-template-areas:"system" "mode" "chrono" "reset" "poss"!important}body.match-mode .matchTop.v310Compact .scoreRow>div:first-child{grid-template-columns:1fr!important;grid-template-areas:"chrono" "engage" "mode" "reset" "poss"!important}.matchTop.v310Compact .chronoControls,.matchTop.v310Compact .resetMatchRow{grid-template-columns:repeat(2,minmax(0,1fr))!important}.matchTop.v310Compact .possessionStrip{grid-template-columns:1fr 1fr!important}}
 </style>
 </body></html>
