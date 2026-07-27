@@ -322,6 +322,7 @@ function setLocked(locked){
 function showHome(){
   frame.classList.add('hidden');
   frame.removeAttribute('src');
+  cloudPanel.classList.remove('open');
   homeView.classList.remove('hidden');
   if(adminView) adminView.classList.add('hidden');
 }
@@ -331,6 +332,7 @@ function showAdmin(){
   refreshAdminAccessPickers();
   frame.classList.add('hidden');
   frame.removeAttribute('src');
+  cloudPanel.classList.remove('open');
   homeView.classList.add('hidden');
   adminView.classList.remove('hidden');
   loadMembers();
@@ -338,10 +340,15 @@ function showAdmin(){
 function openCloudPanel(){
   if(!requireAuth()) return setLocked(true);
   if(!guardAdminAction('Le panneau Cloud est réservé aux administrateurs.')) return;
+  frame.classList.add('hidden');
+  frame.removeAttribute('src');
+  homeView.classList.add('hidden');
+  if(adminView) adminView.classList.add('hidden');
   cloudPanel.classList.add('open');
   $('#staffEmail').value = currentUser?.email || '';
   $('#staffName').value = currentProfile?.name || '';
   $('#staffRole').value = currentProfile?.role || '';
+  if(!window.matchMedia('(max-width:1100px)').matches) shell.classList.add('collapsed');
 }
 
 function routeTo(key){
@@ -358,8 +365,9 @@ function routeTo(key){
   $$('.nav-link,.quick-card').forEach(el => el.classList.toggle('active', el.dataset.tool === key));
   if(key === 'home') showHome();
   else if(key === 'admin') showAdmin();
-  else if(key === 'cloud') { showHome(); openCloudPanel(); }
+  else if(key === 'cloud') openCloudPanel();
   else {
+    cloudPanel.classList.remove('open');
     homeView.classList.add('hidden');
     if(adminView) adminView.classList.add('hidden');
     frame.classList.remove('hidden');
@@ -4076,7 +4084,7 @@ $('#importBackupInput').addEventListener('change', async e => {
   e.target.value='';
 });
 $('#cloudBtn')?.addEventListener('click', openCloudPanel);
-$('#cloudClose').addEventListener('click', () => cloudPanel.classList.remove('open'));
+$('#cloudClose').addEventListener('click', () => routeTo('home'));
 $('#saveFirebaseConfig').addEventListener('click', () => alert('Firebase est déjà intégré dans CoachPulse V6.'));
 $('#staffLogin').addEventListener('click', async () => { $('#loginEmail').value=$('#staffEmail').value.trim(); $('#loginPassword').value=$('#staffPassword').value; await signInStaff(); });
 $('#openAdminFromCloud').addEventListener('click', () => { cloudPanel.classList.remove('open'); routeTo('admin'); });
