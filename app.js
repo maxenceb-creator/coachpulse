@@ -1401,10 +1401,38 @@ async function teamProfileLoadData(options={}){
   function uniqueRows(rows=[]){
     return [...new Map(rows.map(row => [row.id || row.teamId || row.matchId || row.sessionId || row.playerId || JSON.stringify(row), row])).values()];
   }
+  function uniquePlayers(rows=[]){
+    return [...new Map(rows.map(row => {
+      const normalized = normalizePlayer(row);
+      const id = normalized.playerId || normalized.id || row.id || row.playerId;
+      return [id, {...row, ...normalized, id, playerId:id}];
+    }).filter(([id]) => Boolean(id))).values()];
+  }
+  async function readTeamPlayers(teamId){
+    const cachedPlayers = uniquePlayers([
+      ...parseStoredJson('coachpulse:centralPlayers', []),
+      ...parseStoredJson('coachpulse:customPlayers', [])
+    ]).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) && canAccessPlayerRecord(player));
+    if(cachedPlayers.length) return cachedPlayers;
+    const seasons = [...new Set([
+      currentSeason(),
+      String(Number(currentSeason().slice(0, 4)) - 1) + '-' + currentSeason().slice(0, 4),
+      '2026-2027',
+      '2025-2026'
+    ].filter(Boolean))];
+    const fieldNames = [
+      'teamId',
+      'teamSnapshot.teamId',
+      ...seasons.flatMap(season => [`seasonHistory.${season}.teamId`, `seasons.${season}.teamId`])
+    ];
+    const settled = await Promise.allSettled(fieldNames.map(field => readWhere('players', field, '==', teamId)));
+    const rows = uniquePlayers(settled.flatMap(result => result.status === 'fulfilled' ? result.value : []));
+    return filterAuthorizedPlayers(rows).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) || rowMatchesTeamId(player, teamId));
+  }
 
-	  const [teams, allPlayers] = await Promise.all([listTeams({includeArchived:true}), listPlayers({season:'all', includeArchived:true})]);
+	  const [teams, teamPlayers] = await Promise.all([listTeams({includeArchived:true}), readTeamPlayers(teamId)]);
 	  payload.collections.teams = teams.filter(team => !teamId || (team.teamId || team.id) === teamId);
-	  payload.collections.players = allPlayers.filter(player => (!teamId || playerMatchesTeamIdForAnySeason(player, teamId)) && canAccessPlayerRecord(player));
+	  payload.collections.players = teamPlayers;
 	  if(summaryOnly){
 	    if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
 	    return payload;

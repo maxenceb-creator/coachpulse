@@ -80,9 +80,9 @@
   function preloadProgressiveTeamsForFirstSelection(teamId){
     if(state.firstSelectedTeamId || !teamId) return;
     state.firstSelectedTeamId = teamId;
-    const schedule = global.requestIdleCallback || (callback => setTimeout(callback, 150));
+    const schedule = global.requestIdleCallback || (callback => setTimeout(callback, 3000));
     schedule(async () => {
-      for(const nextTeamId of teamsByDistanceFrom(teamId)){
+      for(const nextTeamId of teamsByDistanceFrom(teamId).slice(0, 2)){
         await preloadTeam(nextTeamId);
       }
     });
@@ -127,6 +127,11 @@
     if(!teamId || state.teamCache[teamId]?.complete || state.detailLoadingTeamId === teamId) return;
     state.detailLoadingTeamId = teamId;
     render();
+    await new Promise(resolve => setTimeout(resolve, 600));
+    if(state.selectedTeamId !== teamId) {
+      if(state.detailLoadingTeamId === teamId) state.detailLoadingTeamId = '';
+      return;
+    }
     try{
       const loaded = await loadTeamData(teamId, {summaryOnly:false});
       if(state.selectedTeamId === teamId){
