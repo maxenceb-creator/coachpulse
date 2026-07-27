@@ -15,22 +15,25 @@
     filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', competition:'', venue:'', result:'', opponent:''},
     renderToken:0,
     loadingTeamId:'',
+    detailLoadingTeamId:'',
     firstSelectedTeamId:'',
     preloadedTeams:new Set()
   };
   function debugPerf(){ try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; } }
   function logPerf(label, start){ if(debugPerf()) console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
   function selectedTeam(){ return state.teams.find(team => Data.teamIdOf(team) === state.selectedTeamId) || null; }
-  async function loadTeamData(teamId){
-    if(state.teamCache[teamId]) return state.teamCache[teamId];
-    const payload = await Data.loadTeamData(teamId);
+  async function loadTeamData(teamId, options={}){
+    const cached = state.teamCache[teamId];
+    const summaryOnly = options.summaryOnly === true;
+    if(cached && (cached.complete || summaryOnly)) return cached;
+    const payload = await Data.loadTeamData(teamId, {summaryOnly});
     const collections = Data.normalizeCollections(payload);
-    state.teamCache[teamId] = {payload, collections};
+    state.teamCache[teamId] = {payload, collections, complete:!summaryOnly};
     return state.teamCache[teamId];
   }
-  async function loadSelected(){
+  async function loadSelected(options={}){
     if(!state.selectedTeamId) return null;
-    const loaded = await loadTeamData(state.selectedTeamId);
+    const loaded = await loadTeamData(state.selectedTeamId, options);
     state.payload = loaded.payload;
     state.collections = loaded.collections;
     if(state.collections.teams?.length){
@@ -71,7 +74,7 @@
   async function preloadTeam(teamId){
     if(!teamId || state.preloadedTeams.has(teamId) || state.teamCache[teamId]) return;
     state.preloadedTeams.add(teamId);
-    try{ await loadTeamData(teamId); }
+    try{ await loadTeamData(teamId, {summaryOnly:true}); }
     catch(error){ if(debugPerf()) console.warn('[CoachPulse perf] preload team failed', teamId, error); }
   }
   function preloadProgressiveTeamsForFirstSelection(teamId){
@@ -90,16 +93,18 @@
       state.payload = null;
       state.collections = null;
       state.loadingTeamId = '';
+      state.detailLoadingTeamId = '';
       await render();
       return;
     }
     state.selectedTeamId = teamId;
     const alreadyLoaded = !!state.teamCache[teamId];
+    const hasCompleteData = !!state.teamCache[teamId]?.complete;
     state.loadingTeamId = alreadyLoaded ? '' : teamId;
     await render();
     if(!alreadyLoaded){
       try{
-        await loadSelected();
+        await loadSelected({summaryOnly:true});
       }catch(error){
         state.loadingTeamId = '';
         root.innerHTML = UI.renderControls(state) + `<section class="panel"><div class="empty-state">Chargement impossible : ${UI.esc(error.message || error)}</div></section>`;
@@ -115,7 +120,26 @@
       state.seasons = Filters.seasonsFromCollections(state.collections);
       await render();
     }
+    if(!hasCompleteData) loadFullTeamInBackground(teamId);
     if(options.userSelected) preloadProgressiveTeamsForFirstSelection(teamId);
+  }
+  async function loadFullTeamInBackground(teamId){
+    if(!teamId || state.teamCache[teamId]?.complete || state.detailLoadingTeamId === teamId) return;
+    state.detailLoadingTeamId = teamId;
+    render();
+    try{
+      const loaded = await loadTeamData(teamId, {summaryOnly:false});
+      if(state.selectedTeamId === teamId){
+        state.payload = loaded.payload;
+        state.collections = loaded.collections;
+        state.seasons = Filters.seasonsFromCollections(state.collections);
+      }
+    }catch(error){
+      if(debugPerf()) console.warn('[CoachPulse perf] full team load failed', teamId, error);
+    }finally{
+      if(state.detailLoadingTeamId === teamId) state.detailLoadingTeamId = '';
+      if(state.selectedTeamId === teamId) render();
+    }
   }
   async function init(){
     try{
