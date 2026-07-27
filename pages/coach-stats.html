@@ -1892,4 +1892,35 @@ if(typeof window.v51Season==='function'){
 body.match-mode .slot .slotName{font-size:8.5px!important;left:6px!important;right:6px!important}
 body.match-mode .slot .pos{bottom:-13px!important;font-size:8.5px!important;max-width:62px!important}
 </style>
+<script id="coachstats-single-match-band-js">
+(function(){
+  "use strict";
+  function liveIsVisible(){
+    var live=document.getElementById("live");
+    return !!(live&&!live.classList.contains("hide"));
+  }
+  function setMatchBand(){
+    var isLive=liveIsVisible();
+    document.body.classList.toggle("match-mode",isLive);
+    var btn=document.getElementById("matchModeBtn");
+    if(btn)btn.textContent=isLive?"↩️ Quitter":"🎮 Mode Match";
+  }
+  var previousToggle=window.toggleMatchMode;
+  window.toggleMatchMode=function(){
+    document.body.classList.add("match-mode");
+    setMatchBand();
+    setTimeout(function(){try{renderPitch();}catch(_){}},80);
+  };
+  var previousShowTab=window.showTab;
+  if(typeof previousShowTab==="function"){
+    window.showTab=function(id,btn){
+      var result=previousShowTab.apply(this,arguments);
+      setTimeout(setMatchBand,0);
+      return result;
+    };
+  }
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",setMatchBand,{once:true});else setMatchBand();
+  window.addEventListener("load",function(){setTimeout(setMatchBand,120);});
+})();
+</script>
 </body></html>
