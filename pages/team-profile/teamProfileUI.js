@@ -8,7 +8,7 @@
     const competitions = [...new Set((state.collections?.matches || []).map(match => match.competition || match.championnat).filter(Boolean))].sort();
     const opponents = state.filters.opponent || '';
     return `<section class="team-controls">
-      <div class="field"><label>Équipe</label><select id="teamSelect">${state.teams.map(team => option(Data.teamIdOf(team), Data.teamName(team), state.selectedTeamId)).join('')}</select></div>
+      <div class="field"><label>Équipe</label><select id="teamSelect">${option('', 'Sélectionner une équipe', state.selectedTeamId || '')}${state.teams.map(team => option(Data.teamIdOf(team), Data.teamName(team), state.selectedTeamId)).join('')}</select></div>
       <div class="field"><label>Période</label><select id="periodMode">${option('season','Saison',state.filters.periodMode)}${option('all','Toutes saisons',state.filters.periodMode)}${option('custom','Période personnalisée',state.filters.periodMode)}</select></div>
       <div class="field"><label>Saison</label><select id="seasonSelect">${state.seasons.map(season => option(season, season, state.filters.season)).join('')}</select></div>
       <div class="field"><label>Début</label><input id="startDate" type="date" value="${esc(state.filters.startDate || '')}"></div>
