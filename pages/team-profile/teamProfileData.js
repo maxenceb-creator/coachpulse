@@ -43,8 +43,8 @@
     if(api().listTeams) return (await api().listTeams({includeArchived:false})).filter(team => !api().canAccessTeam || api().canAccessTeam(teamIdOf(team)));
     return OFFICIAL_TEAMS;
   }
-  async function loadTeamData(teamId){
-    if(api().teamProfileLoadData) return api().teamProfileLoadData({teamId});
+  async function loadTeamData(teamId, options={}){
+    if(api().teamProfileLoadData) return api().teamProfileLoadData({teamId, ...options});
     const teams = await listTeams();
     return {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), teamId, collections:{teams:teams.filter(team => !teamId || teamIdOf(team) === teamId), players:[], matches:[], matchEvents:[], sessions:[], attendance:[], technicalTests:[], physicalTests:[], injuries:[], workloads:[]}};
   }
