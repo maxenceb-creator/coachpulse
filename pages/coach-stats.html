@@ -1902,6 +1902,35 @@ if(typeof window.v51Season==='function'){
 .slot .pos{left:50%!important;bottom:-14px!important;transform:translateX(-50%)!important;max-width:72px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;text-align:center!important;z-index:4!important}
 body.match-mode .slot .slotName{font-size:8.5px!important;left:6px!important;right:6px!important}
 body.match-mode .slot .pos{bottom:-13px!important;font-size:8.5px!important;max-width:62px!important}
+body.match-mode .matchTop.v310Compact{width:100%!important;max-width:100%!important;margin:0!important;padding:8px 10px!important;border-radius:0!important;overflow:hidden!important}
+body.match-mode .matchTop.v310Compact .scoreRow{display:grid!important;grid-template-columns:minmax(300px,1.15fr) minmax(210px,.72fr) minmax(430px,1.42fr) minmax(150px,.52fr)!important;gap:8px!important;align-items:stretch!important}
+body.match-mode .matchTop.v310Compact .scoreRow>div{min-width:0!important}
+body.match-mode .matchTop.v310Compact button{min-height:52px!important;border-radius:14px!important;padding:7px 10px!important;font-size:clamp(12px,.92vw,16px)!important;line-height:1.05!important;white-space:normal!important;overflow:hidden!important;text-wrap:balance!important}
+body.match-mode .matchTop.v310Compact select{min-height:52px!important;border-radius:13px!important;padding:7px 12px!important;font-size:clamp(18px,1.45vw,28px)!important}
+body.match-mode .matchTop.v310Compact .liveSystemPanel{display:grid!important;grid-template-columns:minmax(150px,1fr) minmax(128px,.74fr)!important;gap:8px!important;align-items:stretch!important}
+body.match-mode .matchTop.v310Compact .possessionSetup{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;margin:0!important}
+body.match-mode .matchTop.v310Compact .possessionSetup button{font-size:clamp(10px,.78vw,13px)!important;padding:6px 7px!important}
+body.match-mode .matchTop.v310Compact .matchModeRow{display:grid!important;grid-template-columns:minmax(170px,1fr)!important;margin:0!important}
+body.match-mode .matchTop.v310Compact .matchModeRow .ghost{display:none!important}
+body.match-mode .matchTop.v310Compact .resetMatchRow{display:grid!important;grid-template-columns:repeat(4,minmax(78px,1fr))!important;gap:8px!important;align-items:stretch!important}
+body.match-mode .matchTop.v310Compact .resetMatchRow button{min-width:0!important}
+body.match-mode .matchTop.v310Compact .chronoControls{display:grid!important;grid-template-columns:repeat(4,minmax(112px,1fr))!important;gap:8px!important;margin:0!important}
+body.match-mode .matchTop.v310Compact .chronoControls button{font-size:clamp(13px,1vw,18px)!important}
+body.match-mode .matchTop.v310Compact .timer{font-size:clamp(44px,4.4vw,76px)!important;line-height:1!important}
+body.match-mode .matchTop.v310Compact .score{display:grid!important;grid-template-columns:minmax(86px,auto) minmax(170px,1fr)!important;gap:10px!important;align-items:center!important;text-align:left!important}
+body.match-mode .matchTop.v310Compact .score input{width:100%!important;min-height:58px!important;font-size:clamp(44px,4.2vw,74px)!important;line-height:1!important}
+body.match-mode .matchTop.v310Compact #teamLabel{font-size:clamp(18px,1.6vw,30px)!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+body.match-mode .matchTop.v310Compact .possessionStrip{display:grid!important;grid-template-columns:repeat(2,minmax(78px,1fr))!important;gap:8px!important;align-self:stretch!important}
+body.match-mode .matchTop.v310Compact .possessionStrip>*{min-width:0!important;overflow:hidden!important}
+@media(max-width:1280px){
+ body.match-mode .matchTop.v310Compact .scoreRow{grid-template-columns:1fr 1fr!important}
+ body.match-mode .matchTop.v310Compact .resetMatchRow,body.match-mode .matchTop.v310Compact .chronoControls{grid-template-columns:repeat(2,minmax(120px,1fr))!important}
+}
+@media(max-width:760px){
+ body.match-mode .matchTop.v310Compact .scoreRow{grid-template-columns:1fr!important}
+ body.match-mode .matchTop.v310Compact .liveSystemPanel,body.match-mode .matchTop.v310Compact .possessionSetup,body.match-mode .matchTop.v310Compact .resetMatchRow,body.match-mode .matchTop.v310Compact .chronoControls{grid-template-columns:1fr!important}
+ body.match-mode .matchTop.v310Compact .score{grid-template-columns:1fr!important;text-align:center!important}
+}
 </style>
 <script id="coachstats-single-match-band-js">
 (function(){
