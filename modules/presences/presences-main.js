@@ -73,7 +73,11 @@ function localDateIso(date){return `${date.getFullYear()}-${pad2(date.getMonth()
 function today(){return localDateIso(new Date())}
 function inferCats(s){return s.category?[s.category]:['U12-U13']}
 function durationFromTimes(start,end){if(!start||!end)return Number(sessionDuration?.value||90);const [sh,sm]=start.split(':').map(Number),[eh,em]=end.split(':').map(Number);let mins=(eh*60+em)-(sh*60+sm);return mins>0?mins:90}
-function saveNow(){localStorage.setItem('presenceSeanceV3_6_Excel',JSON.stringify(state));}
+function notifyLocalChange(){
+  try{localStorage.setItem('coachpulse:pendingSync','1')}catch(_){}
+  try{window.parent?.postMessage?.({type:'coachpulse-local-change', source:'presences', key:'presenceSeanceV3_6_Excel'}, '*')}catch(_){}
+}
+function saveNow(){localStorage.setItem('presenceSeanceV3_6_Excel',JSON.stringify(state));notifyLocalChange();}
 function showView(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); if(btn){btn.classList.add('active')}else if(event&&event.target){event.target.closest('.tab')?.classList.add('active')} if(id==='planning')renderCalendar(); if(id==='bilan')renderBilan(); if(id==='calendrier')renderHeat(); if(id==='prevention')renderPrevention(); if(id==='saisie')renderAll();}
 function categoryChecks(containerId,defaults=[]){const defaultIds=defaults.map(value=>presenceTeamByValue(value)?.teamId||value);document.getElementById(containerId).innerHTML=presenceTrainingTeams().map(team=>`<label class="check"><input type="checkbox" value="${team.teamId}" ${defaultIds.includes(team.teamId)?'checked':''}>${team.name}</label>`).join('')}
 function selectedChecks(containerId){return [...document.querySelectorAll(`#${containerId} input:checked`)].map(i=>i.value)}

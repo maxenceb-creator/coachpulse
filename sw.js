@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-67-20260729-tablet-cache-refresh';
+const CACHE_NAME = 'coachpulse-v6-4-68-20260729-presences-save-refresh';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
@@ -14,7 +14,16 @@ const CORE_ASSETS = [
   './connectors/fichesJoueusesConnector.js', './connectors/presencesConnector.js',
   './connectors/testsConnectorCore.js', './connectors/testsTechniquesConnector.js', './connectors/testsPhysiquesConnector.js'
 ];
-const NETWORK_FIRST_ASSETS = new Set(['./', './index.html', './app.js', './css/responsive.css']);
+const NETWORK_FIRST_ASSETS = new Set([
+  './',
+  './index.html',
+  './app.js',
+  './css/responsive.css',
+  './pages/presences.html',
+  './modules/presences/presences-main.js',
+  './modules/presences/presences-methodo-sync.js',
+  './modules/presences/presences-pwa-sync.js'
+]);
 
 function assetKey(url) {
   if(url.origin !== self.location.origin) return '';
