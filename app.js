@@ -810,7 +810,7 @@ function normalizePlayer(raw={}){
   return {
     playerId, id:playerId, prenom:String(prenom || '').toUpperCase(), nom:String(nom || '').toUpperCase(), displayName:[prenom, String(nom || '').toUpperCase()].filter(Boolean).join(' ').trim().toUpperCase(),
     categorie, subCategory, team, teamId:teamService?.canonicalTeamId?.(team || categorie) || stableFirestoreId('team', team || categorie || 'global'),
-    foot:raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.preferredFoot || raw.strongFoot || '', nationalite:raw.nationalite || raw.nationalité || raw.nationality || raw.country || raw.pays || '', nationality:raw.nationality || raw.nationalite || raw.nationalité || raw.country || raw.pays || '', birth, dateNaissance:raw.dateNaissance || birth, photo:raw.photo || '',
+    foot:raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.preferredFoot || raw.strongFoot || '', nationalite:raw.nationalite || raw.nationalité || raw.nationality || raw.country || raw.pays || '', nationality:raw.nationality || raw.nationalite || raw.nationalité || raw.country || raw.pays || '', leftClub:raw.leftClub || raw.dernierClubQuitte || raw.lastClubLeft || '', dernierClubQuitte:raw.dernierClubQuitte || raw.leftClub || raw.lastClubLeft || '', birth, dateNaissance:raw.dateNaissance || birth, photo:raw.photo || '',
     source:raw.source || 'Migration CoachPulse', status:raw.status || 'ACTIVE'
   };
 }
@@ -2301,7 +2301,7 @@ async function adminListRawPlayers(){
   return players.sort((a,b) => label(a).localeCompare(label(b), 'fr'));
 }
 function playerAdminDiff(before={}, after={}){
-  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','foot','pied','meilleurPiedLabel','nationalite','nationality','photo','status','commentaireInterne'];
+  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','foot','pied','meilleurPiedLabel','nationalite','nationality','leftClub','dernierClubQuitte','photo','status','commentaireInterne'];
   const changes = {};
   editable.forEach(key => {
     const next = after[key];
@@ -2352,6 +2352,8 @@ async function adminCreatePlayer(data={}){
   clean.meilleurPiedLabel = clean.foot;
   clean.nationalite = String(clean.nationalite || clean.nationality || '').trim();
   clean.nationality = clean.nationalite;
+  clean.leftClub = String(clean.leftClub || clean.dernierClubQuitte || clean.lastClubLeft || '').trim();
+  clean.dernierClubQuitte = clean.leftClub;
   clean.photo = String(clean.photo || '').trim();
   clean.status = String(clean.status || 'active').trim() || 'active';
   clean.commentaireInterne = String(clean.commentaireInterne || '').trim();
@@ -2415,6 +2417,10 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   if(clean.nationalite || clean.nationality){
     clean.nationalite = String(clean.nationalite || clean.nationality || '').trim();
     clean.nationality = clean.nationalite;
+  }
+  if(clean.leftClub !== undefined || clean.dernierClubQuitte !== undefined || clean.lastClubLeft !== undefined){
+    clean.leftClub = String(clean.leftClub || clean.dernierClubQuitte || clean.lastClubLeft || '').trim();
+    clean.dernierClubQuitte = clean.leftClub;
   }
   clean.playerId = playerId;
   clean.id = playerId;
