@@ -19,6 +19,15 @@
     if(c.includes("R1"))return ["R1"];
     return ["U12-U13"];
   }
+  function methodoTeamScope(cat){
+    try{
+      if(typeof presenceScopeFromTeamIds==="function"&&typeof presenceTeamByValue==="function"){
+        const teams=mapCat(cat).map(value=>presenceTeamByValue(value)?.teamId).filter(Boolean);
+        return presenceScopeFromTeamIds(teams.length?teams:["team-u13-a"]);
+      }
+    }catch(_){}
+    return {categories:mapCat(cat),rawCategories:mapCat(cat),teamId:"",teamIds:[],teamSnapshot:[]};
+  }
   function hasSaisie(session){
     return Object.values(session.entries||{}).some(e=>e&&(e.code||Number(e.minutes||0)>0||e.note));
   }
@@ -31,14 +40,13 @@
     let changed=false;
     events.forEach(e=>{
       const id=sessionId(e);
-      const cats=mapCat(e.cat);
+      const scope=methodoTeamScope(e.cat);
       const existing=state.sessions.find(s=>s.id===id);
       if(existing){
         existing.date=e.date;
         existing.type="Séance";
         existing.theme=e.title||"Séance Méthodologie";
-        existing.categories=cats;
-        existing.rawCategories=cats;
+        Object.assign(existing, scope);
         existing.source="Méthodologie";
         existing.methodoEventId=e.id;
         existing.note=e.note||"";
@@ -49,7 +57,7 @@
         state.sessions.unshift({
           id,date:e.date,start:"",end:"",duration:90,type:"Séance",
           theme:e.title||"Séance Méthodologie",
-          categories:cats,rawCategories:cats,entries:{},
+          ...scope,entries:{},
           source:"Méthodologie",methodoEventId:e.id,note:e.note||""
         });
         changed=true;

@@ -44,6 +44,7 @@
       sousCategorie:subCategory,
       team:p.team||existing?.team||"",
       teamId:p.teamId||existing?.teamId||"",
+      teamIds:Array.isArray(p.teamIds)&&p.teamIds.length?p.teamIds:(Array.isArray(existing?.teamIds)?existing.teamIds:[]),
       photo:p.photo||existing?.photo||"",
       source:"players-central"
     };
