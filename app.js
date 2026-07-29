@@ -235,8 +235,8 @@ function teamsService(){
 function permissionsService(){
   return window.CoachPulsePermissionsService || null;
 }
-function firestoreServiceContext(){
-  return {firebaseFns, db, user:currentUser};
+function firestoreServiceContext(options={}){
+  return {firebaseFns, db, user:currentUser, ...options};
 }
 function sortPlayersForApp(players){
   const service = playersService();
@@ -810,7 +810,7 @@ function normalizePlayer(raw={}){
   return {
     playerId, id:playerId, prenom:String(prenom || '').toUpperCase(), nom:String(nom || '').toUpperCase(), displayName:[prenom, String(nom || '').toUpperCase()].filter(Boolean).join(' ').trim().toUpperCase(),
     categorie, subCategory, team, teamId:teamService?.canonicalTeamId?.(team || categorie) || stableFirestoreId('team', team || categorie || 'global'),
-    foot:raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.preferredFoot || raw.strongFoot || '', nationalite:raw.nationalite || raw.nationalité || raw.nationality || raw.country || raw.pays || '', nationality:raw.nationality || raw.nationalite || raw.nationalité || raw.country || raw.pays || '', birth, dateNaissance:raw.dateNaissance || birth, photo:raw.photo || '',
+    foot:raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.preferredFoot || raw.strongFoot || '', nationalite:raw.nationalite || raw.nationalité || raw.nationality || raw.country || raw.pays || '', nationality:raw.nationality || raw.nationalite || raw.nationalité || raw.country || raw.pays || '', leftClub:raw.leftClub || raw.dernierClubQuitte || raw.lastClubLeft || '', dernierClubQuitte:raw.dernierClubQuitte || raw.leftClub || raw.lastClubLeft || '', birth, dateNaissance:raw.dateNaissance || birth, photo:raw.photo || '',
     source:raw.source || 'Migration CoachPulse', status:raw.status || 'ACTIVE'
   };
 }
@@ -1185,7 +1185,7 @@ async function pullCentralPlayersToLocal(manual=true){
   const service = playersService();
   let players = [];
   if(service?.readFirestorePlayers){
-    players = await service.readFirestorePlayers(firestoreServiceContext());
+    players = await service.readFirestorePlayers(firestoreServiceContext({forceRefresh:true}));
   }else{
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
     snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
@@ -2283,8 +2283,9 @@ async function adminListPlayers(filters={}){
     ...await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints()),
     ...await technicalFirestorePlayerFootHints().catch(() => [])
   ]);
-  if(service?.listPlayers) return enrichPlayersWithTechnicalFootHints(await service.listPlayers(firestoreServiceContext(), filters), hints);
-  if(service?.readFirestorePlayers) return enrichPlayersWithTechnicalFootHints(await service.readFirestorePlayers(firestoreServiceContext(), filters), hints);
+  const forceRefresh = !!filters.forceRefresh;
+  if(service?.listPlayers) return enrichPlayersWithTechnicalFootHints(await service.listPlayers(firestoreServiceContext({forceRefresh}), filters), hints);
+  if(service?.readFirestorePlayers) return enrichPlayersWithTechnicalFootHints(await service.readFirestorePlayers(firestoreServiceContext({forceRefresh}), filters), hints);
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
   const players = [];
   snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
@@ -2300,7 +2301,7 @@ async function adminListRawPlayers(){
   return players.sort((a,b) => label(a).localeCompare(label(b), 'fr'));
 }
 function playerAdminDiff(before={}, after={}){
-  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','foot','pied','meilleurPiedLabel','nationalite','nationality','photo','status','commentaireInterne'];
+  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','foot','pied','meilleurPiedLabel','nationalite','nationality','leftClub','dernierClubQuitte','photo','status','commentaireInterne'];
   const changes = {};
   editable.forEach(key => {
     const next = after[key];
@@ -2351,6 +2352,8 @@ async function adminCreatePlayer(data={}){
   clean.meilleurPiedLabel = clean.foot;
   clean.nationalite = String(clean.nationalite || clean.nationality || '').trim();
   clean.nationality = clean.nationalite;
+  clean.leftClub = String(clean.leftClub || clean.dernierClubQuitte || clean.lastClubLeft || '').trim();
+  clean.dernierClubQuitte = clean.leftClub;
   clean.photo = String(clean.photo || '').trim();
   clean.status = String(clean.status || 'active').trim() || 'active';
   clean.commentaireInterne = String(clean.commentaireInterne || '').trim();
@@ -2415,6 +2418,10 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
     clean.nationalite = String(clean.nationalite || clean.nationality || '').trim();
     clean.nationality = clean.nationalite;
   }
+  if(clean.leftClub !== undefined || clean.dernierClubQuitte !== undefined || clean.lastClubLeft !== undefined){
+    clean.leftClub = String(clean.leftClub || clean.dernierClubQuitte || clean.lastClubLeft || '').trim();
+    clean.dernierClubQuitte = clean.leftClub;
+  }
   clean.playerId = playerId;
   clean.id = playerId;
   clean.documentId = playerId;
@@ -2446,6 +2453,19 @@ function isPlayerReference(data={}, playerId=''){
     || (data.playerSnapshot && typeof data.playerSnapshot === 'object' && data.playerSnapshot.playerId === playerId)
     || (data.player && typeof data.player === 'object' && (data.player.playerId === playerId || data.player.id === playerId));
 }
+function purgeDeletedPlayerFromLocalCaches(playerId=''){
+  const id = String(playerId || '').trim();
+  if(!id) return;
+  invalidateAppDataCaches('players');
+  ['coachpulse:centralPlayers', 'coachpulse:customPlayers'].forEach(key => {
+    try{
+      const rows = parseStoredJson(key, []);
+      if(!Array.isArray(rows)) return;
+      const cleaned = rows.filter(player => String(player?.playerId || player?.id || '') !== id);
+      if(cleaned.length !== rows.length) localStorage.setItem(key, JSON.stringify(cleaned));
+    }catch(_e){}
+  });
+}
 async function deletePlayerReferences(playerId){
   const refCounts = {};
   for(const collectionName of adminPlayerRefCollections()){
@@ -2472,6 +2492,7 @@ async function adminDeletePlayer(playerId, confirmation=''){
   const before = {id:snap.id, playerId:snap.id, ...snap.data()};
   const refCounts = await deletePlayerReferences(playerId);
   await firebaseFns.deleteDoc(ref);
+  purgeDeletedPlayerFromLocalCaches(playerId);
   const deletedRefs = Object.entries(refCounts).filter(([,count]) => count).map(([collectionName,count]) => `${collectionName} ${count}`).join(' · ') || 'aucune donnée liée';
   await writeChangeLog({
     collectionName:'players',
@@ -2482,7 +2503,9 @@ async function adminDeletePlayer(playerId, confirmation=''){
     changes:{deleted:{before:'non', after:'oui'}},
     summary:`Suppression définitive joueuse : ${before.displayName || `${before.prenom || ''} ${before.nom || ''}`.trim() || playerId} · ${deletedRefs}`
   });
+  purgeDeletedPlayerFromLocalCaches(playerId);
   await pullCentralPlayersToLocal(false).catch(()=>{});
+  purgeDeletedPlayerFromLocalCaches(playerId);
   notifyFramesPlayersUpdated();
   return {deleted:true, playerId, refCounts};
 }
@@ -3967,7 +3990,7 @@ function openPlayerModal(){
 }
 function closePlayerModal(){ $('#playerModal')?.classList.remove('open'); }
 function resetPlayerForm(){
-  ['playerFirstName','playerLastName','playerBirth','playerPoste','playerNumero','playerCategory','playerSubCategory'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
+  ['playerFirstName','playerLastName','playerBirth','playerPoste','playerNumero','playerCategory','playerSubCategory','playerLeftClub'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
   if($('#playerTeam')) $('#playerTeam').value='U13 A';
   if($('#playerFoot')) $('#playerFoot').value='';
   if($('#playerNationalite')) $('#playerNationalite').value='';
@@ -3996,10 +4019,11 @@ function updatePlayerPreview(){
   const numero=$('#playerNumero')?.value.trim() || '';
   const foot=$('#playerFoot')?.value || '';
   const nationalite=$('#playerNationalite')?.value.trim() || '';
+  const leftClub=$('#playerLeftClub')?.value.trim() || '';
   const name=`${first} ${last.toUpperCase()}`.trim().toUpperCase() || 'Nouvelle joueuse';
   const initials=(first||last||'?').split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase() || '?';
   const box=$('#playerPreview'); if(!box) return;
-  box.innerHTML=`<div class="player-avatar-preview">${escapeHtml(initials)}</div><div><b>${escapeHtml(name)}</b><br><span>${escapeHtml([team,cat,sub,poste,numero?`N° ${numero}`:'',foot,nationalite].filter(Boolean).join(' · ') || 'Complète le formulaire.')}</span></div>`;
+  box.innerHTML=`<div class="player-avatar-preview">${escapeHtml(initials)}</div><div><b>${escapeHtml(name)}</b><br><span>${escapeHtml([team,cat,sub,poste,numero?`N° ${numero}`:'',foot,nationalite,leftClub?`Dernier club : ${leftClub}`:''].filter(Boolean).join(' · ') || 'Complète le formulaire.')}</span></div>`;
 }
 async function saveManualPlayer(){
   if(!guardAdminAction('La gestion manuelle des joueuses est réservée aux administrateurs.')) return;
@@ -4018,6 +4042,7 @@ async function saveManualPlayer(){
   const numero=$('#playerNumero')?.value.trim() || '';
   const foot=$('#playerFoot')?.value || '';
   const nationalite=$('#playerNationalite')?.value.trim() || '';
+  const leftClub=$('#playerLeftClub')?.value.trim() || '';
   const birth=$('#playerBirth')?.value.trim() || '';
   if(!birth){
     if(msg){ msg.textContent='Date de naissance obligatoire pour générer le playerId unique.'; msg.classList.add('bad'); }
@@ -4034,7 +4059,7 @@ async function saveManualPlayer(){
   const rawPlayer={
     id:baseId, playerId:baseId,
     prenom:prenom.toUpperCase(), nom:nom.toUpperCase(), categorie, subCategory, team, poste, numero,
-    foot, pied:foot, meilleurPiedLabel:foot, nationalite, nationality:nationalite, birth, age:/^\d{1,2}$/.test(birth)?birth:'',
+    foot, pied:foot, meilleurPiedLabel:foot, nationalite, nationality:nationalite, leftClub, dernierClubQuitte:leftClub, birth, age:/^\d{1,2}$/.test(birth)?birth:'',
     photo, source:'Saisie manuelle CoachPulse', createdAt:new Date().toISOString()
   };
   const player=service?.normalizePlayer ? service.normalizePlayer(rawPlayer) : rawPlayer;
@@ -4122,7 +4147,7 @@ $('#resetPlayerBtn').addEventListener('click', resetPlayerForm);
 $('#savePlayerBtn').addEventListener('click', saveManualPlayer);
 $('#playerModal').addEventListener('click', e => { if(e.target?.id === 'playerModal') closePlayerModal(); if(e.target?.dataset?.deletePlayer) deleteManualPlayer(e.target.dataset.deletePlayer); });
 ['playerBirth','playerTeam'].forEach(id => { $('#'+id)?.addEventListener('input', updateManualPlayerDerivedCategory); $('#'+id)?.addEventListener('change', updateManualPlayerDerivedCategory); });
-['playerFirstName','playerLastName','playerPoste','playerNumero','playerFoot','playerNationalite'].forEach(id => $('#'+id)?.addEventListener('input', updatePlayerPreview));
+['playerFirstName','playerLastName','playerPoste','playerNumero','playerFoot','playerNationalite','playerLeftClub'].forEach(id => $('#'+id)?.addEventListener('input', updatePlayerPreview));
 $('#loginBtn').addEventListener('click', signInStaff);
 $('#loginPassword').addEventListener('keydown', e => { if(e.key === 'Enter') signInStaff(); });
 $('#logoutBtn').addEventListener('click', logout);

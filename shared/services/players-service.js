@@ -279,6 +279,8 @@
       meilleurPiedLabel: asText(raw.meilleurPiedLabel || raw.foot || raw.pied || raw.meilleurPied || raw.piedFort || raw.piedFortLabel || raw.preferredFoot || raw.preferredFootLabel || raw.strongFoot || raw.strongFootLabel || raw.dominantFoot),
       nationalite: asText(raw.nationalite || raw.nationalité || raw.nationality || raw.nationalityLabel || raw.country || raw.countryName || raw.pays),
       nationality: asText(raw.nationality || raw.nationalite || raw.nationalité || raw.nationalityLabel || raw.country || raw.countryName || raw.pays),
+      leftClub: asText(raw.leftClub || raw.dernierClubQuitte || raw.lastClubLeft),
+      dernierClubQuitte: asText(raw.dernierClubQuitte || raw.leftClub || raw.lastClubLeft),
       birth,
       dateNaissance: asText(raw.dateNaissance || birth),
       currentSeason,
