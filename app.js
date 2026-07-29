@@ -481,18 +481,19 @@ async function initFirebase(){
       if(user){
         try{
           await ensureUserProfile(user);
-          setLocked(false);
-          startRealtimeSync();
-          await syncCloud(false);
-          await pullCentralPlayersToLocal(false).catch(()=>{});
-          purgeUnauthorizedLocalData();
-          const last = localStorage.getItem('coachpulse:lastTool') || 'home';
-          routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
         }catch(e){
           $('#authError').textContent = cleanError(e);
           await firebaseFns.signOut(auth);
           setLocked(true);
+          return;
         }
+        setLocked(false);
+        try{ startRealtimeSync(); }catch(e){ console.warn('Realtime sync unavailable after login', e); }
+        await syncCloud(false).catch(e => console.warn('Cloud sync unavailable after login', e));
+        await pullCentralPlayersToLocal(false).catch(e => console.warn('Central players pull unavailable after login', e));
+        try{ purgeUnauthorizedLocalData(); }catch(e){ console.warn('Local data purge unavailable after login', e); }
+        const last = localStorage.getItem('coachpulse:lastTool') || 'home';
+        routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
       } else {
         currentProfile = null;
         stopRealtimeSync();
@@ -620,11 +621,18 @@ function updateDashboard(){
 }
 function snapshotLocalData(options={}){
   const payload = buildPayload();
-  localStorage.setItem('coachpulse:autoBackup:v6', JSON.stringify(payload));
-  localStorage.setItem('coachpulse:lastAutoSave', payload.savedAt);
+  try{
+    localStorage.setItem('coachpulse:autoBackup:v6', JSON.stringify(payload));
+    localStorage.setItem('coachpulse:lastAutoSave', payload.savedAt);
+  }catch(e){
+    console.warn('Sauvegarde locale indisponible', e);
+    updateSyncState('Stockage local saturé · cloud prioritaire');
+  }
   if(!options.fromCloud && currentUser){
     const lastCloud = localStorage.getItem('coachpulse:lastCloudSync');
-    if(!lastCloud || new Date(payload.savedAt) > new Date(lastCloud)) localStorage.setItem('coachpulse:pendingSync','1');
+    if(!lastCloud || new Date(payload.savedAt) > new Date(lastCloud)){
+      try{ localStorage.setItem('coachpulse:pendingSync','1'); }catch(e){ console.warn('Marqueur de synchronisation indisponible', e); }
+    }
     scheduleCloudSync();
   }
   updateCloudKpis();
@@ -638,7 +646,7 @@ function hashItems(items){
 }
 function scheduleCloudSync(delay=900){
   if(applyingCloud || !currentUser) return;
-  localStorage.setItem('coachpulse:pendingSync','1');
+  try{ localStorage.setItem('coachpulse:pendingSync','1'); }catch(e){ console.warn('Marqueur de synchronisation indisponible', e); }
   updateSyncState('🔄 Synchronisation en attente...');
   clearTimeout(cloudWriteTimer);
   cloudWriteTimer = setTimeout(() => syncCloud(false), delay);
@@ -3649,7 +3657,7 @@ async function syncCloud(manual=false){
     updateSyncState('Cloud synchronisé');
     if(manual) alert('Synchronisation cloud OK.');
   }catch(e){
-    localStorage.setItem('coachpulse:pendingSync','1');
+    try{ localStorage.setItem('coachpulse:pendingSync','1'); }catch(_e){}
     updateSyncState('Erreur cloud · local OK');
     if(manual) alert('Sync cloud impossible : '+cleanError(e));
   }
