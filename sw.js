@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-68-20260729-presences-save-refresh';
+const CACHE_NAME = 'coachpulse-v6-4-69-20260729-presences-local-priority';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',

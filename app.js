@@ -651,6 +651,9 @@ function scheduleCloudSync(delay=900){
   clearTimeout(cloudWriteTimer);
   cloudWriteTimer = setTimeout(() => syncCloud(false), delay);
 }
+function hasPendingLocalSync(){
+  return localStorage.getItem('coachpulse:pendingSync') === '1';
+}
 function getCloudRef(){
   if(!db || !currentUser) return null;
   return firebaseFns.doc(db, 'coachpulse_common_base', currentUser.uid);
@@ -677,6 +680,11 @@ function startRealtimeSync(){
       localStorage.removeItem('coachpulse:pendingSync');
       updateCloudKpis();
       updateSyncState('Cloud synchronisé');
+      return;
+    }
+    if(hasPendingLocalSync()){
+      updateSyncState('Modifications locales en attente · cloud non appliqué');
+      scheduleCloudSync(500);
       return;
     }
     applyingCloud = true;
@@ -3664,6 +3672,11 @@ async function syncCloud(manual=false){
 }
 async function pullCloud(){
   if(!db || !currentUser) return;
+  if(hasPendingLocalSync()){
+    updateSyncState('Modifications locales en attente · récupération cloud reportée');
+    scheduleCloudSync(500);
+    return;
+  }
   const snap = await firebaseFns.getDoc(getCloudRef());
   if(snap.exists()){
     applyingCloud = true;
