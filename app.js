@@ -235,8 +235,8 @@ function teamsService(){
 function permissionsService(){
   return window.CoachPulsePermissionsService || null;
 }
-function firestoreServiceContext(){
-  return {firebaseFns, db, user:currentUser};
+function firestoreServiceContext(options={}){
+  return {firebaseFns, db, user:currentUser, ...options};
 }
 function sortPlayersForApp(players){
   const service = playersService();
@@ -1185,7 +1185,7 @@ async function pullCentralPlayersToLocal(manual=true){
   const service = playersService();
   let players = [];
   if(service?.readFirestorePlayers){
-    players = await service.readFirestorePlayers(firestoreServiceContext());
+    players = await service.readFirestorePlayers(firestoreServiceContext({forceRefresh:true}));
   }else{
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
     snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
@@ -2283,8 +2283,9 @@ async function adminListPlayers(filters={}){
     ...await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints()),
     ...await technicalFirestorePlayerFootHints().catch(() => [])
   ]);
-  if(service?.listPlayers) return enrichPlayersWithTechnicalFootHints(await service.listPlayers(firestoreServiceContext(), filters), hints);
-  if(service?.readFirestorePlayers) return enrichPlayersWithTechnicalFootHints(await service.readFirestorePlayers(firestoreServiceContext(), filters), hints);
+  const forceRefresh = !!filters.forceRefresh;
+  if(service?.listPlayers) return enrichPlayersWithTechnicalFootHints(await service.listPlayers(firestoreServiceContext({forceRefresh}), filters), hints);
+  if(service?.readFirestorePlayers) return enrichPlayersWithTechnicalFootHints(await service.readFirestorePlayers(firestoreServiceContext({forceRefresh}), filters), hints);
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
   const players = [];
   snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
@@ -2446,6 +2447,19 @@ function isPlayerReference(data={}, playerId=''){
     || (data.playerSnapshot && typeof data.playerSnapshot === 'object' && data.playerSnapshot.playerId === playerId)
     || (data.player && typeof data.player === 'object' && (data.player.playerId === playerId || data.player.id === playerId));
 }
+function purgeDeletedPlayerFromLocalCaches(playerId=''){
+  const id = String(playerId || '').trim();
+  if(!id) return;
+  invalidateAppDataCaches('players');
+  ['coachpulse:centralPlayers', 'coachpulse:customPlayers'].forEach(key => {
+    try{
+      const rows = parseStoredJson(key, []);
+      if(!Array.isArray(rows)) return;
+      const cleaned = rows.filter(player => String(player?.playerId || player?.id || '') !== id);
+      if(cleaned.length !== rows.length) localStorage.setItem(key, JSON.stringify(cleaned));
+    }catch(_e){}
+  });
+}
 async function deletePlayerReferences(playerId){
   const refCounts = {};
   for(const collectionName of adminPlayerRefCollections()){
@@ -2472,6 +2486,7 @@ async function adminDeletePlayer(playerId, confirmation=''){
   const before = {id:snap.id, playerId:snap.id, ...snap.data()};
   const refCounts = await deletePlayerReferences(playerId);
   await firebaseFns.deleteDoc(ref);
+  purgeDeletedPlayerFromLocalCaches(playerId);
   const deletedRefs = Object.entries(refCounts).filter(([,count]) => count).map(([collectionName,count]) => `${collectionName} ${count}`).join(' · ') || 'aucune donnée liée';
   await writeChangeLog({
     collectionName:'players',
@@ -2482,7 +2497,9 @@ async function adminDeletePlayer(playerId, confirmation=''){
     changes:{deleted:{before:'non', after:'oui'}},
     summary:`Suppression définitive joueuse : ${before.displayName || `${before.prenom || ''} ${before.nom || ''}`.trim() || playerId} · ${deletedRefs}`
   });
+  purgeDeletedPlayerFromLocalCaches(playerId);
   await pullCentralPlayersToLocal(false).catch(()=>{});
+  purgeDeletedPlayerFromLocalCaches(playerId);
   notifyFramesPlayersUpdated();
   return {deleted:true, playerId, refCounts};
 }
