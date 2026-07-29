@@ -679,6 +679,11 @@ function startRealtimeSync(){
       updateSyncState('Cloud synchronisé');
       return;
     }
+    if(localStorage.getItem('coachpulse:pendingSync') === '1'){
+      updateSyncState('Modifications locales en attente');
+      scheduleCloudSync(500);
+      return;
+    }
     applyingCloud = true;
     try{
       Object.entries(items).forEach(([k,v]) => {
@@ -4162,7 +4167,7 @@ window.addEventListener('online', () => { updateSyncState('Retour Internet · sy
 window.addEventListener('offline', () => updateSyncState('Hors ligne · local actif'));
 window.addEventListener('resize', () => { if(window.matchMedia('(max-width:1180px)').matches) shell.classList.remove('collapsed'); });
 window.addEventListener('message', e => {
-  if(e.data?.type === 'coachpulse-local-change') snapshotLocalData();
+  if(e.data?.type === 'coachpulse-local-change' || e.data?.type === 'coachpulse-presences-updated') snapshotLocalData();
   if(e.data?.type === 'coachpulse-open-module' && e.data.moduleId){
     if(e.data.playerId) localStorage.setItem('coachpulse:playerProfile:selectedPlayerId', e.data.playerId);
     routeTo(e.data.moduleId);
