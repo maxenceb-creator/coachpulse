@@ -582,6 +582,7 @@ function clearSensitiveLocalData(){
     'coachStatsV13Rows',
     'coachStatsV170',
     'presenceSeanceV3_6_Excel',
+    'presenceSeanceV3_6_Excel:meta',
     'methodo_events_v24'
   ].forEach(key => localStorage.removeItem(key));
   Object.keys(localStorage).filter(key => key.startsWith('coachpulse:autoBackup')).forEach(key => localStorage.removeItem(key));
@@ -685,6 +686,11 @@ function startRealtimeSync(){
     const items = data.items || {};
     const incomingHash = hashItems(items);
     const updatedByClient = data.updatedByClient || '';
+    if(shouldKeepLocalPresenceOverCloud(items)){
+      updateSyncState('Séance locale plus récente · cloud non appliqué');
+      scheduleCloudSync(500);
+      return;
+    }
     if(incomingHash === lastCloudItemsHash){ updateSyncState('Cloud synchronisé'); return; }
     if(updatedByClient === CLIENT_ID){
       lastCloudItemsHash = incomingHash;
@@ -696,11 +702,6 @@ function startRealtimeSync(){
     }
     if(hasPendingLocalSync()){
       updateSyncState('Modifications locales en attente · cloud non appliqué');
-      scheduleCloudSync(500);
-      return;
-    }
-    if(shouldKeepLocalPresenceOverCloud(items)){
-      updateSyncState('Séance locale plus récente · cloud non appliqué');
       scheduleCloudSync(500);
       return;
     }
