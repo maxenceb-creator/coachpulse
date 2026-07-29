@@ -1,0 +1,44 @@
+{
+  "id": "teamProfile",
+  "name": "Fiche équipe",
+  "status": "active",
+  "firebase": {
+    "collection": "teams",
+    "relatedCollections": [
+      "players",
+      "matches",
+      "matchEvents",
+      "sessions",
+      "attendance",
+      "technicalTests",
+      "physicalTests",
+      "injuries",
+      "workloads"
+    ]
+  },
+  "permissions": {
+    "read": [
+      "ADMIN",
+      "RESPONSABLE_CATEGORIE",
+      "COACH",
+      "PREPARATEUR_ATHLETIQUE",
+      "OBSERVATEUR_STAFF",
+      "LECTURE"
+    ],
+    "write": [
+      "ADMIN",
+      "RESPONSABLE_CATEGORIE",
+      "COACH"
+    ],
+    "adminOnly": false
+  },
+  "routing": {
+    "currentScreen": "pages/team-profile.html",
+    "targetEntry": "pages/team-profile.html"
+  },
+  "migration": {
+    "phase": 4,
+    "strategy": "dynamic-team-dashboard-linked-by-team-id"
+  },
+  "description": "Tableau de bord équipe dynamique, agrégeant résultats, effectif, statistiques et visualisations par teamId."
+}

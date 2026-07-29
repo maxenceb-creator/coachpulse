@@ -45,9 +45,9 @@ Fichiers Firebase versionnés :
   - ID stable : `testId`
   - Champs principaux : `playerId`, `playerName`, `date`, `season`, `categorie`, `subCategory`, `tests`, `objectifs`
 - `physicalTests` : réservé aux tests physiques.
-- `staff` : profils staff normalisés.
+- `staff_members` : profils staff normalisés.
   - ID stable : `staffId`
-  - Champs principaux : `uid`, `email`, `name`, `role`, `scope`, `status`
+  - Champs principaux : `uid`, `email`, `name`, `role`, `authorizedTeamIds`, `allowedModules`, `modulePermissions`, `scope`, `status`
 - `settings` : configuration et version du schéma.
 
 ## Règles d'accès v1.0
@@ -83,6 +83,8 @@ Les index Firestore versionnés couvrent les requêtes prévues :
 ## Migration progressive
 
 Le bouton `Migrer Firestore` du panneau Cloud lit les données locales existantes puis crée ou met à jour les documents Firestore.
+
+Pour la reconstruction complète de la base joueuses et le remapping des historiques, suivre le protocole dédié : [PLAYER_DATA_MIGRATION_PLAN.md](PLAYER_DATA_MIGRATION_PLAN.md).
 
 Les anciennes données locales restent conservées :
 

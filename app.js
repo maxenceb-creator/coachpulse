@@ -10,20 +10,33 @@ const FIREBASE_CONFIG = {
   appId: "1:147021875262:web:dd0a52857a7b252295e96f"
 };
 
+const ROLES = {
+  core:['ADMIN','RESPONSABLE_CATEGORIE'],
+  sportRead:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','OBSERVATEUR_STAFF','LECTURE'],
+  sportWrite:['ADMIN','RESPONSABLE_CATEGORIE','COACH'],
+  physicalWrite:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE'],
+  medicalRead:['ADMIN','RESPONSABLE_CATEGORIE','MEDICAL'],
+  medicalWrite:['ADMIN','MEDICAL']
+};
+
 const DEFAULT_MODULE_REGISTRY = [
-  {id:'home', name:'Accueil', icon:'🏠', section:'staff', active:true, collection:'settings', screen:{type:'internal'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE']}, settings:{showInNav:true, showOnDashboard:false}},
-  {id:'stats', name:'Matchs', icon:'📊', section:'staff', active:true, collection:'matches', relatedCollections:['matchEvents','players','teams','settings'], screen:{type:'iframe', src:'pages/coach-stats.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Prise de statistiques et bilan match.'}},
-  {id:'presences', name:'Présences', icon:'✅', section:'staff', active:true, collection:'attendance', relatedCollections:['sessions','players','teams','settings'], screen:{type:'iframe', src:'pages/presences.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Suivi séances, statuts et charge.'}},
-  {id:'tests', name:'Tests', icon:'⚡', section:'staff', active:true, collection:'technicalTests', relatedCollections:['physicalTests','players','teams','settings'], screen:{type:'iframe', src:'pages/tests-techniques.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Technique, progression et évaluations.'}},
-  {id:'methodologie', name:'Bilans & planning', icon:'🧭', section:'staff', active:true, collection:'sessions', relatedCollections:['settings','teams'], screen:{type:'iframe', src:'pages/methodologie.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Méthodologie, calendrier et attendus.'}},
-  {id:'database', name:'Joueuses & base', icon:'🧩', section:'admin', active:true, collection:'players', relatedCollections:['teams','settings','changeLogs'], screen:{type:'iframe', src:'pages/admin-database.html'}, permissions:{read:['ADMIN','RESPONSABLE'], write:['ADMIN','RESPONSABLE'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Corriger la base Firestore commune.'}},
-  {id:'dataHub', name:'Data Hub', icon:'🗄️', section:'admin', active:true, collection:'syncLogs', relatedCollections:['players','teams','matches','sessions','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/data-hub.html'}, permissions:{read:['ADMIN','RESPONSABLE'], write:['ADMIN','RESPONSABLE'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:true, showOnDashboard:true, description:'Importer, simuler et synchroniser.'}},
-  {id:'admin', name:'Paramètres admin', icon:'👥', section:'admin', active:true, collection:'staff', relatedCollections:['settings','changeLogs'], screen:{type:'internal'}, permissions:{read:['ADMIN','RESPONSABLE'], write:['ADMIN'], importExport:['ADMIN']}, settings:{showInNav:true, showOnDashboard:true, description:'Rôles, comptes et sécurité.'}},
-  {id:'injuries', name:'Blessures', icon:'🩹', section:'future', active:false, collection:'injuries', relatedCollections:['players','teams','settings'], screen:{type:'iframe', src:'pages/blessures.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR'], write:['ADMIN','RESPONSABLE'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:false, showOnDashboard:false, description:'Suivi blessures et indisponibilités.'}},
-  {id:'workload', name:'Charge de travail', icon:'📈', section:'future', active:false, collection:'workloads', relatedCollections:['players','teams','sessions'], screen:{type:'iframe', src:'pages/charge-travail.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:false, showOnDashboard:false, description:'Charge, volumes et ressentis.'}},
-  {id:'convocations', name:'Convocations', icon:'📣', section:'future', active:false, collection:'convocations', relatedCollections:['players','teams','matches'], screen:{type:'iframe', src:'pages/convocations.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR'], write:['ADMIN','RESPONSABLE'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:false, showOnDashboard:false, description:'Groupes, convocations et disponibilités.'}},
-  {id:'medical', name:'Suivi médical', icon:'🩺', section:'staff', active:true, collection:'injuries', relatedCollections:['players','teams','injuryUpdates','medicalAppointments','rehabRoutines','settings'], screen:{type:'iframe', src:'pages/suivi-medical.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN']}, settings:{showInNav:true, showOnDashboard:true, description:'Blessures, douleurs, rendez-vous et reprise.'}},
-  {id:'individualReports', name:'Bilans individuels', icon:'📝', section:'future', active:false, collection:'individualReports', relatedCollections:['players','teams','matches','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/bilans-individuels.html'}, permissions:{read:['ADMIN','RESPONSABLE','EDUCATEUR'], write:['ADMIN','RESPONSABLE','EDUCATEUR'], importExport:['ADMIN','RESPONSABLE']}, settings:{showInNav:false, showOnDashboard:false, description:'Bilans individuels staff.'}}
+  {id:'home', name:'Accueil', icon:'🏠', section:'staff', active:true, collection:'settings', screen:{type:'internal'}, permissions:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE','MEDICAL','OBSERVATEUR_STAFF','LECTURE']}, settings:{showInNav:true, showOnDashboard:false}},
+  {id:'stats', name:'Matchs', icon:'📊', section:'staff', active:true, collection:'matches', relatedCollections:['matchEvents','players','teams','settings'], screen:{type:'iframe', src:'pages/coach-stats.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Prise de statistiques et bilan match.'}},
+  {id:'presences', name:'Présences', icon:'✅', section:'staff', active:true, collection:'attendance', relatedCollections:['sessions','players','teams','settings'], screen:{type:'iframe', src:'pages/presences.html'}, permissions:{read:ROLES.sportRead, write:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE'], importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Suivi séances, statuts et charge.'}},
+  {id:'tests', name:'Tests', icon:'⚡', section:'staff', active:true, collection:'technicalTests', relatedCollections:['physicalTests','players','teams','settings'], screen:{type:'iframe', src:'pages/tests-techniques.html'}, permissions:{read:ROLES.sportRead, write:['ADMIN','RESPONSABLE_CATEGORIE','COACH','PREPARATEUR_ATHLETIQUE'], importExport:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE']}, settings:{showInNav:true, showOnDashboard:true, description:'Technique, progression et évaluations.'}},
+  {id:'tests-athletiques', name:'Tests athlétiques', icon:'🏃', section:'staff', active:true, collection:'physicalTests', relatedCollections:['players','teams','settings'], screen:{type:'iframe', src:'pages/tests-athletiques.html'}, permissions:{read:ROLES.sportRead, write:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE'], importExport:['ADMIN','RESPONSABLE_CATEGORIE','PREPARATEUR_ATHLETIQUE']}, settings:{showInNav:true, showOnDashboard:true, description:'VMI, vitesse, agilité, CMJ et bilans physiques branchés sur playerId.'}},
+  {id:'methodologie', name:'Bilans & planning', icon:'🧭', section:'staff', active:true, collection:'sessions', relatedCollections:['settings','teams'], screen:{type:'iframe', src:'pages/methodologie.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Méthodologie, calendrier et attendus.'}},
+  {id:'database', name:'Joueuses & base', icon:'🧩', section:'admin', active:true, collection:'players', relatedCollections:['teams','settings','changeLogs'], screen:{type:'iframe', src:'pages/admin-database.html'}, permissions:{read:ROLES.core, write:ROLES.core, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Corriger la base Firestore commune.'}},
+  {id:'dataHub', name:'Data Hub', icon:'🗄️', section:'admin', active:true, collection:'syncLogs', relatedCollections:['players','teams','matches','sessions','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/data-hub.html'}, permissions:{read:ROLES.core, write:ROLES.core, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Importer, simuler et synchroniser.'}},
+  {id:'cloud', name:'Cloud', icon:'☁️', section:'admin', active:true, collection:'syncLogs', relatedCollections:['settings','changeLogs'], screen:{type:'internal'}, permissions:{read:ROLES.core, write:ROLES.core, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Synchronisation Firebase, statut cloud et sauvegardes.'}},
+  {id:'admin', name:'Gestion utilisateurs', icon:'👥', section:'admin', active:true, collection:'staff_members', relatedCollections:['settings','changeLogs'], screen:{type:'internal'}, permissions:{read:['ADMIN'], write:['ADMIN'], importExport:['ADMIN']}, settings:{showInNav:true, showOnDashboard:true, description:'Rôles, équipes et comptes.'}},
+  {id:'injuries', name:'Blessures', icon:'🩹', section:'future', active:false, collection:'injuries', relatedCollections:['players','teams','settings'], screen:{type:'iframe', src:'pages/blessures.html'}, permissions:{read:ROLES.medicalRead, write:ROLES.medicalWrite, importExport:ROLES.medicalWrite}, settings:{showInNav:false, showOnDashboard:false, description:'Suivi blessures et indisponibilités.'}},
+  {id:'workload', name:'Charge de travail', icon:'📈', section:'future', active:false, collection:'workloads', relatedCollections:['players','teams','sessions'], screen:{type:'iframe', src:'pages/charge-travail.html'}, permissions:{read:ROLES.sportRead, write:ROLES.physicalWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Charge, volumes et ressentis.'}},
+  {id:'convocations', name:'Convocations', icon:'📣', section:'future', active:false, collection:'convocations', relatedCollections:['players','teams','matches'], screen:{type:'iframe', src:'pages/convocations.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Groupes, convocations et disponibilités.'}},
+  {id:'medical', name:'Suivi médical', icon:'🩺', section:'staff', active:true, collection:'injuries', relatedCollections:['players','teams','injuryUpdates','medicalAppointments','rehabRoutines','settings'], screen:{type:'iframe', src:'pages/suivi-medical.html'}, permissions:{read:ROLES.medicalRead, write:ROLES.medicalWrite, importExport:ROLES.medicalWrite}, settings:{showInNav:true, showOnDashboard:true, description:'Blessures, douleurs, rendez-vous et reprise.'}},
+  {id:'playerProfile', name:'Fiche individuelle', icon:'👤', section:'staff', active:true, collection:'players', relatedCollections:['attendance','sessions','matches','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps'], screen:{type:'iframe', src:'pages/player-profile.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Tableau de bord joueuse par playerId, saisons et comparaisons.'}},
+  {id:'teamProfile', name:'Fiche équipe', icon:'🛡️', section:'staff', active:true, collection:'teams', relatedCollections:['players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','workloads'], screen:{type:'iframe', src:'pages/team-profile.html'}, permissions:{read:ROLES.sportRead, write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:true, showOnDashboard:true, description:'Bilan complet équipe par teamId, résultats, effectif et tendances.'}},
+  {id:'individualReports', name:'Bilans individuels', icon:'📝', section:'future', active:false, collection:'individualReports', relatedCollections:['players','teams','matches','attendance','technicalTests','physicalTests'], screen:{type:'iframe', src:'pages/bilans-individuels.html'}, permissions:{read:['ADMIN','RESPONSABLE_CATEGORIE','COACH','OBSERVATEUR_STAFF','LECTURE'], write:ROLES.sportWrite, importExport:ROLES.core}, settings:{showInNav:false, showOnDashboard:false, description:'Bilans individuels staff.'}}
 ];
 
 function parseModuleOverrides(){
@@ -35,12 +48,12 @@ function moduleWithOverrides(module){
 }
 function moduleRegistry(){ return DEFAULT_MODULE_REGISTRY.map(moduleWithOverrides); }
 function getModule(id){ return moduleRegistry().find(module => module.id === id); }
-function moduleToTool(module){ return {title:module.name, emoji:module.icon, src:module.screen?.src || '', internal:module.screen?.type === 'internal', admin:module.section === 'admin' || module.permissions?.read?.every(role => ['ADMIN','RESPONSABLE'].includes(role)), module}; }
+function moduleToTool(module){ return {title:module.name, emoji:module.icon, src:module.screen?.src || '', internal:module.screen?.type === 'internal', admin:module.section === 'admin' || module.permissions?.read?.every(role => ['ADMIN','RESPONSABLE','RESPONSABLE_CATEGORIE'].includes(role)), module}; }
 function buildTools(){ return Object.fromEntries(moduleRegistry().filter(module => module.active !== false).map(module => [module.id, moduleToTool(module)])); }
 let tools = buildTools();
 
 let deferredPrompt = null;
-let firebaseFns = null, fbApp = null, auth = null, db = null, currentUser = null, currentProfile = null, authReady = false;
+let firebaseFns = null, fbApp = null, auth = null, db = null, currentUser = null, currentProfile = null, authReady = false, signingIn = false;
 // Prévu pour évoluer avec Firebase Auth custom claims. Aujourd'hui, le rôle vient du document staff_members.
 let currentUserRole = 'STAFF';
 let syncTimer = null;
@@ -48,6 +61,35 @@ let realtimeUnsub = null;
 let cloudWriteTimer = null;
 let applyingCloud = false;
 let lastCloudItemsHash = '';
+let adminAccessChoiceCache = null;
+const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
+const appDataCache = {
+  athleticRows:{rows:null, loadedAt:0},
+  playerProfiles:new Map(),
+  teamProfiles:new Map()
+};
+function cloneData(value){
+  if(typeof structuredClone === 'function') return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+}
+function debugPerfEnabled(){
+  try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; }
+}
+async function measureAsync(label, work){
+  if(!debugPerfEnabled()) return work();
+  const start = performance.now();
+  try{ return await work(); }
+  finally{ console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
+}
+function invalidateAppDataCaches(scope='all'){
+  if(scope === 'all' || scope === 'players') playersService()?.invalidatePlayersCache?.();
+  if(scope === 'all' || scope === 'athletic'){
+    appDataCache.athleticRows.rows = null;
+    appDataCache.athleticRows.loadedAt = 0;
+  }
+  if(scope === 'all' || scope === 'players' || scope === 'playerProfiles') appDataCache.playerProfiles.clear();
+  if(scope === 'all' || scope === 'players' || scope === 'teams' || scope === 'teamProfiles') appDataCache.teamProfiles.clear();
+}
 const CLIENT_ID = (() => {
   let id = localStorage.getItem('coachpulse:clientId');
   if(!id){ id = 'cp-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36); localStorage.setItem('coachpulse:clientId', id); }
@@ -80,23 +122,103 @@ function getCurrentUserRole(){
   if(service?.getRole) return service.getRole(currentProfile, currentUserRole);
   return (currentProfile?.role || currentUserRole || 'STAFF').toUpperCase();
 }
+function getCurrentPermissionLevel(){
+  const service = permissionsService();
+  if(service?.normalizePermission) return service.normalizePermission(null, currentProfile || {role:currentUserRole,status:'ACTIVE'});
+  return currentProfile?.permissionLevel || 'LECTEUR';
+}
 function isAdmin(){
   const service = permissionsService();
-  return service?.isAdminRole ? service.isAdminRole(getCurrentUserRole()) : ['ADMIN','RESPONSABLE'].includes(getCurrentUserRole());
+  return service?.canManageCoreData ? service.canManageCoreData(currentProfile || {role:currentUserRole,status:'ACTIVE'}) : ['ADMIN','RESPONSABLE','RESPONSABLE_CATEGORIE'].includes(getCurrentUserRole());
 }
 function isSuperAdmin(){
   const service = permissionsService();
-  return service?.isSuperAdminRole ? service.isSuperAdminRole(getCurrentUserRole()) : getCurrentUserRole() === 'ADMIN';
+  return service?.canManageUsers ? service.canManageUsers(currentProfile || {role:currentUserRole,status:'ACTIVE'}) : getCurrentUserRole() === 'ADMIN';
 }
 function hasModulePermission(module, action='read'){
   const service = permissionsService();
-  if(service?.canUseModule) return service.canUseModule(module, getCurrentUserRole(), action);
+  if(service?.canUseModule) return service.canUseModule(currentProfile || {role:currentUserRole,status:'ACTIVE'}, module, action);
   if(!module || module.active === false) return false;
   const roles = module.permissions?.[action] || module.permissions?.read || [];
   return roles.map(String).map(r => r.toUpperCase()).includes(getCurrentUserRole());
 }
 function canAccessTool(key){ return hasModulePermission(getModule(key), 'read'); }
-function guardAdminAction(label='Action réservée aux administrateurs'){
+function accessProfile(){
+  return currentProfile || {uid:currentUser?.uid || '', email:currentUser?.email || '', role:currentUserRole, status:'ACTIVE'};
+}
+function canViewModule(moduleId){ return hasModulePermission(getModule(moduleId), 'read'); }
+function canEditModule(moduleId){ return hasModulePermission(getModule(moduleId), 'write'); }
+function canDeleteData(moduleId){
+  const service = permissionsService();
+  return service?.canDeleteData ? service.canDeleteData(accessProfile(), moduleId) : getCurrentUserRole() === 'ADMIN';
+}
+function canAccessTeamId(teamId){
+  const service = permissionsService();
+  return service?.canAccessTeam ? service.canAccessTeam(accessProfile(), teamId) : true;
+}
+function canAccessPlayerRecord(player){
+  const service = permissionsService();
+  return service?.canAccessPlayer ? service.canAccessPlayer(accessProfile(), player) : true;
+}
+function getAuthorizedTeamIds(){
+  const service = permissionsService();
+  return service?.getAuthorizedTeamIds ? service.getAuthorizedTeamIds(accessProfile()) : [];
+}
+function canAccessRecord(record){
+  const service = permissionsService();
+  return service?.canAccessRecord ? service.canAccessRecord(accessProfile(), record) : true;
+}
+function filterAuthorizedTeams(teams=[]){
+  const service = permissionsService();
+  return service?.filterAuthorizedTeams ? service.filterAuthorizedTeams(accessProfile(), teams) : teams;
+}
+function filterAuthorizedPlayers(players=[]){
+  const service = permissionsService();
+  return service?.filterAuthorizedPlayers ? service.filterAuthorizedPlayers(accessProfile(), players) : players;
+}
+function filterAuthorizedRecords(records=[]){
+  const service = permissionsService();
+  return service?.filterAuthorizedRecords ? service.filterAuthorizedRecords(accessProfile(), records) : records;
+}
+function normalizeProfileAccessFields(profile={}){
+  const teams = [...new Set([
+    ...(profile.authorizedTeamIds || []),
+    ...(profile.teamIds || []),
+    ...(profile.allowedTeamIds || [])
+  ].map(v => String(v || '').trim()).filter(Boolean))];
+  profile.authorizedTeamIds = teams;
+  profile.teamIds = teams;
+  profile.allowedTeamIds = teams;
+  return profile;
+}
+function accessContext(){
+  const profile = accessProfile();
+  const authorizedTeamIds = getAuthorizedTeamIds();
+  return {
+    type:'coachpulse-access-context',
+    user:{uid:currentUser?.uid || '', email:currentUser?.email || ''},
+    profile:{
+      uid:profile.uid || currentUser?.uid || '',
+      email:profile.email || currentUser?.email || '',
+      name:profile.name || currentUser?.displayName || currentUser?.email || '',
+      role:getCurrentUserRole(),
+      roleLabel:profile.roleLabel || permissionsService()?.roleLabel?.(getCurrentUserRole()) || getCurrentUserRole(),
+      permissionLevel:getCurrentPermissionLevel(),
+      permissionLabel:permissionsService()?.permissionLabel?.(getCurrentPermissionLevel()) || getCurrentPermissionLevel(),
+      status:profile.status || 'ACTIVE',
+      authorizedTeamIds,
+      teamIds:authorizedTeamIds,
+      allowedTeamIds:authorizedTeamIds,
+      allowedModules:profile.allowedModules || [],
+      modulePermissions:profile.modulePermissions || {}
+    },
+    modules:Object.fromEntries(moduleRegistry().map(module => [module.id, {read:hasModulePermission(module, 'read'), write:hasModulePermission(module, 'write'), delete:canDeleteData(module.id)}]))
+  };
+}
+function notifyFramesAccessUpdated(){
+  try{ frame?.contentWindow?.postMessage(accessContext(), '*'); }catch(_e){}
+}
+function guardAdminAction(label='Action réservée aux éditeurs autorisés'){
   if(isAdmin()) return true;
   alert(label);
   return false;
@@ -119,13 +241,14 @@ function firestoreServiceContext(){
 function sortPlayersForApp(players){
   const service = playersService();
   if(service?.dedupePlayers) return service.dedupePlayers(players);
-  return [...players].sort((a,b) => String(a.nom||a.displayName||'').localeCompare(String(b.nom||b.displayName||''), 'fr'));
+  const label = p => String(`${p.prenom || ''} ${p.nom || ''}`.trim() || p.displayName || '');
+  return [...players].sort((a,b) => label(a).localeCompare(label(b), 'fr'));
 }
 
 function visibleModules(section){
   const service = permissionsService();
   const modules = moduleRegistry();
-  if(service?.visibleModules) return service.visibleModules(modules, getCurrentUserRole(), section);
+  if(service?.visibleModules) return service.visibleModules(modules, currentProfile || {role:currentUserRole,status:'ACTIVE'}, section);
   return modules.filter(module => module.active !== false && module.settings?.showInNav !== false && (!section || module.section === section) && hasModulePermission(module, 'read'));
 }
 function renderModuleShell(){
@@ -166,11 +289,13 @@ function updateRoleUi(){
   renderModuleShell();
   shell.classList.toggle('role-admin', isAdmin());
   $$('.admin-only,.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-  const roleLabel = isAdmin() ? 'Admin' : 'Staff';
+  const service = permissionsService();
+  const roleLabel = service?.roleLabel ? service.roleLabel(currentUserRole) : (isAdmin() ? 'Admin' : 'Staff');
+  const permissionLabel = service?.permissionLabel ? service.permissionLabel(getCurrentPermissionLevel()) : getCurrentPermissionLevel();
   const dashRole = $('#dashboardRole');
   const dashAccess = $('#dashboardAccess');
-  if(dashRole) dashRole.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${currentUserRole}`;
-  if(dashAccess) dashAccess.textContent = roleLabel;
+  if(dashRole) dashRole.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${roleLabel}`;
+  if(dashAccess) dashAccess.textContent = permissionLabel;
 }
 
 function setLocked(locked){
@@ -187,8 +312,9 @@ function setLocked(locked){
     shell.classList.remove('locked');
     authGate.classList.add('hidden');
     topUser.classList.remove('hidden');
-    topUser.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${currentProfile?.role || 'STAFF'}`;
+    topUser.textContent = `${currentProfile?.name || currentUser?.email || 'Staff'} · ${currentProfile?.roleLabel || currentProfile?.role || 'Staff'} · ${currentProfile?.permissionLabel || getCurrentPermissionLevel()}`;
     updateRoleUi();
+    notifyFramesAccessUpdated();
     updateDashboard();
   }
 }
@@ -196,22 +322,39 @@ function setLocked(locked){
 function showHome(){
   frame.classList.add('hidden');
   frame.removeAttribute('src');
+  cloudPanel.classList.remove('open');
   homeView.classList.remove('hidden');
   if(adminView) adminView.classList.add('hidden');
 }
 function showAdmin(){
-  if(!isAdmin()) { alert('Accès réservé aux Admins / Responsables.'); return showHome(); }
+  if(!isSuperAdmin()) { alert('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.'); return showHome(); }
+  ensureUserAdminFields();
+  refreshAdminAccessPickers();
   frame.classList.add('hidden');
   frame.removeAttribute('src');
+  cloudPanel.classList.remove('open');
   homeView.classList.add('hidden');
   adminView.classList.remove('hidden');
   loadMembers();
+}
+function openCloudPanel(){
+  if(!requireAuth()) return setLocked(true);
+  if(!guardAdminAction('Le panneau Cloud est réservé aux administrateurs.')) return;
+  frame.classList.add('hidden');
+  frame.removeAttribute('src');
+  homeView.classList.add('hidden');
+  if(adminView) adminView.classList.add('hidden');
+  cloudPanel.classList.add('open');
+  $('#staffEmail').value = currentUser?.email || '';
+  $('#staffName').value = currentProfile?.name || '';
+  $('#staffRole').value = currentProfile?.role || '';
+  if(!window.matchMedia('(max-width:1100px)').matches) shell.classList.add('collapsed');
 }
 
 function routeTo(key){
   if(!requireAuth()) { setLocked(true); return; }
   if(!canAccessTool(key)){
-    alert('Accès réservé aux administrateurs.');
+    alert('Accès non autorisé.');
     key = 'home';
   }
   let item = tools[key];
@@ -222,12 +365,15 @@ function routeTo(key){
   $$('.nav-link,.quick-card').forEach(el => el.classList.toggle('active', el.dataset.tool === key));
   if(key === 'home') showHome();
   else if(key === 'admin') showAdmin();
+  else if(key === 'cloud') openCloudPanel();
   else {
+    cloudPanel.classList.remove('open');
     homeView.classList.add('hidden');
     if(adminView) adminView.classList.add('hidden');
     frame.classList.remove('hidden');
     const target = new URL(item.src, location.href).href;
     if(frame.src !== target) frame.src = item.src;
+    else notifyFramesAccessUpdated();
     if(!window.matchMedia('(max-width:1100px)').matches) shell.classList.add('collapsed');
   }
   closeDrawer();
@@ -243,19 +389,81 @@ async function loadFirebaseFns(){
   return firebaseFns;
 }
 
+function isSeedAdminEmail(email=''){
+  const value = String(email || '').toLowerCase();
+  return [
+    'maxence.boisdron',
+    'sylvain.ostard@gmail.com'
+  ].some(fragment => value.includes(fragment));
+}
+
+function isAdminLikeProfile(profile={}){
+  if(profile?.isAdmin === true || profile?.admin === true) return true;
+  const values = [
+    profile?.role,
+    profile?.legacyRole,
+    profile?.businessRole,
+    profile?.userRole,
+    profile?.permissionLevel,
+    profile?.permission,
+    profile?.accessLevel,
+    profile?.roleLabel,
+    profile?.permissionLabel
+  ];
+  return values.some(value => /^(ADMIN|ADMINISTRATEUR|SUPER_ADMIN)$/i.test(String(value || '').trim()));
+}
+
+function applyAdminProfileRepair(profile, service){
+  const modules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
+  profile.legacyRole = 'ADMIN';
+  profile.role = 'ADMIN';
+  profile.roleLabel = 'Admin';
+  profile.permissionLevel = 'ADMIN';
+  profile.permissionLabel = service?.permissionLabel ? service.permissionLabel('ADMIN') : 'Admin';
+  profile.allowedModules = modules;
+  profile.status = 'ACTIVE';
+  return profile;
+}
+
 async function ensureUserProfile(user){
   const ref = firebaseFns.doc(db, 'staff_members', user.uid);
   const snap = await firebaseFns.getDoc(ref);
+  const service = permissionsService();
+  const seedAdmin = isSeedAdminEmail(user.email);
   if(snap.exists()){
-    currentProfile = {uid:user.uid, ...snap.data()};
-    if(currentProfile.status === 'ARCHIVED') throw new Error('Compte archivé. Contacte un administrateur.');
-    await firebaseFns.setDoc(ref, {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email}, {merge:true});
+    currentProfile = normalizeProfileAccessFields({uid:user.uid, ...snap.data()});
+    const legacyRole = currentProfile.legacyRole || currentProfile.role || currentUserRole;
+    currentProfile.legacyRole = legacyRole;
+    currentProfile.role = service?.normalizeRole ? service.normalizeRole(currentProfile.businessRole || currentProfile.role) : currentProfile.role;
+    currentProfile.roleLabel = service?.roleLabel ? service.roleLabel(currentProfile.role) : currentProfile.role;
+    currentProfile.permissionLevel = service?.normalizePermission ? service.normalizePermission(currentProfile.permissionLevel, {...currentProfile, legacyRole}) : (currentProfile.permissionLevel || 'LECTEUR');
+    currentProfile.permissionLabel = service?.permissionLabel ? service.permissionLabel(currentProfile.permissionLevel) : currentProfile.permissionLevel;
+    if(seedAdmin || isAdminLikeProfile(currentProfile)) applyAdminProfileRepair(currentProfile, service);
+    if(service?.normalizePermission && currentProfile.permissionLevel === 'ADMIN' && (!Array.isArray(currentProfile.allowedModules) || !currentProfile.allowedModules.length)){
+      currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
+    }
+    if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(currentProfile.status || '').toUpperCase())) throw new Error('Compte inactif. Contacte un administrateur.');
+    const loginPatch = {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email};
+    if(seedAdmin || isAdminLikeProfile(currentProfile)){
+      Object.assign(loginPatch, {legacyRole, role:currentProfile.role, roleLabel:currentProfile.roleLabel, permissionLevel:currentProfile.permissionLevel, permissionLabel:currentProfile.permissionLabel, allowedModules:currentProfile.allowedModules || [], status:currentProfile.status || 'ACTIVE'});
+    }else{
+      Object.assign(loginPatch, {
+        authorizedTeamIds:currentProfile.authorizedTeamIds || [],
+        teamIds:currentProfile.teamIds || [],
+        allowedTeamIds:currentProfile.allowedTeamIds || []
+      });
+    }
+    await firebaseFns.setDoc(ref, loginPatch, {merge:true});
     return currentProfile;
   }
   const email = (user.email || '').toLowerCase();
-  const role = (email.includes('maxence.boisdron') || email.endsWith('@asse.fr')) ? 'ADMIN' : 'EDUCATEUR';
-  currentProfile = {uid:user.uid, email:user.email, name:user.displayName || user.email, role, scope:'CoachPulse', status:'ACTIVE', createdAt:new Date().toISOString()};
-  await firebaseFns.setDoc(ref, {...currentProfile, createdAt:firebaseFns.serverTimestamp(), lastLoginAt:firebaseFns.serverTimestamp()}, {merge:true});
+  const isSeedAdmin = isSeedAdminEmail(email);
+  const role = isSeedAdmin ? 'DIRIGEANT' : 'ENTRAINEUR';
+  const permissionLevel = isSeedAdmin ? 'ADMIN' : 'LECTEUR';
+  currentProfile = service?.defaultProfile ? service.defaultProfile(user, role, permissionLevel) : {uid:user.uid, email:user.email, name:user.displayName || user.email, role, permissionLevel, scope:'CoachPulse', status:'ACTIVE'};
+  normalizeProfileAccessFields(currentProfile);
+  if(isSeedAdmin) applyAdminProfileRepair(currentProfile, service);
+  await firebaseFns.setDoc(ref, {...currentProfile, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp(), lastLoginAt:firebaseFns.serverTimestamp()}, {merge:true});
   return currentProfile;
 }
 
@@ -273,17 +481,19 @@ async function initFirebase(){
       if(user){
         try{
           await ensureUserProfile(user);
-          setLocked(false);
-          startRealtimeSync();
-          await syncCloud(false);
-          await pullCentralPlayersToLocal(false).catch(()=>{});
-          const last = localStorage.getItem('coachpulse:lastTool') || 'home';
-          routeTo((last === 'admin' && !isAdmin()) ? 'home' : last);
         }catch(e){
           $('#authError').textContent = cleanError(e);
           await firebaseFns.signOut(auth);
           setLocked(true);
+          return;
         }
+        setLocked(false);
+        try{ startRealtimeSync(); }catch(e){ console.warn('Realtime sync unavailable after login', e); }
+        await syncCloud(false).catch(e => console.warn('Cloud sync unavailable after login', e));
+        await pullCentralPlayersToLocal(false).catch(e => console.warn('Central players pull unavailable after login', e));
+        try{ purgeUnauthorizedLocalData(); }catch(e){ console.warn('Local data purge unavailable after login', e); }
+        const last = localStorage.getItem('coachpulse:lastTool') || 'home';
+        routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
       } else {
         currentProfile = null;
         stopRealtimeSync();
@@ -301,15 +511,35 @@ async function initFirebase(){
 
 async function signInStaff(){
   $('#authError').textContent = '';
+  if(signingIn) return;
+  signingIn = true;
+  const btn = $('#loginBtn');
+  if(btn) btn.disabled = true;
   try{
     if(!auth) await initFirebase();
     await firebaseFns.signInWithEmailAndPassword(auth, $('#loginEmail').value.trim(), $('#loginPassword').value);
   }catch(e){
     $('#authError').textContent = 'Connexion impossible : ' + cleanError(e);
+  }finally{
+    signingIn = false;
+    if(btn) btn.disabled = false;
   }
 }
 
 function cleanError(e){
+  const raw = String(e?.code || e?.message || e || '');
+  if(raw.includes('auth/quota-exceeded') || raw.includes('quota has been exceeded')){
+    return 'Quota Firebase dépassé. Attends quelques minutes puis réessaie. Si le message reste présent, vérifie dans Firebase / Google Cloud que le quota Identity Toolkit ou Authentication n’est pas bloqué.';
+  }
+  if(raw.includes('auth/too-many-requests')){
+    return 'Trop de tentatives de connexion. Attends quelques minutes avant de réessayer, puis vérifie le mot de passe.';
+  }
+  if(raw.includes('auth/invalid-credential') || raw.includes('auth/wrong-password') || raw.includes('auth/user-not-found')){
+    return 'Email ou mot de passe incorrect.';
+  }
+  if(raw.includes('auth/network-request-failed')){
+    return 'Connexion réseau impossible. Vérifie Internet puis réessaie.';
+  }
   const msg = (e && e.message) ? e.message : String(e || 'Erreur inconnue');
   return msg.replace('Firebase: ', '').replace(/\s*\([^)]*\)\.?/g, '').trim();
 }
@@ -323,6 +553,38 @@ function collectLocalStorage(){
     data[key] = localStorage.getItem(key);
   }
   return data;
+}
+function purgeUnauthorizedLocalData(){
+  const filterPlayers = rows => {
+    if(!Array.isArray(rows)) return [];
+    return filterAuthorizedPlayers(rows).filter(Boolean);
+  };
+  const scrubJsonArray = key => {
+    try{
+      const next = filterPlayers(JSON.parse(localStorage.getItem(key) || '[]'));
+      localStorage.setItem(key, JSON.stringify(next));
+    }catch(_e){ localStorage.removeItem(key); }
+  };
+  scrubJsonArray('coachpulse:centralPlayers');
+  scrubJsonArray('coachpulse:customPlayers');
+  const selectedPlayerId = localStorage.getItem('coachpulse:playerProfile:selectedPlayerId');
+  if(selectedPlayerId){
+    const players = parseStoredJson('coachpulse:centralPlayers', []).concat(parseStoredJson('coachpulse:customPlayers', []));
+    if(!players.some(player => (player.playerId || player.id) === selectedPlayerId)) localStorage.removeItem('coachpulse:playerProfile:selectedPlayerId');
+  }
+}
+function clearSensitiveLocalData(){
+  [
+    'coachpulse:centralPlayers',
+    'coachpulse:customPlayers',
+    'coachpulse:playerProfile:selectedPlayerId',
+    'coachpulse:medicalProfiles',
+    'coachStatsV13Rows',
+    'coachStatsV170',
+    'presenceSeanceV3_6_Excel',
+    'methodo_events_v24'
+  ].forEach(key => localStorage.removeItem(key));
+  Object.keys(localStorage).filter(key => key.startsWith('coachpulse:autoBackup')).forEach(key => localStorage.removeItem(key));
 }
 function buildPayload(){
   return {
@@ -359,11 +621,18 @@ function updateDashboard(){
 }
 function snapshotLocalData(options={}){
   const payload = buildPayload();
-  localStorage.setItem('coachpulse:autoBackup:v6', JSON.stringify(payload));
-  localStorage.setItem('coachpulse:lastAutoSave', payload.savedAt);
+  try{
+    localStorage.setItem('coachpulse:autoBackup:v6', JSON.stringify(payload));
+    localStorage.setItem('coachpulse:lastAutoSave', payload.savedAt);
+  }catch(e){
+    console.warn('Sauvegarde locale indisponible', e);
+    updateSyncState('Stockage local saturé · cloud prioritaire');
+  }
   if(!options.fromCloud && currentUser){
     const lastCloud = localStorage.getItem('coachpulse:lastCloudSync');
-    if(!lastCloud || new Date(payload.savedAt) > new Date(lastCloud)) localStorage.setItem('coachpulse:pendingSync','1');
+    if(!lastCloud || new Date(payload.savedAt) > new Date(lastCloud)){
+      try{ localStorage.setItem('coachpulse:pendingSync','1'); }catch(e){ console.warn('Marqueur de synchronisation indisponible', e); }
+    }
     scheduleCloudSync();
   }
   updateCloudKpis();
@@ -377,7 +646,7 @@ function hashItems(items){
 }
 function scheduleCloudSync(delay=900){
   if(applyingCloud || !currentUser) return;
-  localStorage.setItem('coachpulse:pendingSync','1');
+  try{ localStorage.setItem('coachpulse:pendingSync','1'); }catch(e){ console.warn('Marqueur de synchronisation indisponible', e); }
   updateSyncState('🔄 Synchronisation en attente...');
   clearTimeout(cloudWriteTimer);
   cloudWriteTimer = setTimeout(() => syncCloud(false), delay);
@@ -430,11 +699,15 @@ function startRealtimeSync(){
   });
 }
 function notifyFramesCloudUpdated(){
+  invalidateAppDataCaches('all');
   try{ frame?.contentWindow?.postMessage({type:'coachpulse-cloud-updated'}, '*'); }catch(_e){}
+  notifyFramesAccessUpdated();
 }
 function notifyFramesPlayersUpdated(){
+  invalidateAppDataCaches('all');
   try{ frame?.contentWindow?.postMessage({type:'coachpulse-players-updated'}, '*'); }catch(_e){}
   try{ frame?.contentWindow?.postMessage({type:'coachpulse-cloud-updated'}, '*'); }catch(_e){}
+  notifyFramesAccessUpdated();
 }
 function installFrameLocalStorageWatcher(){
   try{
@@ -455,6 +728,7 @@ function installFrameLocalStorageWatcher(){
       });
     };
     patch();
+    notifyFramesAccessUpdated();
   }catch(_e){ /* certains navigateurs bloquent l'injection : la synchro périodique prend le relais */ }
 }
 
@@ -473,7 +747,7 @@ function downloadText(content, filename, type='text/plain;charset=utf-8'){
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
-const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','staff','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
+const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','staff_members','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
 function parseStoredJson(key, fallback){
   try{ return JSON.parse(localStorage.getItem(key) || ''); }catch(_e){ return fallback; }
 }
@@ -481,18 +755,38 @@ function stableFirestoreId(){
   return slugify([].slice.call(arguments).filter(Boolean).join('-')).slice(0,120);
 }
 function normalizeTeamFromCategory(category){
+  const service = playersService();
+  if(service?.normalizeTeamFromCategory) return service.normalizeTeamFromCategory(category);
+  const teamService = teamsService();
+  if(teamService?.categoryForSubCategory) return teamService.categoryForSubCategory(category);
   const c = String(category || '').toUpperCase();
   const n = Number((c.match(/\d+/)||[])[0] || 0);
-  if(c.includes('R1') || c.includes('SENIOR') || c.includes('SÉNIOR')) return 'R1';
+  if(c.includes('R1') || c.includes('SENIOR') || c.includes('SÉNIOR')) return 'SENIORS';
   if(!n) return c || 'Non renseignee';
-  if(n <= 7) return 'U6-U7';
-  if(n <= 9) return 'U8-U9';
-  if(n <= 11) return 'U10-U11';
-  if(n <= 14) return 'U12-U13-U14';
-  if(n <= 16) return 'U14-U15-U16';
+  if(n <= 7) return 'U7';
+  if(n <= 9) return 'U9';
+  if(n <= 11) return 'U11';
+  if(n <= 14) return 'U13';
+  if(n <= 16) return 'U16';
   return 'U19';
 }
+function playerSeasonSnapshot(player={}, season=seasonFromDate()){
+  const service = playersService();
+  if(service?.playerSeasonSnapshot) return service.playerSeasonSnapshot(player, season);
+  const p = service?.playerForSeason ? service.playerForSeason(player, season) : player;
+  return {
+    season,
+    categorie:p?.categorie || p?.category || '',
+    subCategory:p?.subCategory || p?.sousCategorie || '',
+    sousCategorie:p?.subCategory || p?.sousCategorie || '',
+    team:p?.team || p?.equipe || '',
+    teamId:p?.teamId || teamsService()?.canonicalTeamId?.(p?.team || p?.equipe || p?.categorie || p?.category || '') || ''
+  };
+}
 function normalizePlayer(raw={}){
+  const service = playersService();
+  if(service?.normalizePlayer) return service.normalizePlayer(raw);
+  const teamService = teamsService();
   const full = String(raw.joueuse || raw.name || raw.fullName || '').trim();
   let prenom = String(raw.prenom || raw.firstName || '').trim();
   let nom = String(raw.nom || raw.lastName || '').trim();
@@ -511,13 +805,173 @@ function normalizePlayer(raw={}){
   const subCategory = String(raw.subCategory || raw.sousCategorie || categorie || '').trim();
   const team = String(raw.team || raw.equipe || normalizeTeamFromCategory(subCategory || categorie)).trim();
   const importedId = raw.id && !String(raw.id).startsWith('manual-') ? raw.id : '';
-  const playerId = raw.playerId || importedId || stableFirestoreId('player', nom, prenom, categorie, subCategory);
+  const birth = raw.birth || raw.dateNaissance || raw.birthDate || raw.annee || raw.age || '';
+  const playerId = (nom || prenom) ? stableFirestoreId('player', prenom, nom, birth || 'no-birth') : (raw.playerId || importedId);
   return {
-    playerId, id:playerId, prenom, nom:String(nom || '').toUpperCase(), displayName:[String(nom || '').toUpperCase(), prenom].filter(Boolean).join(' ').trim(),
-    categorie, subCategory, team, teamId:stableFirestoreId('team', team || categorie || 'global'),
-    foot:raw.foot || raw.pied || '', birth:raw.birth || raw.annee || raw.age || '', photo:raw.photo || '',
+    playerId, id:playerId, prenom:String(prenom || '').toUpperCase(), nom:String(nom || '').toUpperCase(), displayName:[prenom, String(nom || '').toUpperCase()].filter(Boolean).join(' ').trim().toUpperCase(),
+    categorie, subCategory, team, teamId:teamService?.canonicalTeamId?.(team || categorie) || stableFirestoreId('team', team || categorie || 'global'),
+    foot:raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.preferredFoot || raw.strongFoot || '', nationalite:raw.nationalite || raw.nationalité || raw.nationality || raw.country || raw.pays || '', nationality:raw.nationality || raw.nationalite || raw.nationalité || raw.country || raw.pays || '', birth, dateNaissance:raw.dateNaissance || birth, photo:raw.photo || '',
     source:raw.source || 'Migration CoachPulse', status:raw.status || 'ACTIVE'
   };
+}
+const TECHNICAL_PLAYER_HINTS_KEY = 'coachpulse:technicalPlayerFootHints';
+function technicalFootValue(raw={}){
+  return String(raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.piedFortLabel || raw.preferredFoot || raw.preferredFootLabel || raw.strongFoot || raw.strongFootLabel || raw.dominantFoot || '').trim();
+}
+function technicalNationalityValue(raw={}){
+  return String(raw.nationalite || raw.nationalité || raw.nationality || raw.nationalityLabel || raw.country || raw.countryName || raw.pays || '').trim();
+}
+function normalizeTechnicalPlayerHint(raw={}){
+  const foot = technicalFootValue(raw);
+  const nationalite = technicalNationalityValue(raw);
+  if(!foot && !nationalite) return null;
+  const normalized = normalizePlayer({...raw, foot, nationalite});
+  return {
+    playerId:normalized.playerId || raw.playerId || raw.id || '',
+    id:normalized.playerId || raw.playerId || raw.id || '',
+    nom:normalized.nom || raw.nom || '',
+    prenom:normalized.prenom || raw.prenom || '',
+    displayName:normalized.displayName || raw.displayName || raw.label || raw.playerName || '',
+    dateNaissance:normalized.dateNaissance || raw.dateNaissance || raw.birth || '',
+    foot,
+    pied:foot,
+    meilleurPiedLabel:foot,
+    nationalite
+  };
+}
+function technicalHintText(value=''){
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+function technicalHintDate(value=''){
+  return String(value || '').replace(/\D+/g, '');
+}
+function technicalHintKeys(raw={}){
+  const normalized = normalizePlayer(raw);
+  const id = normalized.playerId || raw.playerId || raw.id || '';
+  const nom = technicalHintText(normalized.nom || raw.nom || raw.lastName);
+  const prenom = technicalHintText(normalized.prenom || raw.prenom || raw.firstName);
+  const birth = technicalHintDate(normalized.dateNaissance || normalized.birth || raw.dateNaissance || raw.birth || raw.birthDate);
+  return [
+    id,
+    raw.playerId,
+    raw.id,
+    nom && prenom && birth ? `identity:${nom}|${prenom}|${birth}` : '',
+    nom && prenom ? `person:${nom}|${prenom}` : ''
+  ].filter(Boolean).map(String);
+}
+function readTechnicalPlayerFootHints(){
+  return parseStoredJson(TECHNICAL_PLAYER_HINTS_KEY, []).map(normalizeTechnicalPlayerHint).filter(Boolean);
+}
+function mergeTechnicalPlayerFootHints(hints=[]){
+  const byId = new Map();
+  readTechnicalPlayerFootHints().forEach(hint => {
+    technicalHintKeys(hint).forEach(key => {
+      if(key && !byId.has(key)) byId.set(key, hint);
+    });
+  });
+  hints.map(normalizeTechnicalPlayerHint).filter(Boolean).forEach(hint => {
+    const keys = technicalHintKeys(hint);
+    const primaryKey = keys.find(Boolean);
+    if(!primaryKey) return;
+    const previous = keys.map(key => byId.get(key)).find(Boolean) || {};
+    const merged = {...previous, ...hint, foot:hint.foot || previous.foot || '', pied:hint.pied || previous.pied || '', meilleurPiedLabel:hint.meilleurPiedLabel || previous.meilleurPiedLabel || '', nationalite:hint.nationalite || previous.nationalite || ''};
+    keys.forEach(key => {
+      if(key) byId.set(key, merged);
+    });
+  });
+  const merged = [...new Set(byId.values())];
+  try{ localStorage.setItem(TECHNICAL_PLAYER_HINTS_KEY, JSON.stringify(merged)); }catch(_e){}
+  return merged;
+}
+function extractTechnicalDataFromHtml(html=''){
+  const marker = 'const DATA=';
+  const start = html.indexOf(marker);
+  if(start < 0) return null;
+  const open = html.indexOf('{', start);
+  if(open < 0) return null;
+  let depth = 0, inString = false, escape = false;
+  for(let i = open; i < html.length; i += 1){
+    const char = html[i];
+    if(inString){
+      if(escape){ escape = false; continue; }
+      if(char === '\\'){ escape = true; continue; }
+      if(char === '"') inString = false;
+      continue;
+    }
+    if(char === '"'){ inString = true; continue; }
+    if(char === '{') depth += 1;
+    if(char === '}'){
+      depth -= 1;
+      if(depth === 0) return JSON.parse(html.slice(open, i + 1));
+    }
+  }
+  return null;
+}
+let technicalPlayerFootHintsCache = null;
+async function technicalPlayerFootHints(){
+  if(technicalPlayerFootHintsCache) return technicalPlayerFootHintsCache;
+  let hints = readTechnicalPlayerFootHints();
+  try{
+    const response = await fetch('pages/tests-techniques.html', {cache:'no-store'});
+    const html = await response.text();
+    const data = extractTechnicalDataFromHtml(html);
+    const fromFile = Array.isArray(data?.players) ? data.players.map(normalizeTechnicalPlayerHint).filter(Boolean) : [];
+    hints = mergeTechnicalPlayerFootHints([...hints, ...fromFile]);
+  }catch(_e){}
+  technicalPlayerFootHintsCache = hints;
+  return hints;
+}
+async function technicalFirestorePlayerFootHints(){
+  if(!db || !firebaseFns?.getDocs || !firebaseFns?.collection) return [];
+  const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'technicalTests'));
+  const hints = [];
+  snap.forEach(docSnap => {
+    const data = docSnap.data() || {};
+    const snapshot = data.playerSnapshot || data.player || {};
+    const source = {...snapshot, ...data};
+    const foot = technicalFootValue(source) || technicalFootValue(snapshot);
+    const nationalite = technicalNationalityValue(source) || technicalNationalityValue(snapshot);
+    if(!foot && !nationalite) return;
+    hints.push({
+      playerId:data.playerId || snapshot.playerId || data.id || '',
+      id:data.playerId || snapshot.playerId || data.id || '',
+      nom:snapshot.nom || data.nom || data.lastName || '',
+      prenom:snapshot.prenom || data.prenom || data.firstName || '',
+      displayName:snapshot.displayName || data.playerName || data.displayName || '',
+      dateNaissance:snapshot.dateNaissance || data.dateNaissance || data.birth || data.birthDate || '',
+      foot,
+      pied:foot,
+      meilleurPiedLabel:foot,
+      nationalite
+    });
+  });
+  return mergeTechnicalPlayerFootHints(hints);
+}
+function playerHintKey(raw={}){
+  const normalized = normalizePlayer(raw);
+  return normalized.playerId || raw.playerId || raw.id || stableFirestoreId('player', raw.prenom || raw.firstName || '', raw.nom || raw.lastName || '', raw.dateNaissance || raw.birth || 'no-birth');
+}
+function enrichPlayersWithTechnicalFootHints(players=[], hints=readTechnicalPlayerFootHints()){
+  const byId = new Map();
+  hints.forEach(hint => {
+    technicalHintKeys(hint).forEach(key => {
+      if(key && !byId.has(key)) byId.set(key, hint);
+    });
+  });
+  return players.map(player => {
+    const hint = technicalHintKeys(player).map(key => byId.get(key)).find(Boolean) || byId.get(playerHintKey(player));
+    if(!hint) return player;
+    const foot = player.foot || player.pied || player.meilleurPiedLabel || player.meilleurPied || player.piedFort || player.piedFortLabel || player.preferredFoot || player.preferredFootLabel || player.strongFoot || player.strongFootLabel || player.dominantFoot || hint.foot || hint.pied || hint.meilleurPiedLabel || hint.piedFort || '';
+    const nationalite = player.nationalite || player.nationalité || player.nationality || player.nationalityLabel || player.country || player.countryName || player.pays || hint.nationalite || hint.nationality || '';
+    return {
+      ...player,
+      foot,
+      pied:player.pied || foot,
+      meilleurPiedLabel:player.meilleurPiedLabel || foot,
+      nationalite,
+      nationality:player.nationality || nationalite
+    };
+  });
 }
 function addDoc(map, collection, id, data){
   if(!id) return;
@@ -525,15 +979,95 @@ function addDoc(map, collection, id, data){
   const previous = map[collection].get(id) || {};
   map[collection].set(id, {...previous, ...data, id});
 }
+function profileAliasKey(value){
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+function rowsMatchingProfileAliases(rows=[], aliases=[]){
+  const exactAliases = new Set(aliases.map(value => String(value || '').trim()).filter(Boolean));
+  const nameAliases = new Set([...exactAliases].map(profileAliasKey).filter(Boolean));
+  return rows.filter(Boolean).filter(row => {
+    const candidates = [
+      row.playerId,
+      row.id,
+      row.playerID,
+      row.player_id,
+      row.legacyPlayerId,
+      row.oldPlayerId,
+      row.previousPlayerId,
+      row.playerKey,
+      row.playerRef,
+      row.externalId,
+      row.playerName,
+      row.joueuse,
+      row.name,
+      row.nom,
+      row.prenom,
+      row.displayName,
+      row.fullName,
+      [row.prenom, row.nom].filter(Boolean).join(' '),
+      [row.nom, row.prenom].filter(Boolean).join(' '),
+      row.playerSnapshot?.playerId,
+      row.playerSnapshot?.id,
+      row.playerSnapshot?.playerName,
+      row.playerSnapshot?.displayName,
+      row.playerSnapshot?.nom,
+      row.playerSnapshot?.prenom,
+      [row.playerSnapshot?.prenom, row.playerSnapshot?.nom].filter(Boolean).join(' '),
+      [row.playerSnapshot?.nom, row.playerSnapshot?.prenom].filter(Boolean).join(' '),
+      row.player?.playerId,
+      row.player?.id,
+      row.player?.playerName,
+      row.player?.displayName,
+      [row.player?.prenom, row.player?.nom].filter(Boolean).join(' '),
+      [row.player?.nom, row.player?.prenom].filter(Boolean).join(' ')
+    ].map(value => String(value || '').trim()).filter(Boolean);
+    return candidates.some(value => exactAliases.has(value) || nameAliases.has(profileAliasKey(value)));
+  });
+}
+function normalizeProfileTechnicalRows(rows=[]){
+  return rows.map((row, idx) => {
+    const sourcePlayerId = String(row.playerId || row.id || '').trim();
+    const testId = row.testId || stableFirestoreId('technical-local', sourcePlayerId || row.playerName || row.joueuse || 'joueuse', row.date || 'date-inconnue', row.saison || row.season || idx);
+    return {
+      ...row,
+      id:testId,
+      testId,
+      playerId:sourcePlayerId || row.playerId || '',
+      playerName:row.playerName || row.joueuse || '',
+      season:row.season || row.saison || seasonFromDate(row.date || new Date()),
+      source:row.source || 'Tests techniques local'
+    };
+  });
+}
+function localTechnicalTestsForProfile(aliases=[]){
+  return normalizeProfileTechnicalRows(rowsMatchingProfileAliases(parseStoredJson('coachStatsV13Rows', []), aliases));
+}
+let technicalTestsSeedRowsCache = null;
+async function seedTechnicalTestsForProfile(aliases=[]){
+  if(!technicalTestsSeedRowsCache){
+    try{
+      const response = await fetch('pages/tests-techniques.html', {cache:'no-store'});
+      const html = await response.text();
+      const match = html.match(/"hist":(\[[\s\S]*?\]),"obj":/);
+      technicalTestsSeedRowsCache = match ? JSON.parse(match[1]) : [];
+    }catch(_e){
+      technicalTestsSeedRowsCache = [];
+    }
+  }
+  return normalizeProfileTechnicalRows(rowsMatchingProfileAliases(technicalTestsSeedRowsCache, aliases));
+}
 function collectCentralFirestoreDocs(){
   const docs = Object.fromEntries(FIRESTORE_COLLECTIONS.map(name => [name, new Map()]));
-  const players = [
+  const technicalHints = readTechnicalPlayerFootHints();
+  const players = enrichPlayersWithTechnicalFootHints([
     ...parseStoredJson('coachpulse:centralPlayers', []),
     ...parseStoredJson('coachpulse:customPlayers', [])
-  ].filter(Boolean);
+  ].filter(Boolean), technicalHints);
   const rows = parseStoredJson('coachStatsV13Rows', []);
   rows.forEach(row => {
-    if(row && row.joueuse) players.push({joueuse:row.joueuse, categorie:row.categorie, subCategory:row.sousCategorie, source:'Tests techniques'});
+    if(row && (row.playerId || row.playerName || row.joueuse)){
+      players.push({playerId:row.playerId || '', joueuse:row.playerName || row.joueuse, categorie:row.categorie, subCategory:row.sousCategorie, source:'Tests techniques'});
+    }
   });
   players.map(normalizePlayer).forEach(p => {
     if(!p.displayName) return;
@@ -558,34 +1092,59 @@ function collectCentralFirestoreDocs(){
   const methodoEvents = parseStoredJson('methodo_events_v24', []);
   methodoEvents.filter(e => String(e?.type || e?.title || e?.theme || '').toLowerCase().includes('séance') || String(e?.type || '').toLowerCase().includes('seance')).forEach(e => {
     const sessionId = e.sessionId || stableFirestoreId('methodologie', e.date || e.start || '', e.team || e.category || '', e.title || e.theme || 'seance');
-    addDoc(docs,'sessions',sessionId,{sessionId,date:e.date || e.start || '',type:'Séance',theme:e.title || e.theme || e.text || 'Séance',categories:e.categories || e.category || [],team:e.team || '',source:'Méthodologie'});
+    const teamId = teamsService()?.canonicalTeamId?.(e.team || e.category || '') || (e.team || e.category ? stableFirestoreId('team', e.team || e.category) : '');
+    addDoc(docs,'sessions',sessionId,{sessionId,date:e.date || e.start || '',type:'Séance',theme:e.title || e.theme || e.text || 'Séance',categories:e.categories || e.category || [],team:e.team || '',teamId,source:'Méthodologie'});
   });
   rows.forEach((row, idx) => {
-    const player = playerByName.get(stableFirestoreId(row.joueuse, row.categorie, row.sousCategorie)) || normalizePlayer({joueuse:row.joueuse,categorie:row.categorie,subCategory:row.sousCategorie,source:'Tests techniques'});
-    addDoc(docs,'players',player.playerId,{...player, updatedAtIso:new Date().toISOString()});
-    addDoc(docs,'technicalTests',row.testId || stableFirestoreId('technical', player.playerId, row.date, row.saison, idx), {
-      testId:row.testId || stableFirestoreId('technical', player.playerId, row.date, row.saison, idx),
-      playerId:player.playerId, playerName:row.joueuse || player.displayName, date:row.date || '', season:row.saison || '',
-      categorie:row.categorie || player.categorie || '', subCategory:row.sousCategorie || player.subCategory || '',
+    const sourcePlayerId = String(row.playerId || row.id || '').trim();
+    const sourceName = row.playerName || row.joueuse || '';
+    const player = playerIndex.get(sourcePlayerId)
+      || playerByName.get(stableFirestoreId(sourceName, row.categorie, row.sousCategorie))
+      || playerByName.get(stableFirestoreId(row.joueuse, row.categorie, row.sousCategorie))
+      || normalizePlayer({playerId:sourcePlayerId, joueuse:sourceName, categorie:row.categorie, subCategory:row.sousCategorie, source:'Tests techniques'});
+    const resolvedPlayerId = player.playerId || sourcePlayerId;
+    if(player.displayName) addDoc(docs,'players',resolvedPlayerId,{...player, playerId:resolvedPlayerId, updatedAtIso:new Date().toISOString()});
+    const technicalFoot = row.foot || row.pied || row.meilleurPiedLabel || row.playerSnapshot?.foot || row.playerSnapshot?.pied || player.foot || player.pied || player.meilleurPiedLabel || '';
+    const technicalNationality = row.nationalite || row.nationalité || row.nationality || row.playerSnapshot?.nationalite || row.playerSnapshot?.nationality || player.nationalite || player.nationality || '';
+    addDoc(docs,'technicalTests',row.testId || stableFirestoreId('technical', resolvedPlayerId, row.date, row.saison, idx), {
+      testId:row.testId || stableFirestoreId('technical', resolvedPlayerId, row.date, row.saison, idx),
+      playerId:resolvedPlayerId, playerName:sourceName || player.displayName, date:row.date || '', season:row.saison || '',
+      categorie:row.categorie || player.categorie || '', subCategory:row.sousCategorie || player.subCategory || '', team:player.team || '', teamId:player.teamId || '',
+      foot:technicalFoot, pied:technicalFoot, nationalite:technicalNationality,
+      playerSnapshot:{playerId:resolvedPlayerId, displayName:sourceName || player.displayName || '', nom:player.nom || '', prenom:player.prenom || '', categorie:row.categorie || player.categorie || '', subCategory:row.sousCategorie || player.subCategory || '', team:player.team || '', teamId:player.teamId || '', foot:technicalFoot, pied:technicalFoot, nationalite:technicalNationality},
       tests:row.tests || {}, objectifs:row.objectifs || {}, source:row.source || 'Tests techniques'
+    });
+  });
+  parseStoredJson('coachpulse:athleticTests', []).filter(Boolean).forEach((row, idx) => {
+    const testId = row.physicalTestId || row.testId || row.id || stableFirestoreId('physicalTest', row.playerId, row.date, row.season, idx);
+    const teamId = row.teamId || teamsService()?.canonicalTeamId?.(row.team || row.equipe || '') || '';
+    addDoc(docs,'physicalTests',testId, {
+      ...row,
+      id:testId,
+      physicalTestId:testId,
+      testId,
+      teamId,
+      source:row.source || 'Tests athlétiques'
     });
   });
   const stats = parseStoredJson('coachStatsV170', null);
   const matches = Array.isArray(stats?.matches) ? stats.matches : (Array.isArray(stats) ? stats.filter(x => x?.score || x?.events || x?.actions) : []);
   matches.forEach((m, idx) => {
-    const matchId = m.matchId || m.id || stableFirestoreId('match', m.date, m.team || m.equipe, m.opponent || m.adversaire, idx);
-    addDoc(docs,'matches',matchId,{matchId,date:m.date || '',team:m.team || m.equipe || '',opponent:m.opponent || m.adversaire || '',score:m.score || '',competition:m.competition || '',source:'Coach Stats'});
+    const matchTeam = m.team || m.equipe || '';
+    const matchTeamId = teamsService()?.canonicalTeamId?.(matchTeam) || (matchTeam ? stableFirestoreId('team', matchTeam) : '');
+    const matchId = m.matchId || m.id || stableFirestoreId('match', m.date, matchTeam, m.opponent || m.adversaire, idx);
+    addDoc(docs,'matches',matchId,{matchId,date:m.date || '',team:matchTeam,teamId:matchTeamId,opponent:m.opponent || m.adversaire || '',score:m.score || '',competition:m.competition || '',source:'Coach Stats'});
     const actions = Array.isArray(m.events) ? m.events : (Array.isArray(m.actions) ? m.actions : []);
     actions.forEach((ev, evIdx) => {
       const player = ev.playerId ? playerIndex.get(ev.playerId) : normalizePlayer({joueuse:ev.player || ev.joueuse || '', categorie:ev.categorie || '', source:'Coach Stats'});
       addDoc(docs,'matchEvents',ev.eventId || stableFirestoreId('event', matchId, ev.minute, ev.action || ev.type, evIdx), {
         eventId:ev.eventId || stableFirestoreId('event', matchId, ev.minute, ev.action || ev.type, evIdx),
-        matchId, playerId:ev.playerId || player.playerId || '', team:ev.team || m.team || '', minute:ev.minute || '', action:ev.action || ev.type || '', zone:ev.zone || '', source:'Coach Stats'
+        matchId, playerId:ev.playerId || player.playerId || '', team:ev.team || matchTeam || '', teamId:teamsService()?.canonicalTeamId?.(ev.team || matchTeam) || matchTeamId, minute:ev.minute || '', action:ev.action || ev.type || '', zone:ev.zone || '', source:'Coach Stats'
       });
     });
   });
   if(currentProfile){
-    addDoc(docs,'staff',currentUser.uid,{staffId:currentUser.uid, uid:currentUser.uid, email:currentUser.email || currentProfile.email || '', name:currentProfile.name || '', role:currentProfile.role || '', scope:currentProfile.scope || '', status:currentProfile.status || 'ACTIVE'});
+    addDoc(docs,'staff_members',currentUser.uid,{staffId:currentUser.uid, uid:currentUser.uid, email:currentUser.email || currentProfile.email || '', name:currentProfile.name || '', role:currentProfile.role || '', roleLabel:currentProfile.roleLabel || '', permissionLevel:currentProfile.permissionLevel || '', permissionLabel:currentProfile.permissionLabel || '', scope:currentProfile.scope || '', authorizedTeamIds:currentProfile.authorizedTeamIds || [], teamIds:currentProfile.teamIds || [], allowedTeamIds:currentProfile.allowedTeamIds || [], allowedModules:currentProfile.allowedModules || [], modulePermissions:currentProfile.modulePermissions || {}, status:currentProfile.status || 'ACTIVE'});
   }
   addDoc(docs,'settings','coachpulse-schema',{settingsId:'coachpulse-schema',version:'firestore-v1',legacyCloudCollection:'coachpulse_common_base',migratedAtIso:new Date().toISOString(),collections:FIRESTORE_COLLECTIONS,modules:moduleRegistry().map(module => ({id:module.id,name:module.name,active:module.active,section:module.section,collection:module.collection,relatedCollections:module.relatedCollections||[],permissions:module.permissions,screen:module.screen,settings:module.settings}))});
   return docs;
@@ -646,6 +1205,291 @@ async function readCentralFirestoreExport(){
     snap.forEach(docSnap => payload.collections[name].push({id:docSnap.id, ...docSnap.data()}));
   }
   return payload;
+}
+async function playerProfileLoadData(options={}){
+  return measureAsync('playerProfileLoadData', async () => {
+  if(!canViewModule('playerProfile')) throw new Error('Accès non autorisé.');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const playerId = String(options.playerId || '').trim();
+  const aliases = [...new Set([playerId, ...(Array.isArray(options.aliases) ? options.aliases : [])].map(value => String(value || '').trim()).filter(Boolean))];
+  const cacheKey = playerId || aliases.join('|');
+  const cached = appDataCache.playerProfiles.get(cacheKey);
+  if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS) return cloneData(cached.payload);
+  const directCollections = ['attendance','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps','convocations','individualReports'];
+  const payload = {app:'CoachPulse', module:'playerProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), collections:{players:[],sessions:[],matches:[]}};
+  directCollections.forEach(name => { payload.collections[name] = []; });
+  function chunksForValues(values=[]){
+    const out = [];
+    for(let i = 0; i < values.length; i += 10) out.push(values.slice(i, i + 10));
+    return out;
+  }
+  const chunks = chunksForValues(aliases);
+  const playerIdChunks = chunksForValues(playerId ? [playerId] : aliases);
+  async function readWhereIn(collectionName, field='playerId', queryChunks=chunks){
+    const snaps = await Promise.all(queryChunks.filter(chunk => chunk.length).map(chunk => {
+      const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
+      return firebaseFns.getDocs(q);
+    }));
+    const rows = [];
+    snaps.forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
+    return [...new Map(rows.map(row => [row.id, row])).values()];
+  }
+  async function readArrayContainsAny(collectionName, field){
+    const snaps = await Promise.all(chunks.filter(chunk => chunk.length).map(chunk => {
+      const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'array-contains-any', chunk));
+      return firebaseFns.getDocs(q);
+    }));
+    const rows = [];
+    snaps.forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
+    return [...new Map(rows.map(row => [row.id, row])).values()];
+  }
+  async function readPlayerLinkedCollection(collectionName){
+    const primary = await readWhereIn(collectionName, 'playerId', playerIdChunks);
+    if(options.includeLegacyFallback !== true) return primary;
+    const fallbackCollections = new Set(['attendance','matchEvents','technicalTests','physicalTests','injuries','medicalFollowUps']);
+    if(!fallbackCollections.has(collectionName)) return primary;
+    const idFields = ['playerID','player_id','legacyPlayerId','oldPlayerId','previousPlayerId','playerKey','playerRef','externalId','playerSnapshot.playerId','playerSnapshot.id','playerSnapshot.playerName','playerSnapshot.displayName','playerSnapshot.nom','playerSnapshot.prenom','player.playerId','player.id','player.playerName','player.displayName','playerName','joueuse','nom','prenom','name','displayName','fullName'];
+    const arrayFields = ['playerIds','legacyPlayerIds','previousPlayerIds','aliases','aliasIds'];
+    const results = await Promise.allSettled([
+      ...idFields.map(field => readWhereIn(collectionName, field)),
+      ...arrayFields.map(field => readArrayContainsAny(collectionName, field))
+    ]);
+    const rows = [...primary, ...results.flatMap(result => result.status === 'fulfilled' ? result.value : [])];
+    return [...new Map(rows.map(row => [row.id, row])).values()];
+  }
+  async function readDocsByIds(collectionName, ids){
+    const uniqueIds = [...new Set([...ids].filter(Boolean))];
+    const snaps = await Promise.all(uniqueIds.map(id => firebaseFns.getDoc(firebaseFns.doc(db, collectionName, id))));
+    return snaps.filter(snap => snap.exists()).map(snap => ({id:snap.id, ...snap.data()}));
+  }
+  async function readDocsByIdsOrField(collectionName, ids, field){
+    const rows = await readDocsByIds(collectionName, ids);
+    const values = [...new Set([...ids].filter(Boolean))];
+    const valueChunks = [];
+    for(let i = 0; i < values.length; i += 10) valueChunks.push(values.slice(i, i + 10));
+    const snaps = await Promise.all(valueChunks.filter(chunk => chunk.length).map(chunk => {
+      const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
+      return firebaseFns.getDocs(q);
+    }));
+    snaps.forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
+    return [...new Map(rows.map(row => [row.id, row])).values()];
+  }
+  if(!aliases.length){
+    payload.collections.players = await listPlayers({season:'all', includeArchived:true});
+    return payload;
+  }
+  const [authorizedPlayers, playersById, playerRows] = await Promise.all([
+    listPlayers({season:'all', includeArchived:true}),
+    readDocsByIds('players', aliases),
+    readWhereIn('players')
+  ]);
+  const technicalHints = await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints());
+  payload.collections.players = rowsMatchingProfileAliases(authorizedPlayers, aliases);
+  filterAuthorizedPlayers(playersById.map(normalizePlayer)).forEach(row => {
+    if(!payload.collections.players.some(player => (player.playerId || player.id) === (row.playerId || row.id))) payload.collections.players.push(row);
+  });
+  playerRows.map(normalizePlayer).forEach(row => {
+    if(canAccessPlayerRecord(row) && !payload.collections.players.some(player => (player.playerId || player.id) === (row.playerId || row.id))) payload.collections.players.push(row);
+  });
+  payload.collections.players = enrichPlayersWithTechnicalFootHints(payload.collections.players, technicalHints);
+  if(playerId && !payload.collections.players.some(player => (player.playerId || player.id) === playerId)) throw new Error('Accès non autorisé à cette joueuse.');
+  await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
+  const seedTechnicalTests = await seedTechnicalTestsForProfile(aliases);
+  const needsAthleticFallback = canUseAthletic('read') && !(payload.collections.physicalTests || []).length;
+  const profilePhysicalTests = needsAthleticFallback ? await athleticListData({playerId, season:'all'}).catch(() => []) : [];
+  payload.collections.technicalTests = [...new Map([
+    ...(payload.collections.technicalTests || []),
+    ...localTechnicalTestsForProfile(aliases),
+    ...seedTechnicalTests
+  ].map(row => [row.id || row.testId || stableFirestoreId('technical', row.playerId, row.date, row.season, row.playerName), row])).values()];
+  payload.collections.physicalTests = [...new Map([
+    ...(payload.collections.physicalTests || []),
+    ...profilePhysicalTests
+  ].map(row => [row.id || row.physicalTestId || row.testId || stableFirestoreId('physical', row.playerId, row.date, row.season, row.playerName), row])).values()];
+  const accessiblePlayerIds = new Set(payload.collections.players.map(player => player.playerId || player.id).filter(Boolean));
+  directCollections.forEach(name => {
+    payload.collections[name] = (payload.collections[name] || []).filter(row =>
+      canAccessRecord(row)
+      || accessiblePlayerIds.has(row.playerId)
+      || accessiblePlayerIds.has(row.playerSnapshot?.playerId)
+      || accessiblePlayerIds.has(row.player?.playerId)
+    );
+  });
+  const sessionIds = new Set((payload.collections.attendance || []).map(row => row.sessionId).filter(Boolean));
+  const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
+  const [sessions, matches] = await Promise.all([
+    readDocsByIdsOrField('sessions', sessionIds, 'sessionId'),
+    readDocsByIdsOrField('matches', matchIds, 'matchId')
+  ]);
+  payload.collections.sessions = sessions;
+  payload.collections.matches = matches;
+  if(cacheKey) appDataCache.playerProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
+  return payload;
+  });
+}
+function rowTeamIds(row={}){
+  return [
+    row.teamId,
+    row.team_id,
+    row.team?.teamId,
+    row.teamSnapshot?.teamId,
+    row.playerSnapshot?.teamId,
+    row.sessionSnapshot?.teamId,
+    row.matchSnapshot?.teamId
+  ].map(value => String(value || '').trim()).filter(Boolean);
+}
+function rowMatchesTeamId(row={}, teamId=''){
+  const target = String(teamId || '').trim();
+  return Boolean(target && rowTeamIds(row).includes(target));
+}
+function playerMatchesTeamIdForAnySeason(player={}, teamId=''){
+  if(!teamId) return false;
+  if(rowMatchesTeamId(player, teamId)) return true;
+  const history = player.seasonHistory || player.seasons || {};
+  return Object.values(history || {}).some(snapshot => rowMatchesTeamId(snapshot, teamId));
+}
+async function teamProfileLoadData(options={}){
+  return measureAsync('teamProfileLoadData', async () => {
+  if(!canViewModule('teamProfile')) throw new Error('Accès non autorisé.');
+	  const teamId = String(options.teamId || '').trim();
+	  if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
+	  const summaryOnly = options.summaryOnly === true;
+	  const cacheKey = `${teamId || 'all'}:${summaryOnly ? 'summary' : 'full'}`;
+	  const cached = appDataCache.teamProfiles.get(cacheKey);
+	  if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS) return cloneData(cached.payload);
+	  const payload = {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), teamId, collections:{}};
+  const names = ['teams','players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
+  names.forEach(name => { payload.collections[name] = []; });
+
+  if(!db || !currentUser){
+    const docs = collectCentralFirestoreDocs();
+    names.forEach(name => { payload.collections[name] = [...(docs[name] || new Map()).values()]; });
+	    payload.collections.teams = (payload.collections.teams || []).filter(team => !teamId || (team.teamId || team.id) === teamId);
+	    payload.collections.players = (payload.collections.players || []).filter(player => !teamId || playerMatchesTeamIdForAnySeason(player, teamId));
+	    if(summaryOnly){
+	      if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
+	      return payload;
+	    }
+	    const playerIds = new Set(payload.collections.players.map(player => player.playerId || player.id).filter(Boolean));
+    const matchIds = new Set((payload.collections.matches || []).filter(row => !teamId || rowMatchesTeamId(row, teamId)).map(row => row.matchId || row.id).filter(Boolean));
+    payload.collections.matches = payload.collections.matches.filter(row => !teamId || rowMatchesTeamId(row, teamId));
+    ['technicalTests','physicalTests','injuries','workloads','convocations','individualReports'].forEach(name => {
+      payload.collections[name] = payload.collections[name].filter(row => rowMatchesTeamId(row, teamId) || playerIds.has(row.playerId));
+    });
+    payload.collections.matchEvents = payload.collections.matchEvents.filter(row => rowMatchesTeamId(row, teamId) || matchIds.has(row.matchId));
+    const sessionIds = new Set((payload.collections.sessions || []).filter(row => !teamId || rowMatchesTeamId(row, teamId)).map(row => row.sessionId || row.id).filter(Boolean));
+    payload.collections.sessions = payload.collections.sessions.filter(row => !teamId || rowMatchesTeamId(row, teamId));
+    payload.collections.attendance = payload.collections.attendance.filter(row => rowMatchesTeamId(row, teamId) || playerIds.has(row.playerId) || sessionIds.has(row.sessionId));
+    if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
+    return payload;
+  }
+
+  async function docsFromSnap(snap){
+    const rows = [];
+    snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
+    return rows;
+  }
+  async function readCollection(name){
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, name));
+    return docsFromSnap(snap);
+  }
+  async function readWhere(name, field, operator, value){
+    try{
+      const q = firebaseFns.query(firebaseFns.collection(db, name), firebaseFns.where(field, operator, value));
+      return docsFromSnap(await firebaseFns.getDocs(q));
+    }catch(_e){ return []; }
+  }
+  async function readWhereIn(name, field, values=[]){
+    const unique = [...new Set(values.filter(Boolean))];
+    const chunks = [];
+    for(let i = 0; i < unique.length; i += 10) chunks.push(unique.slice(i, i + 10));
+    const settled = await Promise.allSettled(chunks.map(chunk => readWhere(name, field, 'in', chunk)));
+    return settled.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+  }
+  function uniqueRows(rows=[]){
+    return [...new Map(rows.map(row => [row.id || row.teamId || row.matchId || row.sessionId || row.playerId || JSON.stringify(row), row])).values()];
+  }
+  function uniquePlayers(rows=[]){
+    return [...new Map(rows.map(row => {
+      const normalized = normalizePlayer(row);
+      const id = normalized.playerId || normalized.id || row.id || row.playerId;
+      return [id, {...row, ...normalized, id, playerId:id}];
+    }).filter(([id]) => Boolean(id))).values()];
+  }
+  async function readTeamPlayers(teamId){
+    const cachedPlayers = uniquePlayers([
+      ...parseStoredJson('coachpulse:centralPlayers', []),
+      ...parseStoredJson('coachpulse:customPlayers', [])
+    ]).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) && canAccessPlayerRecord(player));
+    if(cachedPlayers.length) return cachedPlayers;
+    const seasons = [...new Set([
+      currentSeason(),
+      String(Number(currentSeason().slice(0, 4)) - 1) + '-' + currentSeason().slice(0, 4),
+      '2026-2027',
+      '2025-2026'
+    ].filter(Boolean))];
+    const fieldNames = [
+      'teamId',
+      'teamSnapshot.teamId',
+      ...seasons.flatMap(season => [`seasonHistory.${season}.teamId`, `seasons.${season}.teamId`])
+    ];
+    const settled = await Promise.allSettled(fieldNames.map(field => readWhere('players', field, '==', teamId)));
+    const rows = uniquePlayers(settled.flatMap(result => result.status === 'fulfilled' ? result.value : []));
+    return filterAuthorizedPlayers(rows).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) || rowMatchesTeamId(player, teamId));
+  }
+
+	  const [teams, teamPlayers] = await Promise.all([listTeams({includeArchived:true}), readTeamPlayers(teamId)]);
+	  payload.collections.teams = teams.filter(team => !teamId || (team.teamId || team.id) === teamId);
+	  payload.collections.players = teamPlayers;
+	  if(summaryOnly){
+	    if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
+	    return payload;
+	  }
+	  const playerIds = payload.collections.players.map(player => player.playerId || player.id).filter(Boolean);
+	  const directNames = ['matches','sessions','technicalTests','physicalTests','injuries','workloads','convocations','individualReports'];
+	  const directRows = await Promise.all(directNames.map(name => readWhere(name, 'teamId', '==', teamId)));
+	  directNames.forEach((name, idx) => { payload.collections[name] = directRows[idx]; });
+	  const matchIds = payload.collections.matches.map(row => row.matchId || row.id).filter(Boolean);
+	  const sessionIds = payload.collections.sessions.map(row => row.sessionId || row.id).filter(Boolean);
+	  const playerLinkedNames = ['technicalTests','physicalTests','injuries','workloads','convocations','individualReports'];
+	  const medicalLinkedNames = ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps'];
+	  const [
+	    matchEventsByTeam,
+	    matchEventsByMatch,
+	    attendanceByTeam,
+	    attendanceBySession,
+	    attendanceByPlayer,
+	    playerLinkedRows,
+	    medicalLinkedRows
+	  ] = await Promise.all([
+	    readWhere('matchEvents', 'teamId', '==', teamId),
+	    readWhereIn('matchEvents', 'matchId', matchIds),
+	    readWhere('attendance', 'teamId', '==', teamId),
+	    readWhereIn('attendance', 'sessionId', sessionIds),
+	    readWhereIn('attendance', 'playerId', playerIds),
+	    Promise.all(playerLinkedNames.map(async name => {
+	      const [byPlayer, bySnapshotTeam] = await Promise.all([
+	        readWhereIn(name, 'playerId', playerIds),
+	        readWhere(name, 'playerSnapshot.teamId', '==', teamId)
+	      ]);
+	      return {name, rows:uniqueRows([...(payload.collections[name] || []), ...byPlayer, ...bySnapshotTeam])};
+	    })),
+	    Promise.all(medicalLinkedNames.map(async name => {
+	      const [byTeam, byPlayer, bySnapshotTeam] = await Promise.all([
+	        readWhere(name, 'teamId', '==', teamId),
+	        readWhereIn(name, 'playerId', playerIds),
+	        readWhere(name, 'playerSnapshot.teamId', '==', teamId)
+	      ]);
+	      return {name, rows:uniqueRows([...byTeam, ...byPlayer, ...bySnapshotTeam])};
+	    }))
+	  ]);
+	  payload.collections.matchEvents = uniqueRows([...matchEventsByTeam, ...matchEventsByMatch]);
+	  payload.collections.attendance = uniqueRows([...attendanceByTeam, ...attendanceBySession, ...attendanceByPlayer]);
+	  playerLinkedRows.forEach(item => { payload.collections[item.name] = item.rows; });
+	  medicalLinkedRows.forEach(item => { payload.collections[item.name] = item.rows; });
+  if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
+  return payload;
+  });
 }
 function csvEscape(v){
   const s = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? '');
@@ -711,22 +1555,21 @@ function detectImportField(header){
   return '';
 }
 function normalizeSubCategory(value){
-  const txt = normalizeImportText(value).toUpperCase().replace('SENIORS','R1').replace('SÉNIORS','R1');
-  if(txt.includes('R1')) return 'R1';
+  const txt = normalizeImportText(value).toUpperCase().replace('SÉNIORS','SENIORS');
+  if(txt.includes('R1') || txt.includes('SENIORS')) return 'SENIORS';
   const n = Number((txt.match(/\d+/)||[])[0] || 0);
   return n ? `U${n}` : txt;
 }
 function normalizeImportCategory(value){
   const sub = normalizeSubCategory(value);
-  if(sub === 'R1') return 'R1';
+  if(sub === 'SENIORS' || sub === 'R1') return 'SENIORS';
   const n = Number((sub.match(/\d+/)||[])[0] || 0);
   if(!n) return normalizeImportText(value);
   if(n <= 7) return 'U7';
-  if(n <= 9) return 'U8-U9';
-  if(n <= 11) return 'U10-U11';
-  if(n <= 13) return 'U12-U13';
-  if(n <= 14) return 'U12-U13-U14';
-  if(n <= 16) return 'U14-U15-U16';
+  if(n <= 9) return 'U9';
+  if(n <= 11) return 'U11';
+  if(n <= 14) return 'U13';
+  if(n <= 16) return 'U16';
   return 'U19';
 }
 function splitImportName(row){
@@ -896,7 +1739,7 @@ function buildImportPlan(rows, options={}){
     const status = normalizeImportText(f.status).toUpperCase();
     if(IMPORT_STATUS_CODES.has(status) || f.minutes || f.theme || f.sessionType){
       const sessionId = stableFirestoreId('session', date || 'date-inconnue', f.theme || f.sessionType || 'seance', player.teamId);
-      addDoc(plan,'sessions',sessionId,{sessionId,date,type:f.sessionType || 'Séance',theme:f.theme || 'Import présence',team:player.team,categories:[player.categorie].filter(Boolean),source:plan.source});
+      addDoc(plan,'sessions',sessionId,{sessionId,date,type:f.sessionType || 'Séance',theme:f.theme || 'Import présence',team:player.team,teamId:player.teamId,categories:[player.categorie].filter(Boolean),source:plan.source});
       addDoc(plan,'attendance',stableFirestoreId('attendance',sessionId,player.playerId),{attendanceId:stableFirestoreId('attendance',sessionId,player.playerId),sessionId,playerId:player.playerId,date,status:status || 'P',minutes:Number(f.minutes || 0),note:'',source:plan.source});
     }
     Object.entries(mapped.extras).forEach(([header,value]) => {
@@ -906,7 +1749,7 @@ function buildImportPlan(rows, options={}){
       const upper = val.toUpperCase();
       if(headerDate && IMPORT_STATUS_CODES.has(upper)){
         const sessionId = stableFirestoreId('session', headerDate, 'presence', player.teamId);
-        addDoc(plan,'sessions',sessionId,{sessionId,date:headerDate,type:'Séance',theme:'Import présence',team:player.team,categories:[player.categorie].filter(Boolean),source:plan.source});
+        addDoc(plan,'sessions',sessionId,{sessionId,date:headerDate,type:'Séance',theme:'Import présence',team:player.team,teamId:player.teamId,categories:[player.categorie].filter(Boolean),source:plan.source});
         addDoc(plan,'attendance',stableFirestoreId('attendance',sessionId,player.playerId),{attendanceId:stableFirestoreId('attendance',sessionId,player.playerId),sessionId,playerId:player.playerId,date:headerDate,status:upper,minutes:0,note:'',source:plan.source});
       }
       const num = parseImportNumber(val);
@@ -930,30 +1773,44 @@ function buildImportPlan(rows, options={}){
   return plan;
 }
 async function existingPlayersIndex(){
-  const byId = new Map(), byKey = new Map();
+  const byId = new Map(), byKey = new Map(), byPerson = new Map();
+  const indexPlayer = player => {
+    const id = player.playerId || player.id;
+    if(!id) return;
+    const p = {...player, playerId:id};
+    byId.set(id, p);
+    byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory, p.birth || p.dateNaissance || ''), p);
+    byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory), p);
+    byPerson.set(stableFirestoreId('person', p.nom, p.prenom, p.birth || p.dateNaissance || ''), p);
+    byPerson.set(stableFirestoreId('person', p.nom, p.prenom), p);
+  };
   if(db && currentUser){
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
     snap.forEach(docSnap => {
-      const p = {id:docSnap.id, playerId:docSnap.id, ...docSnap.data()};
-      byId.set(docSnap.id, p);
-      byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory, p.birth || ''), p);
-      byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory), p);
+      indexPlayer({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()});
     });
   }
   parseStoredJson('coachpulse:centralPlayers', []).forEach(p => {
-    if(!p?.playerId && !p?.id) return;
-    const id = p.playerId || p.id;
-    byId.set(id, {...p, playerId:id});
-    byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory, p.birth || ''), {...p, playerId:id});
-    byKey.set(stableFirestoreId(p.nom, p.prenom, p.categorie, p.subCategory), {...p, playerId:id});
+    indexPlayer(p);
   });
-  return {byId, byKey};
+  return {byId, byKey, byPerson};
 }
-function mergePlayerWithoutOverwrite(existing, incoming){
+function findExistingPlayerForImport(existing, player){
+  const keyBirth = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory, player.birth || player.dateNaissance || '');
+  const key = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory);
+  const personBirth = stableFirestoreId('person', player.nom, player.prenom, player.birth || player.dateNaissance || '');
+  const person = stableFirestoreId('person', player.nom, player.prenom);
+  return existing.byId.get(player.playerId) || existing.byKey.get(keyBirth) || existing.byKey.get(key) || existing.byPerson.get(personBirth) || existing.byPerson.get(person);
+}
+const PLAYER_IMPORT_AUTHORITATIVE_FIELDS = new Set(['categorie','subCategory','team','teamId','birth','dateNaissance','photo','foot','poste']);
+function mergePlayerForImport(existing, incoming){
   const out = {}, changes = {};
   Object.entries(incoming).forEach(([k,v]) => {
     if(v === '' || v == null || ['id','playerId','updatedAt','updatedBy','updatedByEmail'].includes(k)) return;
-    if(existing[k] == null || existing[k] === '' || (Array.isArray(existing[k]) && !existing[k].length)){
+    const current = existing[k];
+    const isEmpty = current == null || current === '' || (Array.isArray(current) && !current.length);
+    const isAuthoritative = PLAYER_IMPORT_AUTHORITATIVE_FIELDS.has(k);
+    if((isAuthoritative || isEmpty) && String(current ?? '') !== String(v ?? '')){
       out[k] = v; changes[k] = v;
     }
   });
@@ -963,11 +1820,9 @@ async function analyzeImportAgainstFirestore(plan){
   const existing = await existingPlayersIndex();
   const report = {created:0, updated:0, unchanged:0, potentialDuplicates:0, ignored:plan.ignored.length, details:[]};
   plan.players.forEach(player => {
-    const keyBirth = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory, player.birth || '');
-    const key = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory);
-    const found = existing.byId.get(player.playerId) || existing.byKey.get(keyBirth) || existing.byKey.get(key);
+    const found = findExistingPlayerForImport(existing, player);
     if(found){
-      const merged = mergePlayerWithoutOverwrite(found, player);
+      const merged = mergePlayerForImport(found, player);
       if(Object.keys(merged.changes).length){ report.updated++; report.details.push({type:'mise à jour', player:player.displayName, fields:Object.keys(merged.changes)}); }
       else { report.unchanged++; report.details.push({type:'inchangé', player:player.displayName}); }
       if((found.playerId || found.id) !== player.playerId) report.potentialDuplicates++;
@@ -979,20 +1834,50 @@ async function analyzeImportAgainstFirestore(plan){
 }
 async function commitImportPlan(plan){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const service = playersService();
   const existing = await existingPlayersIndex();
   const docs = Object.fromEntries(FIRESTORE_COLLECTIONS.map(c => [c,new Map()]));
+  const playerIdMap = new Map();
+  const resolvedPlayers = new Map();
   plan.players.forEach(player => {
-    const keyBirth = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory, player.birth || '');
-    const key = stableFirestoreId(player.nom, player.prenom, player.categorie, player.subCategory);
-    const found = existing.byId.get(player.playerId) || existing.byKey.get(keyBirth) || existing.byKey.get(key);
+    const found = findExistingPlayerForImport(existing, player);
     if(found){
       const foundId = found.playerId || found.id;
-      const merged = mergePlayerWithoutOverwrite(found, player);
+      playerIdMap.set(player.playerId, foundId);
+      resolvedPlayers.set(foundId, {...found, playerId:foundId, id:foundId});
+      const merged = mergePlayerForImport(found, player);
       if(Object.keys(merged.out).length) addDoc(docs,'players',foundId,{...merged.out, playerId:foundId, lastImportSource:plan.source});
-    }else addDoc(docs,'players',player.playerId,{...player, createdFromImport:true});
+    }else{
+      playerIdMap.set(player.playerId, player.playerId);
+      resolvedPlayers.set(player.playerId, player);
+      addDoc(docs,'players',player.playerId,{...player, createdFromImport:true});
+    }
   });
+  function applySeasonSnapshot(doc={}){
+    const player = resolvedPlayers.get(doc.playerId);
+    const season = doc.season || doc.saison || seasonFromDate(doc.date || new Date());
+    const snap = player ? playerSeasonSnapshot(player, season) : null;
+    return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || ''} : doc;
+  }
+  function remapImportedDoc(collection, doc={}){
+    const resolvedPlayerId = playerIdMap.get(doc.playerId) || doc.playerId || '';
+    let out = applySeasonSnapshot({...doc, playerId:resolvedPlayerId});
+    if(collection === 'attendance'){
+      out.attendanceId = stableFirestoreId('attendance', out.sessionId, resolvedPlayerId);
+      out.id = out.attendanceId;
+    }
+    if(collection === 'technicalTests' || collection === 'physicalTests'){
+      const testName = out.testName || out.testType || 'test';
+      out.testId = stableFirestoreId(collection, resolvedPlayerId, out.date || 'date-inconnue', testName);
+      out.id = out.testId;
+    }
+    return out;
+  }
   ['teams','sessions','attendance','technicalTests','physicalTests'].forEach(collection => {
-    plan[collection].forEach((doc,id) => addDoc(docs,collection,id,doc));
+    plan[collection].forEach(doc => {
+      const clean = ['attendance','technicalTests','physicalTests'].includes(collection) ? remapImportedDoc(collection, doc) : doc;
+      addDoc(docs,collection,clean.id || clean.attendanceId || clean.testId || clean.sessionId || clean.teamId,clean);
+    });
   });
   const count = await pushCentralDocsToFirestore(docs);
   await pullCentralPlayersToLocal(false).catch(()=>{});
@@ -1012,6 +1897,51 @@ function openImportModal(){
   renderImportSummary();
 }
 function closeImportModal(){ $('#importModal')?.classList.remove('open'); }
+const IMPORT_COLLECTION_LABELS = {
+  players:'Joueuses',
+  sessions:'Séances',
+  attendance:'Présences',
+  technicalTests:'Tests techniques',
+  physicalTests:'Tests physiques',
+  ignored:'Lignes ignorées'
+};
+const IMPORT_FIELD_LABELS = {
+  fullName:'Nom complet',
+  nom:'Nom',
+  prenom:'Prénom',
+  categorie:'Catégorie',
+  subCategory:'Sous-catégorie',
+  team:'Équipe',
+  poste:'Poste',
+  birth:'Date de naissance',
+  photo:'Photo',
+  date:'Date',
+  status:'Statut',
+  minutes:'Minutes',
+  sessionType:'Type de séance',
+  theme:'Thème',
+  testType:'Type de test',
+  value:'Valeur',
+  season:'Saison',
+  dateColumn:'Date de présence',
+  'non reconnu':'Non reconnu'
+};
+const IMPORT_HEADER_LABELS = {
+  nom:'Nom',
+  prenom:'Prénom',
+  categorie:'Catégorie',
+  subCategory:'Sous-catégorie',
+  team:'Équipe',
+  birth:'Date de naissance',
+  photo:'Photo',
+  poste:'Poste',
+  season:'Saison'
+};
+function importLabel(map, key){ return map[key] || key; }
+function importPreviewValue(header, value){
+  if(header === 'photo') return value ? 'Photo intégrée' : 'Aucune photo';
+  return value ?? '';
+}
 function renderImportSummary(){
   const box = $('#importSummary'), preview = $('#importPreview'), report = $('#importReport');
   if(!box || !preview || !report) return;
@@ -1023,11 +1953,11 @@ function renderImportSummary(){
     return;
   }
   const counts = {players:plan.players.size,sessions:plan.sessions.size,attendance:plan.attendance.size,technicalTests:plan.technicalTests.size,physicalTests:plan.physicalTests.size,ignored:plan.ignored.length};
-  box.innerHTML = Object.entries(counts).map(([k,v]) => `<div><b>${v}</b><span>${escapeHtml(k)}</span></div>`).join('');
-  const cols = plan.columns.map(c => `<span class="${c.field==='non reconnu'?'bad':''}">${escapeHtml(c.header)} → ${escapeHtml(c.field)}</span>`).join('');
+  box.innerHTML = Object.entries(counts).map(([k,v]) => `<div><b>${v}</b><span>${escapeHtml(importLabel(IMPORT_COLLECTION_LABELS,k))}</span></div>`).join('');
+  const cols = plan.columns.map(c => `<span class="${c.field==='non reconnu'?'bad':''}">${escapeHtml(importLabel(IMPORT_HEADER_LABELS,c.header))} → ${escapeHtml(importLabel(IMPORT_FIELD_LABELS,c.field))}</span>`).join('');
   const sample = importUiState.rows.slice(0,8);
   const headers = Object.keys(sample[0] || {}).filter(k => !k.startsWith('__')).slice(0,8);
-  preview.innerHTML = `<h3>Colonnes détectées</h3><div class="import-columns">${cols || 'Aucune colonne'}</div><h3>Aperçu</h3><div class="table-wrap"><table class="staff-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>${sample.map(r=>`<tr>${headers.map(h=>`<td>${escapeHtml(r[h] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  preview.innerHTML = `<h3>Colonnes détectées</h3><div class="import-columns">${cols || 'Aucune colonne'}</div><h3>Aperçu</h3><div class="table-wrap"><table class="staff-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(importLabel(IMPORT_HEADER_LABELS,h))}</th>`).join('')}</tr></thead><tbody>${sample.map(r=>`<tr>${headers.map(h=>`<td>${escapeHtml(importPreviewValue(h,r[h]))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   const r = importUiState.report;
   report.innerHTML = r ? `<h3>Simulation</h3><p><b>${r.created}</b> créations · <b>${r.updated}</b> mises à jour · <b>${r.unchanged}</b> inchangées · <b>${r.potentialDuplicates}</b> doublons potentiels · <b>${r.ignored}</b> lignes ignorées</p>` : '<p class="admin-note">Lance une simulation avant import réel.</p>';
 }
@@ -1095,17 +2025,106 @@ function normalizeDataHubAttendance(item, meta={}){
     source:meta.fileName || item.source || 'Data Hub'
   };
 }
-function normalizeDataHubTest(item, meta={}){
+function resolveDataHubPlayerRef(existing, item={}){
+  if(!existing) return null;
+  const direct = item.playerId ? existing.byId?.get(item.playerId) : null;
+  if(direct) return direct;
+  const nameKey = value => String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '');
+  const fullNameKey = nameKey(item.fullName || item.playerName || item.joueuse);
+  if(fullNameKey && existing.byId){
+    const foundByFullName = [...existing.byId.values()].find(player => {
+      const names = [
+        player.displayName,
+        player.playerName,
+        `${player.nom || ''} ${player.prenom || ''}`,
+        `${player.prenom || ''} ${player.nom || ''}`
+      ].map(nameKey);
+      return names.includes(fullNameKey);
+    });
+    if(foundByFullName) return foundByFullName;
+  }
+  const names = splitImportName({
+    nom:item.nom,
+    prenom:item.prenom,
+    fullName:item.fullName || item.playerName || item.joueuse
+  });
+  const candidates = [
+    stableFirestoreId('person', names.nom, names.prenom, item.birth || item.dateNaissance || ''),
+    stableFirestoreId('person', names.nom, names.prenom)
+  ].filter(Boolean);
+  return candidates.map(key => existing.byPerson?.get(key)).find(Boolean) || null;
+}
+function normalizeDataHubTest(item, meta={}, existing=null){
   const collection = item.type === 'physicalTest' ? 'physicalTests' : 'technicalTests';
-  const testId = item.testId || stableFirestoreId(item.type || 'test', item.playerId, item.date || 'date-inconnue', item.testName || 'test');
+  const linkedPlayer = resolveDataHubPlayerRef(existing, item);
+  const linkedPlayerId = linkedPlayer?.playerId || linkedPlayer?.id || item.playerId || '';
+  const date = item.date || '';
+  const season = item.season || (date ? seasonFromDate(date) : '');
+  const testId = item.testId && !linkedPlayerId ? item.testId : stableFirestoreId(item.type || 'test', linkedPlayerId || item.playerId, date || 'date-inconnue', item.testName || 'test');
+  const playerName = linkedPlayer?.displayName || item.playerName || [item.prenom, item.nom].filter(Boolean).join(' ').trim();
   return {
     collection,
-    testId, id:testId, playerId:item.playerId || '', playerName:item.playerName || '',
-    date:item.date || '', season:item.season || '', categorie:item.categorie || '',
-    subCategory:item.sousCategorie || item.subCategory || '', testName:item.testName || item.testType || '',
+    testId, id:testId, playerId:linkedPlayerId, playerName,
+    date, season, categorie:item.categorie || linkedPlayer?.categorie || '',
+    subCategory:item.sousCategorie || item.subCategory || linkedPlayer?.subCategory || '', testName:item.testName || item.testType || '',
     testType:item.testName || item.testType || '', value:item.value ?? '', unit:item.unit || '',
+    playerSnapshot:linkedPlayer ? {
+      playerId:linkedPlayerId,
+      nom:linkedPlayer.nom || '',
+      prenom:linkedPlayer.prenom || '',
+      displayName:playerName,
+      categorie:linkedPlayer.categorie || '',
+      subCategory:linkedPlayer.subCategory || '',
+      team:linkedPlayer.team || '',
+      photo:linkedPlayer.photo || ''
+    } : undefined,
     source:meta.fileName || item.source || 'Data Hub'
   };
+}
+function buildDataHubPlayerIdMap(items=[], existing){
+  const map = new Map();
+  items.filter(item => item.type === 'player').forEach(item => {
+    const player = normalizeDataHubPlayer(item, {});
+    const found = findExistingPlayerForImport(existing, player);
+    map.set(player.playerId, found ? (found.playerId || found.id) : player.playerId);
+  });
+  return map;
+}
+function buildDataHubPlayerMap(items=[], existing){
+  const map = new Map();
+  existing?.byId?.forEach(player => {
+    const id = player.playerId || player.id;
+    if(id) map.set(id, {...player, playerId:id, id});
+  });
+  items.filter(item => item.type === 'player').forEach(item => {
+    const player = normalizeDataHubPlayer(item, {});
+    const found = findExistingPlayerForImport(existing, player);
+    const resolved = found ? {...found, playerId:found.playerId || found.id, id:found.playerId || found.id} : player;
+    map.set(player.playerId, resolved);
+    map.set(resolved.playerId || resolved.id, resolved);
+  });
+  return map;
+}
+function resolveDataHubPlayerId(playerId, playerIdMap){
+  return playerIdMap.get(playerId) || playerId || '';
+}
+function applyDataHubSeasonSnapshot(doc={}, playerMap){
+  const player = playerMap.get(doc.playerId);
+  const season = doc.season || doc.saison || seasonFromDate(doc.date || new Date());
+  const snap = player ? playerSeasonSnapshot(player, season) : null;
+  return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || ''} : doc;
+}
+function remapDataHubAttendance(item, meta, playerIdMap, playerMap){
+  const base = normalizeDataHubAttendance(item, meta);
+  const playerId = resolveDataHubPlayerId(base.playerId, playerIdMap);
+  return applyDataHubSeasonSnapshot({...base, playerId, attendanceId:stableFirestoreId('attendance', base.sessionId, playerId), id:stableFirestoreId('attendance', base.sessionId, playerId)}, playerMap);
+}
+function remapDataHubTest(item, meta, playerIdMap, playerMap){
+  const existing = {byId:playerMap};
+  const base = normalizeDataHubTest(item, meta, existing);
+  const playerId = resolveDataHubPlayerId(base.playerId, playerIdMap);
+  const testId = stableFirestoreId(base.collection, playerId, base.date || 'date-inconnue', base.testName || base.testType || 'test');
+  return applyDataHubSeasonSnapshot({...base, playerId, testId, id:testId}, playerMap);
 }
 function objectDiff(existing={}, incoming={}, keys=[]){
   const changes = {};
@@ -1135,6 +2154,8 @@ async function simulateDataHubSync(items=[], meta={}){
   const existingPhysicalTests = await existingCollectionIndex('physicalTests');
   const report = {mode:'simulation', fileName:meta.fileName || '', fileType:meta.fileType || 'fichesJoueuses', rowsRead:Number(meta.rowsRead || items.length), valid:0, created:0, updated:0, unchanged:0, potentialDuplicates:0, errors:0, anomalies:[...(meta.anomalies || [])], details:[]};
   const seen = new Set();
+  const playerIdMap = buildDataHubPlayerIdMap(items, existing);
+  const playerMap = buildDataHubPlayerMap(items, existing);
   items.forEach((item, idx) => {
     if(item.type === 'player'){
       const player = normalizeDataHubPlayer(item, meta);
@@ -1168,7 +2189,7 @@ async function simulateDataHubSync(items=[], meta={}){
       return;
     }
     if(item.type === 'attendance'){
-      const attendance = normalizeDataHubAttendance(item, meta);
+      const attendance = remapDataHubAttendance(item, meta, playerIdMap, playerMap);
       if(!attendance.playerId || !attendance.sessionId){ report.errors++; report.anomalies.push({row:item.rowNumber || idx+1, level:'error', message:'Présence sans playerId ou sessionId'}); return; }
       report.valid++;
       if(seen.has('attendance:'+attendance.attendanceId)){ report.potentialDuplicates++; return; }
@@ -1182,7 +2203,7 @@ async function simulateDataHubSync(items=[], meta={}){
       return;
     }
     if(item.type === 'technicalTest' || item.type === 'physicalTest'){
-      const test = normalizeDataHubTest(item, meta);
+      const test = remapDataHubTest(item, meta, playerIdMap, playerMap);
       if(!test.playerId || !test.testName){ report.errors++; report.anomalies.push({row:item.rowNumber || idx+1, level:'error', message:'Test sans playerId ou nom de test'}); return; }
       report.valid++;
       if(seen.has(test.collection+':'+test.testId)){ report.potentialDuplicates++; return; }
@@ -1204,6 +2225,8 @@ async function syncDataHubItems(items=[], meta={}){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const report = await simulateDataHubSync(items, meta);
   const existing = await existingPlayersIndex();
+  const playerIdMap = buildDataHubPlayerIdMap(items, existing);
+  const playerMap = buildDataHubPlayerMap(items, existing);
   const docs = Object.fromEntries(FIRESTORE_COLLECTIONS.map(c => [c,new Map()]));
   items.forEach(item => {
     if(item.type === 'player'){
@@ -1224,11 +2247,11 @@ async function syncDataHubItems(items=[], meta={}){
       addDoc(docs,'sessions',session.sessionId,{...session, lastDataHubSyncAt:new Date().toISOString()});
     }
     if(item.type === 'attendance'){
-      const attendance = normalizeDataHubAttendance(item, meta);
+      const attendance = remapDataHubAttendance(item, meta, playerIdMap, playerMap);
       if(attendance.playerId && attendance.sessionId) addDoc(docs,'attendance',attendance.attendanceId,{...attendance, lastDataHubSyncAt:new Date().toISOString()});
     }
     if(item.type === 'technicalTest' || item.type === 'physicalTest'){
-      const test = normalizeDataHubTest(item, meta);
+      const test = remapDataHubTest(item, meta, playerIdMap, playerMap);
       if(test.playerId && test.testName) addDoc(docs,test.collection,test.testId,{...test, lastDataHubSyncAt:new Date().toISOString()});
     }
   });
@@ -1252,19 +2275,32 @@ async function readSyncLogs(limit=20){
   snap.forEach(docSnap => { if(logs.length < limit) logs.push({id:docSnap.id, ...docSnap.data()}); });
   return logs;
 }
-async function adminListPlayers(){
+async function adminListPlayers(filters={}){
   if(!guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = playersService();
-  if(service?.listPlayers) return service.listPlayers(firestoreServiceContext());
-  if(service?.readFirestorePlayers) return service.readFirestorePlayers(firestoreServiceContext());
+  const hints = mergeTechnicalPlayerFootHints([
+    ...await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints()),
+    ...await technicalFirestorePlayerFootHints().catch(() => [])
+  ]);
+  if(service?.listPlayers) return enrichPlayersWithTechnicalFootHints(await service.listPlayers(firestoreServiceContext(), filters), hints);
+  if(service?.readFirestorePlayers) return enrichPlayersWithTechnicalFootHints(await service.readFirestorePlayers(firestoreServiceContext(), filters), hints);
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
   const players = [];
   snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
-  return sortPlayersForApp(players);
+  return enrichPlayersWithTechnicalFootHints(sortPlayersForApp(players).filter(p => filters.includeArchived || filters.status || String(p.status || 'active').toLowerCase() !== 'archived'), hints);
+}
+async function adminListRawPlayers(){
+  if(!guardAdminAction()) return [];
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
+  const players = [];
+  snap.forEach(docSnap => players.push({...docSnap.data(), id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id}));
+  const label = p => String(`${p.prenom || ''} ${p.nom || ''}`.trim() || p.displayName || '');
+  return players.sort((a,b) => label(a).localeCompare(label(b), 'fr'));
 }
 function playerAdminDiff(before={}, after={}){
-  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','photo','status','commentaireInterne'];
+  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','foot','pied','meilleurPiedLabel','nationalite','nationality','photo','status','commentaireInterne'];
   const changes = {};
   editable.forEach(key => {
     const next = after[key];
@@ -1295,24 +2331,35 @@ async function writeChangeLog({collectionName, documentId, action, before, after
 async function adminCreatePlayer(data={}){
   if(!guardAdminAction()) return {created:false};
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
-  const clean = {...data};
+  const service = playersService();
+  const teamService = teamsService();
+  const clean = service?.normalizePlayer ? service.normalizePlayer(data) : {...data};
   clean.nom = String(clean.nom || '').trim().toUpperCase();
-  clean.prenom = String(clean.prenom || '').trim();
+  clean.prenom = String(clean.prenom || '').trim().toUpperCase();
   if(!clean.nom || !clean.prenom) throw new Error('Nom et prénom obligatoires.');
   clean.categorie = String(clean.categorie || '').trim();
   clean.subCategory = String(clean.subCategory || clean.categorie || '').trim();
-  clean.team = String(clean.team || normalizeTeamFromCategory(clean.categorie || clean.subCategory) || '').trim();
-  clean.teamId = clean.team ? stableFirestoreId('team', clean.team) : '';
+  clean.team = String(clean.team || service?.defaultClubTeamFromSubCategory?.(clean.subCategory || clean.categorie) || normalizeTeamFromCategory(clean.categorie || clean.subCategory) || '').trim();
+  clean.teamId = clean.team ? (teamService?.canonicalTeamId?.(clean.team) || stableFirestoreId('team', clean.team)) : '';
   clean.birth = String(clean.birth || clean.dateNaissance || '').trim();
+  if(!clean.birth) throw new Error('Date de naissance obligatoire pour générer un playerId unique.');
   clean.dateNaissance = clean.birth;
   clean.poste = String(clean.poste || '').trim();
   clean.numero = String(clean.numero || '').trim();
+  clean.foot = String(clean.foot || clean.pied || clean.meilleurPiedLabel || '').trim();
+  clean.pied = clean.foot;
+  clean.meilleurPiedLabel = clean.foot;
+  clean.nationalite = String(clean.nationalite || clean.nationality || '').trim();
+  clean.nationality = clean.nationalite;
   clean.photo = String(clean.photo || '').trim();
   clean.status = String(clean.status || 'active').trim() || 'active';
   clean.commentaireInterne = String(clean.commentaireInterne || '').trim();
-  clean.playerId = clean.playerId || stableFirestoreId('player', clean.nom, clean.prenom, clean.categorie, clean.subCategory, clean.birth);
+  clean.currentSeason = clean.currentSeason || service?.seasonFromDate?.() || '2026-2027';
+  clean.seasonStart = clean.seasonStart || `${clean.currentSeason.slice(0,4)}-07-01`;
+  clean.seasonEnd = clean.seasonEnd || `${clean.currentSeason.slice(5)}-06-30`;
+  clean.playerId = clean.playerId || stableFirestoreId('player', clean.prenom, clean.nom, clean.birth);
   clean.id = clean.playerId;
-  clean.displayName = [clean.nom, clean.prenom].filter(Boolean).join(' ').trim();
+  clean.displayName = [clean.prenom, clean.nom].filter(Boolean).join(' ').trim().toUpperCase();
   clean.createdAt = firebaseFns.serverTimestamp();
   clean.createdAtIso = new Date().toISOString();
   clean.updatedAt = firebaseFns.serverTimestamp();
@@ -1326,8 +2373,7 @@ async function adminCreatePlayer(data={}){
     const sameId = (p.playerId || p.id) === clean.playerId;
     const sameIdentity = String(p.nom || '').toUpperCase() === clean.nom
       && String(p.prenom || '').trim().toLowerCase() === clean.prenom.toLowerCase()
-      && String(p.categorie || '') === clean.categorie
-      && String(p.subCategory || '') === clean.subCategory;
+      && String(p.birth || p.dateNaissance || '') === String(clean.birth || clean.dateNaissance || '');
     return sameId || sameIdentity;
   });
   if(duplicate) throw new Error(`Joueuse déjà présente : ${duplicate.displayName || `${duplicate.nom || ''} ${duplicate.prenom || ''}`.trim()}`);
@@ -1351,15 +2397,28 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   if(!playerId) throw new Error('playerId manquant.');
   const service = playersService();
+  const teamService = teamsService();
   const ref = firebaseFns.doc(db, 'players', playerId);
   const snap = service?.getPlayer ? null : await firebaseFns.getDoc(ref);
   const before = service?.getPlayer ? (await service.getPlayer(playerId, firestoreServiceContext()) || {}) : (snap.exists() ? {id:snap.id, playerId:snap.id, ...snap.data()} : {});
   const clean = {...updates};
   if(clean.nom) clean.nom = String(clean.nom).trim().toUpperCase();
   if(clean.prenom) clean.prenom = String(clean.prenom).trim();
-  if(clean.categorie && !clean.team) clean.team = normalizeTeamFromCategory(clean.categorie);
-  if(clean.team) clean.teamId = stableFirestoreId('team', clean.team);
-  clean.displayName = [String(clean.nom ?? before.nom ?? '').toUpperCase(), String(clean.prenom ?? before.prenom ?? '')].filter(Boolean).join(' ').trim();
+  if((clean.categorie || clean.subCategory) && !clean.team) clean.team = service?.defaultClubTeamFromSubCategory?.(clean.subCategory || clean.categorie) || normalizeTeamFromCategory(clean.categorie || clean.subCategory);
+  if(clean.team) clean.teamId = teamService?.canonicalTeamId?.(clean.team) || stableFirestoreId('team', clean.team);
+  if(clean.foot || clean.pied || clean.meilleurPiedLabel){
+    clean.foot = String(clean.foot || clean.pied || clean.meilleurPiedLabel || '').trim();
+    clean.pied = clean.foot;
+    clean.meilleurPiedLabel = clean.foot;
+  }
+  if(clean.nationalite || clean.nationality){
+    clean.nationalite = String(clean.nationalite || clean.nationality || '').trim();
+    clean.nationality = clean.nationalite;
+  }
+  clean.playerId = playerId;
+  clean.id = playerId;
+  clean.documentId = playerId;
+  clean.displayName = [String(clean.prenom ?? before.prenom ?? ''), String(clean.nom ?? before.nom ?? '').toUpperCase()].filter(Boolean).join(' ').trim().toUpperCase();
   clean.updatedAt = firebaseFns.serverTimestamp();
   clean.updatedAtIso = new Date().toISOString();
   clean.updatedBy = currentUser.uid;
@@ -1367,8 +2426,9 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   const after = {...before, ...clean};
   const changes = playerAdminDiff(before, after);
   if(!Object.keys(changes).length) return {changed:false, changes:{}};
-  if(service?.savePlayer) await service.savePlayer(after, firestoreServiceContext());
-  else await firebaseFns.setDoc(ref, clean, {merge:true});
+  const playerPayload = {...clean};
+  delete playerPayload.documentId;
+  await firebaseFns.setDoc(ref, playerPayload, {merge:true});
   const summary = Object.entries(changes).map(([field,v]) => `${field}: ${v.before || '-'} → ${v.after || '-'}`).join(' · ');
   await writeChangeLog({collectionName:'players', documentId:playerId, action, before, after, changes, summary});
   if(clean.teamId && clean.team) await firebaseFns.setDoc(firebaseFns.doc(db, 'teams', clean.teamId), {teamId:clean.teamId, name:clean.team, source:'Administration', updatedAt:firebaseFns.serverTimestamp()}, {merge:true});
@@ -1379,6 +2439,52 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
 async function adminArchivePlayer(playerId, archived=true){
   if(!guardAdminAction()) return;
   return adminUpdatePlayer(playerId, {status:archived ? 'archived' : 'active'}, archived ? 'archive' : 'update');
+}
+function isPlayerReference(data={}, playerId=''){
+  return data.playerId === playerId
+    || (Array.isArray(data.playerIds) && data.playerIds.includes(playerId))
+    || (data.playerSnapshot && typeof data.playerSnapshot === 'object' && data.playerSnapshot.playerId === playerId)
+    || (data.player && typeof data.player === 'object' && (data.player.playerId === playerId || data.player.id === playerId));
+}
+async function deletePlayerReferences(playerId){
+  const refCounts = {};
+  for(const collectionName of adminPlayerRefCollections()){
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, collectionName));
+    const deletes = [];
+    snap.forEach(docSnap => {
+      if(isPlayerReference(docSnap.data() || {}, playerId)){
+        deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, collectionName, docSnap.id)));
+      }
+    });
+    await Promise.all(deletes);
+    refCounts[collectionName] = deletes.length;
+  }
+  return refCounts;
+}
+async function adminDeletePlayer(playerId, confirmation=''){
+  if(!guardAdminAction()) return;
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  if(!playerId) throw new Error('playerId manquant.');
+  if(String(confirmation || '').trim() !== playerId) throw new Error('Confirmation playerId incorrecte.');
+  const ref = firebaseFns.doc(db, 'players', playerId);
+  const snap = await firebaseFns.getDoc(ref);
+  if(!snap.exists()) throw new Error('Joueuse introuvable.');
+  const before = {id:snap.id, playerId:snap.id, ...snap.data()};
+  const refCounts = await deletePlayerReferences(playerId);
+  await firebaseFns.deleteDoc(ref);
+  const deletedRefs = Object.entries(refCounts).filter(([,count]) => count).map(([collectionName,count]) => `${collectionName} ${count}`).join(' · ') || 'aucune donnée liée';
+  await writeChangeLog({
+    collectionName:'players',
+    documentId:playerId,
+    action:'delete',
+    before,
+    after:{deleted:true, playerId, refCounts},
+    changes:{deleted:{before:'non', after:'oui'}},
+    summary:`Suppression définitive joueuse : ${before.displayName || `${before.prenom || ''} ${before.nom || ''}`.trim() || playerId} · ${deletedRefs}`
+  });
+  await pullCentralPlayersToLocal(false).catch(()=>{});
+  notifyFramesPlayersUpdated();
+  return {deleted:true, playerId, refCounts};
 }
 async function adminReadChangeLogs(limit=50){
   if(!guardAdminAction()) return [];
@@ -1401,16 +2507,68 @@ async function adminExportPlayers(format='json'){
   return players.length;
 }
 const DEFAULT_DB_OPTIONS = {
-  categories:['U7','U8-U9','U10-U11','U12-U13','U12-U13-U14','U14-U15-U16','U19','R1'],
-  subCategories:['U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U19','R1']
+  categories:['U7','U9','U11','U13','U16','U19','SENIORS'],
+  subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','SENIORS'],
+  teams:['U7 A','U9 A','U11 A','U13 A','U13 B','U16 A','U19','R1']
 };
+let teamIdRepairScheduled = false;
+function resolveOfficialTeamForApp(value, fallback=''){
+  const service = teamsService();
+  const official = service?.resolveOfficialTeam?.(value, fallback);
+  if(official) return {name:official.name, teamId:service.canonicalTeamId(official.name), category:official.category || ''};
+  const players = playersService();
+  const name = players?.resolveClubTeam?.(value, fallback) || players?.defaultClubTeamFromSubCategory?.(value || fallback) || '';
+  return name ? {name, teamId:service?.canonicalTeamId?.(name) || stableFirestoreId('team', name), category:normalizeTeamFromCategory(value || fallback || name)} : null;
+}
+async function adminRepairTeamIds(){
+  if(!guardAdminAction()) return {updated:0};
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const collections = ['players','sessions','matches','matchEvents','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
+  let updated = 0;
+  const writes = [];
+  for(const collectionName of collections){
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, collectionName));
+    snap.forEach(docSnap => {
+      const data = docSnap.data() || {};
+      let patch = null;
+      if(collectionName === 'players'){
+        const player = normalizePlayer({id:docSnap.id, playerId:docSnap.id, ...data});
+        if((player.team && data.team !== player.team) || (player.teamId && data.teamId !== player.teamId)) patch = {team:player.team || '', teamId:player.teamId || '', categorie:player.categorie || data.categorie || '', subCategory:player.subCategory || data.subCategory || ''};
+      }else{
+        const official = resolveOfficialTeamForApp(data.team || data.equipe || data.categorie || data.category || data.subCategory || data.sousCategorie);
+        if(official && (data.team !== official.name || data.teamId !== official.teamId)) patch = {team:official.name, teamId:official.teamId};
+      }
+      if(data.playerSnapshot && typeof data.playerSnapshot === 'object'){
+        const official = resolveOfficialTeamForApp(data.playerSnapshot.team || data.playerSnapshot.categorie || data.playerSnapshot.subCategory);
+        if(official && (data.playerSnapshot.team !== official.name || data.playerSnapshot.teamId !== official.teamId)){
+          patch = {...(patch || {}), playerSnapshot:{...data.playerSnapshot, team:official.name, teamId:official.teamId}};
+        }
+      }
+      if(!patch) return;
+      updated++;
+      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
+        ...patch,
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:new Date().toISOString()
+      }, {merge:true}));
+    });
+  }
+  await Promise.all(writes);
+  if(updated) await writeChangeLog({collectionName:'teams', documentId:'official-team-id-repair', action:'repair', before:{}, after:{updated}, changes:{updated}, summary:`Team ID officiels appliqués sur ${updated} document(s)`});
+  return {updated};
+}
 async function adminListTeamsAndSettings(){
   if(!guardAdminAction()) return {teams:[], settings:DEFAULT_DB_OPTIONS};
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = teamsService();
   if(service?.listTeams && service?.readDatabaseOptions){
+    if(service.ensureOfficialTeams) await service.ensureOfficialTeams(firestoreServiceContext());
+    if(!teamIdRepairScheduled){
+      teamIdRepairScheduled = true;
+      adminRepairTeamIds().catch(err => console.warn('Team ID repair skipped', err));
+    }
     return {
-      teams:await service.listTeams(firestoreServiceContext()),
+      teams:await service.listTeams(firestoreServiceContext(), {includeArchived:true}),
       settings:await service.readDatabaseOptions(firestoreServiceContext())
     };
   }
@@ -1425,21 +2583,24 @@ async function adminListTeamsAndSettings(){
     teams,
     settings:{
       categories:Array.isArray(settings.categories) && settings.categories.length ? settings.categories : DEFAULT_DB_OPTIONS.categories,
-      subCategories:Array.isArray(settings.subCategories) && settings.subCategories.length ? settings.subCategories : DEFAULT_DB_OPTIONS.subCategories
+      subCategories:Array.isArray(settings.subCategories) && settings.subCategories.length ? settings.subCategories : DEFAULT_DB_OPTIONS.subCategories,
+      teams:Array.isArray(settings.teams) && settings.teams.length ? settings.teams : DEFAULT_DB_OPTIONS.teams
     }
   };
 }
 async function adminSaveTeam(team={}){
   if(!guardAdminAction()) return;
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const service = teamsService();
   const name = String(team.name || '').trim();
   if(!name) throw new Error('Nom d’équipe obligatoire.');
-  const teamId = team.teamId || team.id || stableFirestoreId('team', name);
+  const official = service?.resolveOfficialTeam?.(name, team.category || team.categorie || '');
+  if(service?.OFFICIAL_TEAMS && !official) throw new Error('Cette équipe ne fait pas partie de la liste officielle CoachPulse.');
+  const teamId = service?.canonicalTeamId?.(official?.name || name) || stableFirestoreId('team', official?.name || name);
   const ref = firebaseFns.doc(db, 'teams', teamId);
-  const service = teamsService();
   let before = {};
   let created = false;
-  let after = {teamId, name, category:team.category || '', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''};
+  let after = {teamId, name:official?.name || name, category:official?.category || team.category || '', status:team.status || 'active', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''};
   if(service?.saveTeam){
     const result = await service.saveTeam(after, firestoreServiceContext());
     before = result.before || {};
@@ -1453,6 +2614,67 @@ async function adminSaveTeam(team={}){
   }
   await writeChangeLog({collectionName:'teams', documentId:teamId, action:created?'create':'update', before, after:{...before,...after}, changes:objectDiff(before, after, ['name','category']), summary:`Équipe ${created?'créée':'modifiée'} : ${name}`});
   return {teamId, name};
+}
+async function adminArchiveTeam(teamId, archived=true){
+  if(!guardAdminAction()) return;
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const service = teamsService();
+  if(!teamId) throw new Error('teamId obligatoire.');
+  let before = {};
+  let after = {};
+  const initialRef = firebaseFns.doc(db, 'teams', teamId);
+  const initialSnap = await firebaseFns.getDoc(initialRef);
+  before = initialSnap.exists() ? {id:initialSnap.id, teamId:initialSnap.id, ...initialSnap.data()} : {};
+  const official = service?.resolveOfficialTeam?.(before.name || before.team || before.category || teamId, before.category || before.categorie || '');
+  const targetName = official?.name || before.name || teamId;
+  const targetTeamId = official && service?.canonicalTeamId ? service.canonicalTeamId(official.name) : teamId;
+  const targetRef = firebaseFns.doc(db, 'teams', targetTeamId);
+  const targetSnap = targetTeamId === teamId ? initialSnap : await firebaseFns.getDoc(targetRef);
+  const targetBefore = targetSnap.exists() ? {id:targetSnap.id, teamId:targetSnap.id, ...targetSnap.data()} : {};
+  before = Object.keys(targetBefore).length ? targetBefore : before;
+  after = {
+    ...before,
+    teamId:targetTeamId,
+    name:official?.name || before.name || targetName,
+    category:official?.category || before.category || before.categorie || '',
+    subCategories:official?.subCategories || before.subCategories || [],
+    source:before.source || 'CoachPulse officiel',
+    status:archived ? 'archived' : 'active',
+    updatedAt:firebaseFns.serverTimestamp(),
+    updatedAtIso:new Date().toISOString(),
+    updatedBy:currentUser.uid,
+    updatedByEmail:currentUser.email || ''
+  };
+  await firebaseFns.setDoc(targetRef, after, {merge:true});
+  if(!archived){
+    const teamsSnap = await firebaseFns.getDocs(firebaseFns.collection(db, 'teams'));
+    const aliasWrites = [];
+    teamsSnap.forEach(docSnap => {
+      if(docSnap.id === targetTeamId) return;
+      const data = docSnap.data() || {};
+      const aliasOfficial = service?.resolveOfficialTeam?.(data.name || data.team || data.category || docSnap.id, data.category || data.categorie || '');
+      const aliasTeamId = aliasOfficial && service?.canonicalTeamId ? service.canonicalTeamId(aliasOfficial.name) : '';
+      if(aliasTeamId !== targetTeamId) return;
+      aliasWrites.push(firebaseFns.setDoc(firebaseFns.doc(db, 'teams', docSnap.id), {
+        ...data,
+        teamId:targetTeamId,
+        replacedByTeamId:targetTeamId,
+        status:'active',
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:new Date().toISOString(),
+        updatedBy:currentUser.uid,
+        updatedByEmail:currentUser.email || ''
+      }, {merge:true}));
+    });
+    await Promise.all(aliasWrites);
+  }
+  const checkSnap = await firebaseFns.getDoc(targetRef);
+  const check = checkSnap.exists() ? checkSnap.data() : {};
+  if(String(check.status || '').toLowerCase() !== String(after.status).toLowerCase()){
+    throw new Error(`Statut équipe non modifié après écriture (${check.status || 'vide'}).`);
+  }
+  await writeChangeLog({collectionName:'teams', documentId:targetTeamId, action:archived?'archive':'reactivate', before, after:{...before,...after}, changes:objectDiff(before, after, ['status']), summary:`Équipe ${archived?'archivée':'réactivée'} : ${after.name || before.name || targetTeamId}`});
+  return after;
 }
 function cleanOptionList(values){
   return [...new Set((values || []).map(v => String(v || '').trim()).filter(Boolean))];
@@ -1468,13 +2690,14 @@ async function adminSaveDatabaseOptions(options={}){
     settingsId:'database-options',
     categories:cleanOptionList(options.categories),
     subCategories:cleanOptionList(options.subCategories),
+    teams:DEFAULT_DB_OPTIONS.teams,
     updatedAt:firebaseFns.serverTimestamp(),
     updatedAtIso:new Date().toISOString(),
     updatedBy:currentUser.uid,
     updatedByEmail:currentUser.email || ''
   };
   if(!service?.saveDatabaseOptions) await firebaseFns.setDoc(ref, after, {merge:true});
-  await writeChangeLog({collectionName:'settings', documentId:'database-options', action:'update', before, after:{...before,...after}, changes:objectDiff(before, after, ['categories','subCategories']), summary:'Options catégories mises à jour'});
+  await writeChangeLog({collectionName:'settings', documentId:'database-options', action:'update', before, after:{...before,...after}, changes:objectDiff(before, after, ['categories','subCategories','teams']), summary:'Options catégories mises à jour'});
   return after;
 }
 async function updatePlayerRefsInCollection(collectionName, fromPlayerId, toPlayerId){
@@ -1488,20 +2711,140 @@ async function updatePlayerRefsInCollection(collectionName, fromPlayerId, toPlay
   let count = 0;
   snap.forEach(docSnap => {
     const data = docSnap.data() || {};
-    if(data.playerId === fromPlayerId){
+    const directMatch = data.playerId === fromPlayerId;
+    const arrayMatch = Array.isArray(data.playerIds) && data.playerIds.includes(fromPlayerId);
+    const snapshotMatch = data.playerSnapshot && typeof data.playerSnapshot === 'object' && data.playerSnapshot.playerId === fromPlayerId;
+    if(directMatch || arrayMatch || snapshotMatch){
       count++;
-      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
-        playerId:toPlayerId,
+      const patch = {
         mergedFromPlayerId:fromPlayerId,
         updatedAt:firebaseFns.serverTimestamp(),
         updatedAtIso:new Date().toISOString(),
         updatedBy:currentUser.uid,
         updatedByEmail:currentUser.email || ''
-      }, {merge:true}));
+      };
+      if(directMatch) patch.playerId = toPlayerId;
+      if(snapshotMatch) patch.playerSnapshot = {...data.playerSnapshot, playerId:toPlayerId};
+      if(arrayMatch) patch.playerIds = data.playerIds.map(id => id === fromPlayerId ? toPlayerId : id);
+      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), patch, {merge:true}));
     }
   });
   await Promise.all(writes);
   return count;
+}
+function adminPlayerRefCollections(){
+  const service = playersService();
+  return service?.PLAYER_REF_COLLECTIONS || ['matchEvents', 'attendance', 'technicalTests', 'physicalTests', 'injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines', 'workloads', 'medicalFollowUps', 'convocations', 'individualReports'];
+}
+function adminIdentityText(value){
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+function adminIdentityDate(value){
+  const parsed = parseImportDate(value);
+  return parsed || String(value || '').trim();
+}
+function adminPlayerIdentity(player={}){
+  const nom = adminIdentityText(player.nom || player.lastName);
+  const prenom = adminIdentityText(player.prenom || player.firstName);
+  const birth = adminIdentityDate(player.birth || player.dateNaissance || player.birthDate);
+  return {nom, prenom, birth};
+}
+function adminPlayerNameLabel(player={}){
+  const identity = adminPlayerIdentity(player);
+  return [identity.prenom, identity.nom].filter(Boolean).join(' ');
+}
+function adminPlayerMergeScore(player={}){
+  const source = String(player.source || player.importSource || '').toLowerCase();
+  let score = 0;
+  if(source.includes('coachpulse-joueuses-import') || source.includes('reference')) score += 80;
+  if(player.photo) score += 20;
+  if(player.birth || player.dateNaissance) score += 12;
+  if(player.categorie) score += 6;
+  if(player.subCategory) score += 6;
+  if(player.team) score += 4;
+  if(source.includes('test') || /^U20\d{2}$/i.test(String(player.subCategory || ''))) score -= 30;
+  return score;
+}
+function chooseAdminMergePrimary(group=[]){
+  return [...group].sort((a,b) => {
+    const score = adminPlayerMergeScore(b) - adminPlayerMergeScore(a);
+    if(score) return score;
+    return String(b.updatedAtIso || '').localeCompare(String(a.updatedAtIso || ''));
+  })[0];
+}
+function compactAdminMergePlayer(player={}){
+  return {
+    playerId:player.playerId || player.id || '',
+    label:adminPlayerNameLabel(player),
+    nom:player.nom || '',
+    prenom:player.prenom || '',
+    birth:player.birth || player.dateNaissance || '',
+    categorie:player.categorie || '',
+    subCategory:player.subCategory || '',
+    team:player.team || '',
+    source:player.source || player.importSource || '',
+    status:player.status || 'active'
+  };
+}
+function buildAdminDuplicateMergePlan(players=[]){
+  const active = players.filter(p => String(p.status || 'active').toLowerCase() !== 'archived');
+  const strictMap = new Map();
+  const nameMap = new Map();
+  active.forEach(player => {
+    const id = player.playerId || player.id;
+    if(!id) return;
+    const identity = adminPlayerIdentity(player);
+    const nameKey = [identity.nom, identity.prenom].join('|');
+    if(identity.nom && identity.prenom) nameMap.set(nameKey, [...(nameMap.get(nameKey) || []), player]);
+    if(identity.nom && identity.prenom && identity.birth){
+      const strictKey = [identity.nom, identity.prenom, identity.birth].join('|');
+      strictMap.set(strictKey, [...(strictMap.get(strictKey) || []), player]);
+    }
+  });
+  const strictGroups = [];
+  const strictPlayerIds = new Set();
+  strictMap.forEach(group => {
+    const unique = [...new Map(group.map(player => [player.playerId || player.id, player])).values()];
+    if(unique.length < 2) return;
+    const primary = chooseAdminMergePrimary(unique);
+    const keepId = primary.playerId || primary.id;
+    const duplicates = unique.filter(player => (player.playerId || player.id) !== keepId);
+    unique.forEach(player => strictPlayerIds.add(player.playerId || player.id));
+    strictGroups.push({
+      key:[adminPlayerIdentity(primary).nom, adminPlayerIdentity(primary).prenom, adminPlayerIdentity(primary).birth].join('|'),
+      keepId,
+      keep:compactAdminMergePlayer(primary),
+      duplicates:duplicates.map(compactAdminMergePlayer),
+      duplicateIds:duplicates.map(player => player.playerId || player.id),
+      count:unique.length
+    });
+  });
+  const manualCandidates = [];
+  nameMap.forEach(group => {
+    const unique = [...new Map(group.map(player => [player.playerId || player.id, player])).values()].filter(player => !strictPlayerIds.has(player.playerId || player.id));
+    if(unique.length < 2) return;
+    manualCandidates.push({
+      name:adminPlayerNameLabel(unique[0]),
+      reason:'Même nom/prénom, date de naissance absente ou différente',
+      players:unique.map(compactAdminMergePlayer)
+    });
+  });
+  strictGroups.sort((a,b) => a.keep.label.localeCompare(b.keep.label, 'fr'));
+  manualCandidates.sort((a,b) => a.name.localeCompare(b.name, 'fr'));
+  return {
+    generatedAtIso:new Date().toISOString(),
+    rule:'Fusion automatique seulement si nom + prénom + date de naissance identiques.',
+    refCollections:adminPlayerRefCollections(),
+    strictGroups,
+    manualCandidates,
+    groupsToMerge:strictGroups.length,
+    duplicatePlayersToArchive:strictGroups.reduce((sum, group) => sum + group.duplicateIds.length, 0)
+  };
+}
+async function adminBuildDuplicateMergePlan(){
+  if(!guardAdminAction()) return buildAdminDuplicateMergePlan([]);
+  const players = await adminListRawPlayers();
+  return buildAdminDuplicateMergePlan(players);
 }
 async function adminMergePlayers({primaryPlayerId, duplicatePlayerId}={}){
   if(!guardAdminAction()) return;
@@ -1514,7 +2857,7 @@ async function adminMergePlayers({primaryPlayerId, duplicatePlayerId}={}){
   const primary = {playerId:primaryPlayerId, ...primarySnap.data()};
   const duplicate = {playerId:duplicatePlayerId, ...duplicateSnap.data()};
   const refCounts = {};
-  for(const collectionName of ['matchEvents','attendance','technicalTests','physicalTests']){
+  for(const collectionName of adminPlayerRefCollections()){
     refCounts[collectionName] = await updatePlayerRefsInCollection(collectionName, duplicatePlayerId, primaryPlayerId);
   }
   const fill = {};
@@ -1544,22 +2887,417 @@ async function adminMergePlayers({primaryPlayerId, duplicatePlayerId}={}){
   notifyFramesPlayersUpdated();
   return {primaryPlayerId, duplicatePlayerId, refCounts, filledFields:Object.keys(fill)};
 }
+async function adminMergeDuplicatePlan(){
+  if(!guardAdminAction()) return {mergedPlayers:0, groupsMerged:0, results:[]};
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const plan = await adminBuildDuplicateMergePlan();
+  const results = [];
+  for(const group of plan.strictGroups){
+    for(const duplicatePlayerId of group.duplicateIds){
+      results.push(await adminMergePlayers({primaryPlayerId:group.keepId, duplicatePlayerId}));
+    }
+  }
+  await writeChangeLog({
+    collectionName:'players',
+    documentId:'duplicate-merge-plan',
+    action:'merge-plan',
+    before:{},
+    after:{groupsMerged:plan.strictGroups.length, mergedPlayers:results.length, rule:plan.rule},
+    changes:{mergedPlayers:{before:0, after:results.length}},
+    summary:`Fusion stricte doublons : ${results.length} fiches archivées sur ${plan.strictGroups.length} groupes.`
+  });
+  return {groupsMerged:plan.strictGroups.length, mergedPlayers:results.length, results};
+}
+async function adminRepairPlayerIdsByIdentity(){
+  if(!guardAdminAction()) return {repaired:0, skipped:0, references:{}};
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const service = playersService();
+  const players = await adminListRawPlayers();
+  const report = {repaired:0, skipped:0, references:{}, details:[]};
+  for(const player of players){
+    const nom = String(player.nom || '').trim().toUpperCase();
+    const prenom = String(player.prenom || '').trim().toUpperCase();
+    const birth = String(player.birth || player.dateNaissance || '').trim();
+    const currentId = player.documentId || player.id || player.playerId;
+    const canonicalId = service?.canonicalPlayerId ? service.canonicalPlayerId({...player, nom, prenom, birth}) : stableFirestoreId('player', prenom, nom, birth);
+    if(!currentId || !canonicalId || currentId === canonicalId){ report.skipped++; continue; }
+    const canonicalRef = firebaseFns.doc(db, 'players', canonicalId);
+    const legacyIds = [...new Set([...(Array.isArray(player.legacyPlayerIds) ? player.legacyPlayerIds : []), player.legacyPlayerId, currentId].filter(Boolean))];
+    const {documentId, ...playerData} = player;
+    await firebaseFns.setDoc(canonicalRef, {
+      ...playerData,
+      id:canonicalId,
+      playerId:canonicalId,
+      legacyPlayerId:legacyIds[0] || currentId,
+      legacyPlayerIds:legacyIds,
+      updatedAt:firebaseFns.serverTimestamp(),
+      updatedAtIso:new Date().toISOString(),
+      updatedBy:currentUser.uid,
+      updatedByEmail:currentUser.email || ''
+    }, {merge:true});
+    const refCounts = {};
+    for(const collectionName of adminPlayerRefCollections()){
+      refCounts[collectionName] = await updatePlayerRefsInCollection(collectionName, currentId, canonicalId);
+      report.references[collectionName] = (report.references[collectionName] || 0) + refCounts[collectionName];
+    }
+    await firebaseFns.setDoc(firebaseFns.doc(db, 'players', currentId), {
+      status:'archived',
+      archivedReason:'playerId réparé vers prénom-nom-dateNaissance',
+      mergedIntoPlayerId:canonicalId,
+      updatedAt:firebaseFns.serverTimestamp(),
+      updatedAtIso:new Date().toISOString(),
+      updatedBy:currentUser.uid,
+      updatedByEmail:currentUser.email || ''
+    }, {merge:true});
+    report.repaired++;
+    report.details.push({from:currentId, to:canonicalId, references:refCounts});
+  }
+  await writeChangeLog({
+    collectionName:'players',
+    documentId:'repair-playerids-by-identity',
+    action:'repair-playerids',
+    before:{},
+    after:report,
+    changes:{repaired:{before:0, after:report.repaired}},
+    summary:`Réparation playerId prénom-nom-dateNaissance : ${report.repaired} fiche(s), références transférées.`
+  });
+  await pullCentralPlayersToLocal(false).catch(()=>{});
+  notifyFramesPlayersUpdated();
+  return report;
+}
+function buildCleanPlayersReference(rows=[], options={}){
+  const service = playersService();
+  const sourceSeason = options.sourceSeason || '2025-2026';
+  const source = options.source || 'Migration propre CoachPulse';
+  const normalized = rows.map(row => service?.normalizePlayer ? service.normalizePlayer({...row, season:row.season || row.saison || sourceSeason, source, status:'active'}) : normalizePlayer({...row, season:row.season || row.saison || sourceSeason, source, status:'active'}));
+  const players = service?.dedupePlayers ? service.dedupePlayers(normalized) : sortPlayersForApp(normalized);
+  const ids = new Set();
+  const duplicates = [];
+  players.forEach(player => {
+    const id = player.playerId || player.id;
+    if(ids.has(id)) duplicates.push(id);
+    ids.add(id);
+  });
+  const categories = {};
+  players.forEach(player => {
+    const key = `${player.categorie || '-'} / ${player.subCategory || '-'}`;
+    categories[key] = (categories[key] || 0) + 1;
+  });
+  return {
+    players,
+    report:{
+      sourceRows:rows.length,
+      cleanPlayers:players.length,
+      duplicates,
+      withPhoto:players.filter(player => player.photo).length,
+      categories
+    }
+  };
+}
+async function adminAnalyzeCleanPlayersReference(rows=[], options={}){
+  if(!guardAdminAction()) return {players:[], report:{}};
+  return buildCleanPlayersReference(rows, options);
+}
+async function adminApplyCleanPlayersReference(rows=[], options={}){
+  if(!guardAdminAction()) return {written:0, archived:0};
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const {players, report} = buildCleanPlayersReference(rows, options);
+  if(players.length !== 127) throw new Error(`Migration bloquée : ${players.length} joueuses détectées au lieu de 127.`);
+  if(report.duplicates.length) throw new Error(`Migration bloquée : ${report.duplicates.length} doublons playerId dans la source.`);
+  await exportCentralFirestore('json');
+  const existing = await adminListRawPlayers();
+  const cleanIds = new Set(players.map(player => player.playerId || player.id));
+  const writes = [];
+  const now = new Date().toISOString();
+  players.forEach(player => {
+    writes.push(firebaseFns.setDoc(firebaseFns.doc(db, 'players', player.playerId), {
+      ...player,
+      status:'active',
+      migrationBatch:'clean-reference-2026-2027',
+      updatedAt:firebaseFns.serverTimestamp(),
+      updatedAtIso:now,
+      updatedBy:currentUser.uid,
+      updatedByEmail:currentUser.email || ''
+    }, {merge:true}));
+    if(player.teamId && player.team){
+      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, 'teams', player.teamId), {
+        teamId:player.teamId,
+        name:player.team,
+        category:player.categorie || '',
+        source:'Migration propre CoachPulse',
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:now
+      }, {merge:true}));
+    }
+  });
+  let archived = 0;
+  existing.forEach(player => {
+    const id = player.playerId || player.id;
+    if(!id || cleanIds.has(id) || String(player.status || '').toLowerCase() === 'archived') return;
+    archived++;
+    writes.push(firebaseFns.setDoc(firebaseFns.doc(db, 'players', id), {
+      status:'archived',
+      archivedReason:'Migration propre vers référentiel 127 joueuses',
+      migrationBatch:'clean-reference-2026-2027',
+      updatedAt:firebaseFns.serverTimestamp(),
+      updatedAtIso:now,
+      updatedBy:currentUser.uid,
+      updatedByEmail:currentUser.email || ''
+    }, {merge:true}));
+  });
+  await Promise.all(writes);
+  await writeChangeLog({
+    collectionName:'players',
+    documentId:'clean-reference-2026-2027',
+    action:'clean-migration',
+    before:{existingPlayers:existing.length},
+    after:{cleanPlayers:players.length, archivedPlayers:archived, categories:report.categories},
+    changes:{players:{before:existing.length, after:players.length}, archived:{before:0, after:archived}},
+    summary:`Migration base joueuses propre : ${players.length} fiches actives, ${archived} anciennes fiches archivées.`
+  });
+  await pullCentralPlayersToLocal(false).catch(()=>{});
+  notifyFramesPlayersUpdated();
+  return {written:players.length, archived, report};
+}
 function canUseMedical(action='read'){
   return hasModulePermission(getModule('medical'), action);
 }
 function guardMedical(action='read'){
   if(canUseMedical(action)) return true;
-  alert(action === 'importExport' ? 'Export médical réservé aux administrateurs.' : 'Accès médical non autorisé pour ce rôle.');
+  alert(action === 'importExport' ? 'Export médical réservé aux éditeurs autorisés.' : 'Accès médical non autorisé.');
   return false;
 }
 function medicalCapabilities(){
   return {role:getCurrentUserRole(), canRead:canUseMedical('read'), canWrite:canUseMedical('write'), canExport:canUseMedical('importExport')};
+}
+function canUseAthletic(action='read'){
+  return hasModulePermission(getModule('tests-athletiques'), action);
+}
+function guardAthletic(action='read'){
+  if(canUseAthletic(action)) return true;
+  alert(action === 'importExport' ? 'Export tests athlétiques réservé aux administrateurs / responsables.' : 'Accès tests athlétiques non autorisé pour ce rôle.');
+  return false;
+}
+function athleticCapabilities(){
+  return {role:getCurrentUserRole(), canRead:canUseAthletic('read'), canWrite:canUseAthletic('write'), canExport:canUseAthletic('importExport')};
 }
 function localMedicalPayload(){
   return parseStoredJson('coachpulse:medicalData', {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[]});
 }
 function saveLocalMedicalPayload(payload){
   localStorage.setItem('coachpulse:medicalData', JSON.stringify(payload || {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[]}));
+}
+function localAthleticPayload(){
+  return parseStoredJson('coachpulse:athleticTests', []);
+}
+function saveLocalAthleticPayload(payload){
+  localStorage.setItem('coachpulse:athleticTests', JSON.stringify(Array.isArray(payload) ? payload : []));
+}
+async function bundledAthleticPayload(){
+  try{
+    const response = await fetch('data/tests-athletiques-2025-2026.json', {cache:'no-store'});
+    if(!response.ok) return [];
+    const rows = await response.json();
+    return Array.isArray(rows) ? rows : [];
+  }catch(_){
+    return [];
+  }
+}
+function normalizeAthleticToken(value){
+  return String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '');
+}
+function athleticNumber(value){
+  if(value === '' || value == null) return '';
+  const clean = String(value).replace(',', '.').replace(/[^\d.-]/g, '');
+  const n = Number(clean);
+  return Number.isFinite(n) ? n : '';
+}
+const ATHLETIC_METRICS = {
+  vmi:{type:'vmi', label:'VMI 30/15 IFT', unit:'km/h', direction:'high'},
+  illinois:{type:'illinois', label:'Illinois', unit:'s', direction:'low'},
+  v10s:{type:'v10s', label:'Vitesse 10m', unit:'s', direction:'low'},
+  v10kmh:{type:'v10kmh', label:'Vitesse 10m', unit:'km/h', direction:'high'},
+  v40s:{type:'v40s', label:'Vitesse 40m', unit:'s', direction:'low'},
+  v40kmh:{type:'v40kmh', label:'Vitesse 40m', unit:'km/h', direction:'high'},
+  cmj:{type:'cmj', label:'CMJ', unit:'cm', direction:'high'}
+};
+function athleticMetricsFromTests(tests={}, comment=''){
+  return Object.entries(ATHLETIC_METRICS).map(([key, meta]) => {
+    const value = athleticNumber(tests?.[key]);
+    if(value === '') return null;
+    return {
+      type:meta.type,
+      label:meta.label,
+      result:value,
+      unit:meta.unit,
+      direction:meta.direction,
+      comment:comment || ''
+    };
+  }).filter(Boolean);
+}
+function athleticDateValue(row={}){
+  return row.date || row.testDate || row.test_date || row.dateTest || row.createdAtIso?.slice?.(0, 10) || '';
+}
+function normalizeAthleticDate(value){
+  const text = String(value || '').trim();
+  if(!text) return '';
+  const iso = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if(iso){
+    const [, y, m, d] = iso;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  const fr = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if(fr){
+    const [, d, m, y] = fr;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+}
+function normalizeAthleticSeason(value, dateValue){
+  const text = String(value || '').trim();
+  if(/^\d{4}-\d{4}$/.test(text)) return text;
+  const date = normalizeAthleticDate(dateValue);
+  return date ? seasonFromDate(date) : seasonFromDate(new Date());
+}
+function athleticMetricKey(label='', row={}){
+  const key = normalizeAthleticToken(label || row.testName || row.testType || row.type || row.metric);
+  const unit = normalizeAthleticToken(row.unit || row.unite);
+  if(!key) return '';
+  if(key.includes('vmi') || key.includes('ift') || key.includes('3015')) return 'vmi';
+  if(key.includes('illinois') || key.includes('agilite')) return 'illinois';
+  if(key.includes('cmj') || key.includes('detente') || key.includes('jump') || key.includes('puissance')) return 'cmj';
+  if(key.includes('10m') || key.includes('vitesse10') || key.includes('sprint10')){
+    return key.includes('kmh') || unit.includes('kmh') ? 'v10kmh' : 'v10s';
+  }
+  if(key.includes('40m') || key.includes('vitesse40') || key.includes('sprint40')){
+    return key.includes('kmh') || unit.includes('kmh') ? 'v40kmh' : 'v40s';
+  }
+  if(['vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].includes(key)) return key;
+  return '';
+}
+function athleticTestsFromRow(row={}){
+  const tests = {};
+  const source = row.tests && typeof row.tests === 'object' ? row.tests : {};
+  ['vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].forEach(key => {
+    const value = athleticNumber(source[key] ?? row[key]);
+    if(value !== '') tests[key] = value;
+  });
+  if(Array.isArray(row.metrics)){
+    row.metrics.forEach(metric => {
+      const metricKey = athleticMetricKey(metric.type || metric.label || metric.testName, metric);
+      const value = athleticNumber(metric.result ?? metric.value ?? metric.valeur ?? metric.score);
+      if(metricKey && value !== '') tests[metricKey] = value;
+    });
+  }
+  const metricKey = athleticMetricKey(row.testName || row.testType || row.type || row.metric, row);
+  if(metricKey){
+    const value = athleticNumber(row.value ?? row.valeur ?? row.result ?? row.resultat ?? row.score);
+    if(value !== '') tests[metricKey] = value;
+  }
+  return tests;
+}
+function playerSearchKey(value){
+  return normalizeAthleticToken(value);
+}
+function athleticNameVariants(value){
+  const text = String(value || '').trim();
+  const tokens = text.split(/\s+/).filter(Boolean);
+  const variants = new Set([playerSearchKey(text)]);
+  if(tokens.length > 1){
+    variants.add(playerSearchKey([...tokens].reverse().join(' ')));
+    variants.add(playerSearchKey(tokens.filter(token => token.length > 1).join(' ')));
+    variants.add(playerSearchKey(tokens.filter(token => token.length > 1).reverse().join(' ')));
+  }
+  return [...variants].filter(Boolean);
+}
+function athleticRowNameCandidates(row={}){
+  const lastName = row.nom || row.lastName || row.lastname || row.playerLastName || row.playerSnapshot?.nom;
+  const firstName = row.prenom || row.prénom || row.firstName || row.firstname || row.playerFirstName || row.playerSnapshot?.prenom;
+  return [
+    row.playerName,
+    row.joueuse,
+    row.name,
+    row.fullName,
+    row.displayName,
+    row.playerSnapshot?.displayName,
+    `${firstName || ''} ${lastName || ''}`,
+    `${lastName || ''} ${firstName || ''}`
+  ];
+}
+function athleticPlayerLookup(players=[]){
+  const byId = new Map();
+  const byName = new Map();
+  players.forEach(player => {
+    const id = player.playerId || player.id;
+    if(id) byId.set(id, player);
+    const names = [
+      player.displayName,
+      player.playerName,
+      `${player.prenom || ''} ${player.nom || ''}`,
+      `${player.nom || ''} ${player.prenom || ''}`
+    ].flatMap(athleticNameVariants).filter(Boolean);
+    names.forEach(name => { if(!byName.has(name)) byName.set(name, player); });
+  });
+  return {byId, byName};
+}
+function resolveAthleticPlayer(row={}, lookup={}){
+  const id = row.playerId || row.idPlayer || row.player?.playerId || row.playerSnapshot?.playerId;
+  if(id && lookup.byId?.has(id)) return lookup.byId.get(id);
+  const names = athleticRowNameCandidates(row)
+    .flatMap(athleticNameVariants)
+    .filter(Boolean);
+  return names.map(name => lookup.byName?.get(name)).find(Boolean) || null;
+}
+function normalizeAthleticRows(rawRows=[], players=[]){
+  const service = playersService();
+  const lookup = athleticPlayerLookup(players);
+  const grouped = new Map();
+  rawRows.forEach((raw, idx) => {
+    const tests = athleticTestsFromRow(raw);
+    if(!Object.keys(tests).length) return;
+    const date = normalizeAthleticDate(athleticDateValue(raw));
+    const season = normalizeAthleticSeason(raw.season || raw.saison, date);
+    const rawPlayer = resolveAthleticPlayer(raw, lookup);
+    const playerId = rawPlayer?.playerId || rawPlayer?.id || raw.playerId || raw.playerSnapshot?.playerId || '';
+    if(!playerId) return;
+    const seasonPlayer = rawPlayer && service?.playerForSeason ? service.playerForSeason(rawPlayer, season) : (rawPlayer || raw.playerSnapshot || {});
+    const canonicalId = seasonPlayer.playerId || seasonPlayer.id || playerId;
+    const groupId = stableFirestoreId('physicalTest', canonicalId, date || 'date-inconnue', season);
+    const previous = grouped.get(groupId) || {
+      id:groupId,
+      physicalTestId:groupId,
+      testId:groupId,
+      playerId:canonicalId,
+      playerName:seasonPlayer.displayName || `${seasonPlayer.prenom || ''} ${seasonPlayer.nom || ''}`.trim() || raw.playerName || raw.joueuse || '',
+      playerSnapshot:{
+        playerId:canonicalId,
+        nom:seasonPlayer.nom || raw.playerSnapshot?.nom || '',
+        prenom:seasonPlayer.prenom || raw.playerSnapshot?.prenom || '',
+        displayName:seasonPlayer.displayName || raw.playerSnapshot?.displayName || raw.playerName || raw.joueuse || '',
+        categorie:seasonPlayer.categorie || raw.categorie || raw.category || '',
+        subCategory:seasonPlayer.subCategory || raw.subCategory || raw.sousCategorie || '',
+        team:seasonPlayer.team || raw.team || raw.equipe || '',
+        photo:seasonPlayer.photo || raw.playerSnapshot?.photo || ''
+      },
+      date,
+      season,
+      categorie:seasonPlayer.categorie || raw.categorie || raw.category || '',
+      subCategory:seasonPlayer.subCategory || raw.subCategory || raw.sousCategorie || '',
+      tests:{},
+      metrics:[],
+      comment:raw.comment || raw.commentaire || raw.note || '',
+      source:raw.source || 'Tests athlétiques'
+    };
+    const nextTests = {...previous.tests, ...tests};
+    grouped.set(groupId, {
+      ...previous,
+      originalIds:[...(previous.originalIds || []), raw.physicalTestId || raw.testId || raw.id || `row-${idx}`],
+      tests:nextTests,
+      metrics:athleticMetricsFromTests(nextTests, previous.comment || raw.comment || raw.commentaire || raw.note || '')
+    });
+  });
+  return [...grouped.values()].sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
 }
 async function moduleListPlayers(){
   if(!requireAuth()) throw new Error('Connexion Firebase requise.');
@@ -1575,9 +3313,47 @@ async function moduleListPlayers(){
   }
   return sortPlayersForApp([...byId.values()]);
 }
+async function listPlayers(filters={}){
+  return measureAsync('listPlayers', async () => {
+    const players = await moduleListPlayers();
+    const service = playersService();
+    const filtered = service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
+    const hints = await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints());
+    return filterAuthorizedPlayers(enrichPlayersWithTechnicalFootHints(filtered, hints));
+  });
+}
+async function listTeams(filters={}){
+  const service = teamsService();
+  const teams = service?.listTeams && db && currentUser ? await service.listTeams(firestoreServiceContext(), filters) : (service?.officialTeamRows ? service.officialTeamRows() : []);
+  return filterAuthorizedTeams(teams);
+}
+function seasonFromDate(date=new Date()){
+  const service = playersService();
+  if(service?.seasonFromDate) return service.seasonFromDate(date);
+  const d = date instanceof Date ? date : new Date(date);
+  const safe = Number.isNaN(d.getTime()) ? new Date() : d;
+  const year = safe.getFullYear();
+  return safe.getMonth() >= 6 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+}
+function currentSeason(){ return seasonFromDate(new Date()); }
+function playerForSeason(player={}, season=currentSeason()){
+  const service = playersService();
+  return service?.playerForSeason ? service.playerForSeason(player, season) : player;
+}
+function categorySnapshotForSeason(player={}, season=currentSeason()){
+  const service = playersService();
+  if(service?.categorySnapshotForSeason) return service.categorySnapshotForSeason(player, season);
+  const team = player.team || player.categorie || '';
+  return {season, categorie:player.categorie || '', subCategory:player.subCategory || player.sousCategorie || '', team, teamId:teamsService()?.canonicalTeamId?.(team) || (team ? stableFirestoreId('team', team) : '')};
+}
+async function getPlayer(playerId){
+  if(!playerId) return null;
+  const players = await listPlayers();
+  return players.find(player => (player.playerId || player.id) === playerId) || null;
+}
 async function medicalListPlayers(){
   if(!guardMedical('read')) return [];
-  return moduleListPlayers();
+  return listPlayers();
 }
 async function medicalListData(){
   if(!guardMedical('read')) return localMedicalPayload();
@@ -1597,11 +3373,27 @@ async function medicalSaveInjury(injury={}){
   if(!injury.playerId) throw new Error('playerId obligatoire.');
   const now = new Date().toISOString();
   const injuryId = injury.injuryId || injury.id || stableFirestoreId('injury', injury.playerId, injury.declaredAt || now, injury.bodyZone || 'zone');
+  const season = injury.season || seasonFromDate(injury.declaredAt || now);
+  const player = await getPlayer(injury.playerId);
+  const seasonalPlayer = player ? playerForSeason(player, season) : null;
+  const playerSnapshot = seasonalPlayer ? {
+    ...(injury.playerSnapshot || {}),
+    nom:String(seasonalPlayer.nom || injury.playerSnapshot?.nom || '').toUpperCase(),
+    prenom:String(seasonalPlayer.prenom || injury.playerSnapshot?.prenom || '').toUpperCase(),
+    categorie:seasonalPlayer.categorie || injury.playerSnapshot?.categorie || '',
+    subCategory:seasonalPlayer.subCategory || seasonalPlayer.sousCategorie || injury.playerSnapshot?.subCategory || '',
+    team:seasonalPlayer.team || injury.playerSnapshot?.team || '',
+    teamId:seasonalPlayer.teamId || injury.playerSnapshot?.teamId || '',
+    photo:seasonalPlayer.photo || injury.playerSnapshot?.photo || '',
+    poste:seasonalPlayer.poste || injury.playerSnapshot?.poste || ''
+  } : (injury.playerSnapshot || {});
   const clean = {
     ...injury,
     id:injuryId,
     injuryId,
     playerId:injury.playerId,
+    playerSnapshot,
+    season,
     status:injury.status || injury.availability || 'active',
     bodyZone:injury.bodyZone || '',
     painLevel:Number(injury.painLevel || 0),
@@ -1679,6 +3471,131 @@ async function medicalExport(format='json'){
     downloadText(rows.map(row => row.map(csvEscape).join(';')).join('\n'), 'coachpulse_suivi_medical.csv', 'text/csv;charset=utf-8');
   }else exportJson(payload, 'coachpulse_suivi_medical.json');
 }
+async function athleticListData(filters={}){
+  return measureAsync('athleticListData', async () => {
+  if(!guardAthletic('read')) return [];
+  const now = Date.now();
+  const filterRows = rows => rows.filter(row =>
+    (!filters.playerId || row.playerId === filters.playerId)
+    && (!filters.season || filters.season === 'all' || row.season === filters.season)
+    && (!filters.date || row.date === filters.date)
+  );
+  if(!filters.forceRefresh && appDataCache.athleticRows.rows && now - appDataCache.athleticRows.loadedAt < DATA_CACHE_TTL_MS){
+    return filterRows(appDataCache.athleticRows.rows);
+  }
+  const local = localAthleticPayload();
+  const rawById = new Map();
+  const bundled = await bundledAthleticPayload();
+  bundled.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `bundled-${idx}`, row));
+  local.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `local-${idx}`, row));
+  if(db && currentUser){
+    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'physicalTests'));
+    snap.forEach(docSnap => rawById.set(docSnap.id, {id:docSnap.id, physicalTestId:docSnap.id, ...docSnap.data(), syncPending:false}));
+    saveLocalAthleticPayload([...rawById.values()]);
+  }
+  const rawRows = [...rawById.values()];
+  const players = await listPlayers({season:'all', includeArchived:true});
+  const rows = normalizeAthleticRows(rawRows, players);
+  appDataCache.athleticRows.rows = rows;
+  appDataCache.athleticRows.loadedAt = now;
+  return filterRows(rows);
+  });
+}
+async function athleticSaveTest(test={}){
+  if(!guardAthletic('write')) return null;
+  if(!test.playerId) throw new Error('playerId obligatoire.');
+  const service = playersService();
+  const players = await listPlayers({season:test.season || seasonFromDate(test.date || new Date())});
+  const canonicalPlayer = players.find(player => (player.playerId || player.id) === test.playerId);
+  if(!canonicalPlayer) throw new Error('playerId introuvable dans la base joueuses unique.');
+  const now = new Date().toISOString();
+  const date = test.date || now.slice(0,10);
+  const season = test.season || seasonFromDate(date);
+  const seasonPlayer = service?.playerForSeason ? service.playerForSeason(canonicalPlayer, season) : canonicalPlayer;
+  const canonicalPlayerId = seasonPlayer.playerId || seasonPlayer.id || test.playerId;
+  const playerName = seasonPlayer.displayName || `${seasonPlayer.prenom || ''} ${seasonPlayer.nom || ''}`.trim();
+  const comment = test.comment || test.commentaire || test.note || '';
+  const tests = test.tests || {};
+  const metrics = athleticMetricsFromTests(tests, comment);
+  const playerSnapshot = {
+    playerId:canonicalPlayerId,
+    nom:seasonPlayer.nom || '',
+    prenom:seasonPlayer.prenom || '',
+    displayName:playerName,
+    categorie:seasonPlayer.categorie || '',
+    subCategory:seasonPlayer.subCategory || '',
+    team:seasonPlayer.team || '',
+    teamId:seasonPlayer.teamId || '',
+    photo:seasonPlayer.photo || ''
+  };
+  const physicalTestId = test.physicalTestId || test.testId || stableFirestoreId('physicalTest', canonicalPlayerId, date, season);
+  const clean = {
+    ...test,
+    id:physicalTestId,
+    physicalTestId,
+    testId:physicalTestId,
+    playerId:canonicalPlayerId,
+    playerName,
+    playerSnapshot,
+    date,
+    season,
+    categorie:playerSnapshot.categorie,
+    subCategory:playerSnapshot.subCategory,
+    team:playerSnapshot.team,
+    teamId:playerSnapshot.teamId,
+    tests,
+    metrics,
+    testTypes:metrics.map(metric => metric.type),
+    type:'athleticTest',
+    comment,
+    source:test.source || 'Tests athlétiques',
+    syncPending:!!(db && currentUser),
+    createdBy:test.createdBy || currentUser?.uid || '',
+    createdByEmail:test.createdByEmail || currentUser?.email || '',
+    updatedAtIso:now,
+    updatedBy:currentUser?.uid || '',
+    updatedByEmail:currentUser?.email || ''
+  };
+  if(!clean.createdAtIso) clean.createdAtIso = now;
+  const local = localAthleticPayload();
+  const idx = local.findIndex(row => (row.physicalTestId || row.testId || row.id) === physicalTestId);
+  if(idx >= 0) local[idx] = {...local[idx], ...clean};
+  else local.push(clean);
+  saveLocalAthleticPayload(local);
+  invalidateAppDataCaches('athletic');
+  snapshotLocalData();
+  if(db && currentUser){
+    const payload = {
+      ...clean,
+      updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined
+    };
+    const firestoreWrite = firebaseFns.setDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId), payload, {merge:true})
+      .then(() => {
+        const refreshed = localAthleticPayload();
+        const localIdx = refreshed.findIndex(row => (row.physicalTestId || row.testId || row.id) === physicalTestId);
+        if(localIdx >= 0){
+          refreshed[localIdx] = {...refreshed[localIdx], syncPending:false};
+          saveLocalAthleticPayload(refreshed);
+        }
+      })
+      .catch(error => console.warn('CoachPulse athletic Firestore sync pending', error));
+    await Promise.race([
+      firestoreWrite,
+      new Promise(resolve => setTimeout(resolve, 1800))
+    ]);
+  }
+  return clean;
+}
+async function athleticExport(format='json'){
+  if(!guardAthletic('importExport')) return;
+  const data = await athleticListData({season:'all'});
+  const payload = {app:'CoachPulse', module:'tests-athletiques', exportedAt:new Date().toISOString(), data};
+  if(format === 'csv'){
+    const rows = [['physicalTestId','playerId','joueuse','season','date','categorie','subCategory','vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj']];
+    data.forEach(row => rows.push([row.physicalTestId||row.testId||row.id||'', row.playerId||'', row.playerName||'', row.season||'', row.date||'', row.categorie||'', row.subCategory||'', row.tests?.vmi||'', row.tests?.illinois||'', row.tests?.v10s||'', row.tests?.v10kmh||'', row.tests?.v40s||'', row.tests?.v40kmh||'', row.tests?.cmj||'']));
+    downloadText(rows.map(row => row.map(csvEscape).join(';')).join('\n'), 'coachpulse_tests_athletiques.csv', 'text/csv;charset=utf-8');
+  }else exportJson(payload, 'coachpulse_tests_athletiques.json');
+}
 function getModuleCatalog(){
   return moduleRegistry().map(module => ({id:module.id,name:module.name,icon:module.icon,section:module.section,active:module.active !== false,collection:module.collection,relatedCollections:module.relatedCollections || [],screen:module.screen,permissions:module.permissions,settings:module.settings,visible:hasModulePermission(module,'read') && module.active !== false}));
 }
@@ -1704,7 +3621,16 @@ async function adminSaveModuleSettings(moduleId, updates={}){
   updateRoleUi();
   return getModuleCatalog();
 }
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, adminSaveModuleSettings, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+var seasonFromDate = typeof seasonFromDate === 'function' ? seasonFromDate : (() => '');
+var currentSeason = typeof currentSeason === 'function' ? currentSeason : (() => '');
+var listPlayers = typeof listPlayers === 'function' ? listPlayers : adminListPlayers;
+var getPlayer = typeof getPlayer === 'function' ? getPlayer : (async playerId => (await adminListPlayers()).find(p => (p.playerId || p.id) === playerId) || null);
+var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'function' ? adminBuildDuplicateMergePlan : (async () => []);
+var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
+var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
+var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedRecords});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   snapshotLocalData({fromCloud:true});
@@ -1731,7 +3657,7 @@ async function syncCloud(manual=false){
     updateSyncState('Cloud synchronisé');
     if(manual) alert('Synchronisation cloud OK.');
   }catch(e){
-    localStorage.setItem('coachpulse:pendingSync','1');
+    try{ localStorage.setItem('coachpulse:pendingSync','1'); }catch(_e){}
     updateSyncState('Erreur cloud · local OK');
     if(manual) alert('Sync cloud impossible : '+cleanError(e));
   }
@@ -1774,6 +3700,7 @@ async function logout(){
   try{ if(auth) await firebaseFns.signOut(auth); }catch(e){ alert('Déconnexion impossible : '+cleanError(e)); }
   stopRealtimeSync();
   currentUser = null; currentProfile = null;
+  clearSensitiveLocalData();
   localStorage.removeItem('coachpulse:pendingSync');
   setLocked(true);
   updateSyncState('Compte déconnecté');
@@ -1781,12 +3708,19 @@ async function logout(){
 
 async function createMember(){
   const msg = $('#adminMsg'); msg.textContent=''; msg.classList.remove('bad');
-  if(!guardAdminAction()) return;
+  if(!isSuperAdmin()){ msg.textContent='Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.'; msg.classList.add('bad'); return; }
   const name = $('#newStaffName').value.trim();
   const email = $('#newStaffEmail').value.trim().toLowerCase();
   const password = $('#newStaffPassword').value;
-  const role = $('#newStaffRole').value;
+  const service = permissionsService();
+  const role = service?.normalizeRole ? service.normalizeRole($('#newStaffRole').value) : $('#newStaffRole').value;
+  const roleLabel = service?.roleLabel ? service.roleLabel(role) : role;
+  const permissionLevel = service?.normalizePermission ? service.normalizePermission($('#newStaffPermission')?.value || 'LECTEUR') : ($('#newStaffPermission')?.value || 'LECTEUR');
+  const permissionLabel = service?.permissionLabel ? service.permissionLabel(permissionLevel) : permissionLevel;
   const scope = $('#newStaffScope').value.trim();
+  const teamIds = readCsvField('newStaffTeams');
+  const allowedModules = readCsvField('newStaffModules');
+  const status = $('#newStaffStatus')?.value || 'ACTIVE';
   if(!email || !password || password.length < 6){ msg.textContent='Email et mot de passe de 6 caractères minimum obligatoires.'; msg.classList.add('bad'); return; }
 
   let secondary = null;
@@ -1800,7 +3734,8 @@ async function createMember(){
     await firebaseFns.updateProfile(cred.user, {displayName:name || email});
 
     await firebaseFns.setDoc(firebaseFns.doc(db, 'staff_members', cred.user.uid), {
-      uid:cred.user.uid, name:name || email, email, role, scope:scope || 'CoachPulse', status:'ACTIVE',
+      uid:cred.user.uid, name:name || email, email, role, roleLabel, permissionLevel, permissionLabel, scope:scope || teamIds.join(', ') || 'CoachPulse', authorizedTeamIds:teamIds, teamIds, allowedTeamIds:teamIds, allowedModules, modulePermissions:modulePermissionsFromSelection(allowedModules, permissionLevel), status,
+      userType:'staff',
       createdBy:currentUser.uid, createdByEmail:currentUser.email, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp()
     }, {merge:true});
 
@@ -1823,12 +3758,162 @@ async function createMember(){
   }
 }
 function resetMemberForm(clearMsg=true){
-  ['newStaffName','newStaffEmail','newStaffPassword','newStaffScope'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
-  $('#newStaffRole').value='EDUCATEUR';
+  ['newStaffName','newStaffEmail','newStaffPassword','newStaffScope','newStaffTeams','newStaffModules'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
+  $('#newStaffRole').value='ENTRAINEUR';
+  if($('#newStaffPermission')) $('#newStaffPermission').value='LECTEUR';
+  if($('#newStaffStatus')) $('#newStaffStatus').value='ACTIVE';
+  refreshAdminAccessPickers();
   if(clearMsg){ $('#adminMsg').textContent=''; $('#adminMsg').classList.remove('bad'); }
 }
+function roleOptions(selected='ENTRAINEUR'){
+  const service = permissionsService();
+  const labels = service?.ROLE_LABELS || {RESPONSABLE_POLE:'Responsable de pôle',ENTRAINEUR:'Entraîneur',ENTRAINEUR_ADJOINT:'Entraîneur adjoint',PREPARATEUR_PHYSIQUE:'Préparateur physique',KINE:'Kiné',MEDECIN:'Médecin',DIRIGEANT:'Dirigeant'};
+  const current = service?.normalizeRole ? service.normalizeRole(selected) : selected;
+  return Object.entries(labels).map(([role,label]) => `<option value="${role}" ${role===current?'selected':''}>${escapeHtml(label)}</option>`).join('');
+}
+function permissionOptions(selected='LECTEUR'){
+  const service = permissionsService();
+  const labels = service?.PERMISSION_LABELS || {LECTEUR:'Lecteur',SAISIE:'Saisie',EDITEUR:'Éditeur',ADMIN:'Admin'};
+  const current = service?.normalizePermission ? service.normalizePermission(selected) : selected;
+  return Object.entries(labels).map(([permission,label]) => `<option value="${permission}" ${permission===current?'selected':''}>${escapeHtml(label)}</option>`).join('');
+}
+function readCsvField(id){
+  return parseAccessList($('#'+id)?.value || '');
+}
+function parseAccessList(value){
+  return [...new Set(String(value || '').split(/[,;\n]+/).map(v => v.trim()).filter(Boolean))];
+}
+function modulePermissionsFromSelection(allowedModules=[], permissionLevel='LECTEUR'){
+  const level = String(permissionLevel || '').toUpperCase();
+  const value = ['ADMIN','EDITEUR','SAISIE'].includes(level) ? 'edit' : 'read';
+  return Object.fromEntries((allowedModules || []).map(moduleId => [moduleId, value]));
+}
+function accessChoiceKey(value){
+  return String(value || '').trim().toLowerCase();
+}
+function uniqueAccessChoices(items=[]){
+  const seen = new Set();
+  return items.map(item => {
+    const value = String(item?.value || '').trim();
+    const label = String(item?.label || value).trim();
+    const hint = String(item?.hint || '').trim();
+    return value ? {value, label, hint} : null;
+  }).filter(Boolean).filter(item => {
+    const key = accessChoiceKey(item.value);
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function moduleAccessChoices(){
+  return uniqueAccessChoices(moduleRegistry()
+    .filter(module => module.id !== 'home')
+    .map(module => ({
+      value:module.id,
+      label:module.name,
+      hint:module.section === 'admin' ? 'Admin' : (module.section === 'future' ? 'À venir' : 'Staff')
+    })));
+}
+async function loadAdminAccessChoices(force=false){
+  if(adminAccessChoiceCache && !force) return adminAccessChoiceCache;
+  const moduleChoices = moduleAccessChoices();
+  const officialRows = teamsService()?.officialTeamRows?.() || DEFAULT_DB_OPTIONS.teams.map(name => ({
+    teamId:teamsService()?.canonicalTeamId?.(name) || stableFirestoreId('team', name),
+    name,
+    category:''
+  }));
+  const officialIds = new Set(officialRows.map(team => team.teamId || team.id).filter(Boolean));
+  const baseTeamChoices = officialRows.map(team => ({
+    value:team.teamId || team.id,
+    label:team.name || team.teamName || team.teamId || team.id,
+    hint:[team.category, Array.isArray(team.subCategories) ? team.subCategories.join(', ') : ''].filter(Boolean).join(' · ') || 'Équipe officielle'
+  }));
+  let teamChoices = [...baseTeamChoices];
+  try{
+    const data = await adminListTeamsAndSettings();
+    teamChoices = [
+      ...(data?.teams || []).map(team => {
+        const value = team.teamId || team.id || team.name || team.category || '';
+        const label = team.name || team.teamName || value;
+        const hint = team.category || team.level || 'Équipe';
+        return {value, label, hint};
+      }).filter(choice => officialIds.has(choice.value)),
+      ...baseTeamChoices
+    ];
+  }catch(_e){}
+  adminAccessChoiceCache = {
+    teams:uniqueAccessChoices(teamChoices).sort((a,b) => a.label.localeCompare(b.label, 'fr', {numeric:true})),
+    modules:moduleChoices
+  };
+  return adminAccessChoiceCache;
+}
+function renderAccessPicker(kind, selected=[], choices=[], inputAttrs=''){
+  const selectedKeys = new Set(parseAccessList(selected).map(accessChoiceKey));
+  const knownKeys = new Set(choices.map(choice => accessChoiceKey(choice.value)));
+  const extraChoices = parseAccessList(selected)
+    .filter(value => kind !== 'teams' && value && !knownKeys.has(accessChoiceKey(value)))
+    .map(value => ({value, label:value, hint:'Personnalisé'}));
+  const allChoices = uniqueAccessChoices([...choices, ...extraChoices]);
+  const selectedValues = allChoices.filter(choice => selectedKeys.has(accessChoiceKey(choice.value))).map(choice => choice.value);
+  const selectedLabels = allChoices.filter(choice => selectedKeys.has(accessChoiceKey(choice.value))).map(choice => choice.label);
+  const list = allChoices.length ? allChoices.map(choice => {
+    const checked = selectedKeys.has(accessChoiceKey(choice.value)) ? 'checked' : '';
+    const title = choice.hint ? `${choice.label} · ${choice.hint}` : choice.label;
+    return `<label class="access-choice" title="${escapeHtml(title)}"><input type="checkbox" data-access-choice="${escapeHtml(kind)}" value="${escapeHtml(choice.value)}" ${checked}><span>${escapeHtml(choice.label)}</span>${choice.hint ? `<small>${escapeHtml(choice.hint)}</small>` : ''}</label>`;
+  }).join('') : '<div class="admin-note">Aucun choix disponible.</div>';
+  const summary = selectedValues.length ? `${selectedValues.length} sélectionné(s)` : 'Aucun accès spécifique';
+  const selectedLabel = selectedLabels.length ? selectedLabels.slice(0, 2).join(', ') + (selectedLabels.length > 2 ? ` +${selectedLabels.length - 2}` : '') : 'Choisir';
+  return `<details class="access-picker" data-access-kind="${escapeHtml(kind)}"><summary><span class="access-summary">${escapeHtml(summary)}</span><b>${escapeHtml(selectedLabel)}</b></summary><input type="hidden" ${inputAttrs} value="${escapeHtml(selectedValues.join(', '))}"><div class="access-choice-list">${list}</div></details>`;
+}
+function syncAccessPicker(picker){
+  if(!picker) return;
+  const selected = [...picker.querySelectorAll('[data-access-choice]:checked')].map(input => input.value);
+  const hidden = picker.querySelector('input[type="hidden"]');
+  if(hidden) hidden.value = selected.join(', ');
+  const summary = picker.querySelector('.access-summary');
+  if(summary) summary.textContent = selected.length ? `${selected.length} sélectionné(s)` : 'Aucun accès spécifique';
+  const label = picker.querySelector('summary b');
+  if(label) label.textContent = selected.length ? selected.slice(0, 2).join(', ') + (selected.length > 2 ? ` +${selected.length - 2}` : '') : 'Choisir';
+}
+function ensureAccessPickerStyles(){
+  if(document.getElementById('accessPickerStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'accessPickerStyles';
+  style.textContent = `.access-picker{position:relative;border:1px solid var(--line);border-radius:12px;background:#fff}.access-picker summary{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:8px 10px;cursor:pointer;list-style:none}.access-picker summary::-webkit-details-marker{display:none}.access-picker summary:after{content:'⌄';color:var(--muted);font-weight:1000}.access-picker[open] summary:after{content:'⌃'}.access-picker summary b{font-size:12px;color:#06351f;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.access-choice-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;max-height:210px;overflow:auto;padding:8px;border-top:1px solid var(--line);background:#fff;box-shadow:0 14px 30px rgba(6,23,13,.10);border-radius:0 0 12px 12px}.access-choice{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:10px;background:#f8fafc;padding:8px;cursor:pointer;min-width:0}.access-choice input{width:auto!important;margin:0}.access-choice span{font-weight:900;color:#06351f;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.access-choice small{margin-left:auto;color:var(--muted);font-size:10px;font-weight:900;text-transform:uppercase}.access-choice:has(input:checked){border-color:rgba(29,153,91,.55);background:#eef8f2}.access-summary{color:var(--muted);font-size:12px;font-weight:900;white-space:nowrap}.staff-table .access-picker{min-width:190px}.staff-table .access-choice-list{grid-template-columns:minmax(130px,1fr);max-height:170px}.staff-table .access-choice small{display:none}`;
+  document.head.appendChild(style);
+}
+async function refreshAdminAccessPickers(){
+  if(!isSuperAdmin()) return;
+  const choices = await loadAdminAccessChoices();
+  const teamsBox = $('#newStaffTeamsPicker');
+  const modulesBox = $('#newStaffModulesPicker');
+  if(teamsBox) teamsBox.innerHTML = renderAccessPicker('teams', readCsvField('newStaffTeams'), choices.teams, 'id="newStaffTeams"');
+  if(modulesBox) modulesBox.innerHTML = renderAccessPicker('modules', readCsvField('newStaffModules'), choices.modules, 'id="newStaffModules"');
+}
+function ensureUserAdminFields(){
+  ensureAccessPickerStyles();
+  const roleSelect = $('#newStaffRole');
+  if(roleSelect && !roleSelect.dataset.extendedRoles){
+    const roleLabel = roleSelect.closest('.field')?.querySelector('label');
+    if(roleLabel) roleLabel.textContent = 'Rôle métier';
+    roleSelect.innerHTML = roleOptions('ENTRAINEUR');
+    roleSelect.dataset.extendedRoles = '1';
+    roleSelect.closest('.field')?.insertAdjacentHTML('afterend', `<div class="field"><label>Permission</label><select id="newStaffPermission">${permissionOptions('LECTEUR')}</select></div>`);
+  }
+  const scope = $('#newStaffScope');
+  if(scope && !$('#newStaffTeams')){
+    scope.closest('.field')?.insertAdjacentHTML('afterend', `<div class="form-grid"><div class="field"><label>Équipes autorisées</label><div id="newStaffTeamsPicker" class="admin-note">Chargement des équipes...</div></div><div class="field"><label>Modules autorisés</label><div id="newStaffModulesPicker" class="admin-note">Chargement des modules...</div></div></div><div class="field"><label>Statut</label><select id="newStaffStatus"><option value="ACTIVE">Actif</option><option value="INACTIVE">Inactif</option><option value="ARCHIVED">Archivé</option></select></div>`);
+  }
+  const roleList = document.querySelector('.role-list');
+  if(roleList && !roleList.dataset.extendedRoles){
+    roleList.innerHTML = `<div><b>Rôle métier</b><span>Fonction dans le club : responsable de pôle, entraîneur, adjoint, préparateur, kiné, médecin ou dirigeant.</span></div><div><b>Équipes</b><span>Périmètre sportif accessible. Plusieurs équipes peuvent être sélectionnées.</span></div><div><b>Modules</b><span>Périmètre fonctionnel visible dans CoachPulse.</span></div><div><b>Lecteur</b><span>Consultation uniquement sur les modules autorisés.</span></div><div><b>Saisie</b><span>Consultation et ajout/modification courante sur les modules autorisés.</span></div><div><b>Éditeur</b><span>Droits avancés sur les modules autorisés, avec accès aux actions d’administration si le module est autorisé.</span></div><div><b>Admin</b><span>Tous les droits, toutes les équipes et tous les modules.</span></div>`;
+    roleList.dataset.extendedRoles = '1';
+  }
+}
 async function loadMembers(){
-  if(!db || !isAdmin()) return;
+  if(!db || !isSuperAdmin()) return;
+  ensureUserAdminFields();
+  const choices = await loadAdminAccessChoices();
   const tbody = $('#membersTbody'); if(!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6">Chargement...</td></tr>';
   try{
@@ -1839,7 +3924,11 @@ async function loadMembers(){
     snap.forEach(docSnap => {
       const m = {uid:docSnap.id, ...docSnap.data()};
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><b>${escapeHtml(m.name||'-')}</b></td><td>${escapeHtml(m.email||'-')}</td><td><select data-role="${m.uid}">${['ADMIN','RESPONSABLE','EDUCATEUR','LECTURE'].map(r=>`<option value="${r}" ${r===(m.role||'')?'selected':''}>${r}</option>`).join('')}</select></td><td>${escapeHtml(m.scope||'-')}</td><td><span class="role-pill">${escapeHtml(m.status||'ACTIVE')}</span></td><td><div class="staff-actions"><button data-reset="${m.email||''}">Reset MDP</button><button data-save="${m.uid}">Sauver rôle</button><button class="danger" data-archive="${m.uid}">${m.status==='ARCHIVED'?'Réactiver':'Archiver'}</button></div></td>`;
+      const teams = [...new Set([...(m.authorizedTeamIds || []), ...(m.teamIds || []), ...(m.allowedTeamIds || [])])].filter(Boolean);
+      const modules = m.allowedModules || [];
+      const teamPicker = renderAccessPicker('teams', teams, choices.teams, `data-teams="${escapeHtml(m.uid)}"`);
+      const modulePicker = renderAccessPicker('modules', modules, choices.modules, `data-modules="${escapeHtml(m.uid)}"`);
+      tr.innerHTML = `<td><b>${escapeHtml(m.name||'-')}</b></td><td>${escapeHtml(m.email||'-')}</td><td><label class="admin-note">Rôle métier</label><select data-role="${m.uid}">${roleOptions(m.role)}</select><label class="admin-note" style="display:block;margin-top:8px">Permission</label><select data-permission="${m.uid}">${permissionOptions(m.permissionLevel || m.permission || m.role)}</select></td><td><label class="admin-note">Équipes</label>${teamPicker}<label class="admin-note" style="display:block;margin-top:8px">Modules</label>${modulePicker}</td><td><select data-status="${m.uid}"><option value="ACTIVE" ${String(m.status||'ACTIVE').toUpperCase()==='ACTIVE'?'selected':''}>Actif</option><option value="INACTIVE" ${String(m.status||'').toUpperCase()==='INACTIVE'?'selected':''}>Inactif</option><option value="ARCHIVED" ${String(m.status||'').toUpperCase()==='ARCHIVED'?'selected':''}>Archivé</option></select></td><td><div class="staff-actions"><button data-reset="${m.email||''}">Reset MDP</button><button data-save="${m.uid}">Sauver accès</button><button class="danger" data-archive="${m.uid}">${String(m.status||'ACTIVE').toUpperCase()==='ARCHIVED'?'Réactiver':'Archiver'}</button></div></td>`;
       tbody.appendChild(tr);
     });
   }catch(e){ tbody.innerHTML = `<tr><td colspan="6">Erreur : ${escapeHtml(cleanError(e))}</td></tr>`; }
@@ -1874,30 +3963,43 @@ function openPlayerModal(){
   if(!guardAdminAction('La gestion manuelle des joueuses est réservée aux administrateurs.')) return;
   $('#playerModal')?.classList.add('open');
   renderCustomPlayers();
-  updatePlayerPreview();
+  updateManualPlayerDerivedCategory();
 }
 function closePlayerModal(){ $('#playerModal')?.classList.remove('open'); }
 function resetPlayerForm(){
-  ['playerFirstName','playerLastName','playerBirth'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
-  if($('#playerCategory')) $('#playerCategory').value='U12';
-  if($('#playerTeam')) $('#playerTeam').value='U12-U13';
+  ['playerFirstName','playerLastName','playerBirth','playerPoste','playerNumero','playerCategory','playerSubCategory'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
+  if($('#playerTeam')) $('#playerTeam').value='U13 A';
   if($('#playerFoot')) $('#playerFoot').value='';
+  if($('#playerNationalite')) $('#playerNationalite').value='';
   if($('#playerPhoto')) $('#playerPhoto').value='';
   if($('#playerMsg')) $('#playerMsg').textContent='';
-  updatePlayerPreview();
+  updateManualPlayerDerivedCategory();
 }
 function playerDisplayName(p){
-  return `${String(p.nom||'').toUpperCase()} ${String(p.prenom||'').trim()}`.trim();
+  return `${String(p.prenom||'').trim()} ${String(p.nom||'').toUpperCase()}`.trim().toUpperCase();
+}
+function updateManualPlayerDerivedCategory(){
+  const birth=$('#playerBirth')?.value.trim() || '';
+  const team=$('#playerTeam')?.value || '';
+  const snapshot=categorySnapshotForSeason({birth,dateNaissance:birth,team,equipe:team}, currentSeason());
+  if($('#playerCategory')) $('#playerCategory').value=snapshot.categorie || '';
+  if($('#playerSubCategory')) $('#playerSubCategory').value=snapshot.subCategory || snapshot.sousCategorie || '';
+  updatePlayerPreview();
 }
 function updatePlayerPreview(){
   const first=$('#playerFirstName')?.value.trim() || '';
   const last=$('#playerLastName')?.value.trim() || '';
   const cat=$('#playerCategory')?.value || '';
+  const sub=$('#playerSubCategory')?.value || '';
   const team=$('#playerTeam')?.value || '';
-  const name=`${last.toUpperCase()} ${first}`.trim() || 'Nouvelle joueuse';
+  const poste=$('#playerPoste')?.value.trim() || '';
+  const numero=$('#playerNumero')?.value.trim() || '';
+  const foot=$('#playerFoot')?.value || '';
+  const nationalite=$('#playerNationalite')?.value.trim() || '';
+  const name=`${first} ${last.toUpperCase()}`.trim().toUpperCase() || 'Nouvelle joueuse';
   const initials=(first||last||'?').split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase() || '?';
   const box=$('#playerPreview'); if(!box) return;
-  box.innerHTML=`<div class="player-avatar-preview">${escapeHtml(initials)}</div><div><b>${escapeHtml(name)}</b><br><span>${escapeHtml([team,cat].filter(Boolean).join(' · ') || 'Complète le formulaire.')}</span></div>`;
+  box.innerHTML=`<div class="player-avatar-preview">${escapeHtml(initials)}</div><div><b>${escapeHtml(name)}</b><br><span>${escapeHtml([team,cat,sub,poste,numero?`N° ${numero}`:'',foot,nationalite].filter(Boolean).join(' · ') || 'Complète le formulaire.')}</span></div>`;
 }
 async function saveManualPlayer(){
   if(!guardAdminAction('La gestion manuelle des joueuses est réservée aux administrateurs.')) return;
@@ -1910,21 +4012,32 @@ async function saveManualPlayer(){
   }
   const photo = await readPlayerPhoto();
   const categorie=$('#playerCategory')?.value || '';
+  const subCategory=$('#playerSubCategory')?.value || categorie;
   const team=$('#playerTeam')?.value || '';
+  const poste=$('#playerPoste')?.value.trim() || '';
+  const numero=$('#playerNumero')?.value.trim() || '';
+  const foot=$('#playerFoot')?.value || '';
+  const nationalite=$('#playerNationalite')?.value.trim() || '';
   const birth=$('#playerBirth')?.value.trim() || '';
-  const baseId=stableFirestoreId('player', nom, prenom, categorie, categorie);
+  if(!birth){
+    if(msg){ msg.textContent='Date de naissance obligatoire pour générer le playerId unique.'; msg.classList.add('bad'); }
+    return;
+  }
+  const service=playersService();
+  const baseId=stableFirestoreId('player', prenom, nom, birth);
   const players=customPlayers();
-  const duplicate=players.find(p => slugify(playerDisplayName(p)) === slugify(`${nom} ${prenom}`));
+  const duplicate=players.find(p => slugify(playerDisplayName(p)) === slugify(`${prenom} ${nom}`) && String(p.birth || p.dateNaissance || '') === birth);
   if(duplicate){
     if(msg){ msg.textContent='Cette joueuse existe déjà dans la base manuelle.'; msg.classList.add('bad'); }
     return;
   }
-  const player={
+  const rawPlayer={
     id:baseId, playerId:baseId,
-    prenom, nom:nom.toUpperCase(), categorie, subCategory:categorie, team,
-    foot:$('#playerFoot')?.value || '', birth, age:/^\d{1,2}$/.test(birth)?birth:'',
+    prenom:prenom.toUpperCase(), nom:nom.toUpperCase(), categorie, subCategory, team, poste, numero,
+    foot, pied:foot, meilleurPiedLabel:foot, nationalite, nationality:nationalite, birth, age:/^\d{1,2}$/.test(birth)?birth:'',
     photo, source:'Saisie manuelle CoachPulse', createdAt:new Date().toISOString()
   };
+  const player=service?.normalizePlayer ? service.normalizePlayer(rawPlayer) : rawPlayer;
   players.push(player);
   setCustomPlayers(players);
   resetPlayerForm();
@@ -1938,17 +4051,56 @@ function deleteManualPlayer(id){
 function renderCustomPlayers(){
   const box=$('#customPlayerList'); if(!box) return;
   const players=customPlayers();
-  box.innerHTML = players.length ? players.slice().reverse().map(p => `<div class="player-list-row"><div><b>${escapeHtml(playerDisplayName(p))}</b><br><span>${escapeHtml([p.team,p.categorie,p.foot].filter(Boolean).join(' · ') || 'Infos non renseignées')}</span></div><button data-delete-player="${escapeHtml(p.id)}">Retirer</button></div>`).join('') : '<div class="player-list-row"><span>Aucune joueuse ajoutée manuellement.</span></div>';
+  box.innerHTML = players.length ? players.slice().reverse().map(p => `<div class="player-list-row"><div><b>${escapeHtml(playerDisplayName(p))}</b><br><span>${escapeHtml([p.team,p.categorie,p.foot,p.nationalite||p.nationality].filter(Boolean).join(' · ') || 'Infos non renseignées')}</span></div><button data-delete-player="${escapeHtml(p.id)}">Retirer</button></div>`).join('') : '<div class="player-list-row"><span>Aucune joueuse ajoutée manuellement.</span></div>';
 }
 async function adminTableClick(e){
   const resetEmail = e.target?.dataset?.reset;
   const saveUid = e.target?.dataset?.save;
   const archiveUid = e.target?.dataset?.archive;
+  if((resetEmail || saveUid || archiveUid) && !isSuperAdmin()){
+    alert('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.');
+    return;
+  }
   try{
     if(resetEmail){ await firebaseFns.sendPasswordResetEmail(auth, resetEmail); alert('Email de réinitialisation envoyé à '+resetEmail); }
-    if(saveUid){ const role = document.querySelector(`[data-role="${saveUid}"]`)?.value || 'EDUCATEUR'; await firebaseFns.setDoc(firebaseFns.doc(db,'staff_members',saveUid), {role, updatedAt:firebaseFns.serverTimestamp(), updatedBy:currentUser.uid}, {merge:true}); alert('Rôle mis à jour.'); await loadMembers(); }
-    if(archiveUid){ const ref=firebaseFns.doc(db,'staff_members',archiveUid); const snap=await firebaseFns.getDoc(ref); const current=snap.data()?.status; await firebaseFns.setDoc(ref,{status:current==='ARCHIVED'?'ACTIVE':'ARCHIVED', updatedAt:firebaseFns.serverTimestamp(), updatedBy:currentUser.uid},{merge:true}); await loadMembers(); }
+    if(saveUid){
+      const service = permissionsService();
+      const role = service?.normalizeRole ? service.normalizeRole(document.querySelector(`[data-role="${saveUid}"]`)?.value || 'ENTRAINEUR') : (document.querySelector(`[data-role="${saveUid}"]`)?.value || 'ENTRAINEUR');
+      const permissionLevel = service?.normalizePermission ? service.normalizePermission(document.querySelector(`[data-permission="${saveUid}"]`)?.value || 'LECTEUR') : (document.querySelector(`[data-permission="${saveUid}"]`)?.value || 'LECTEUR');
+      const teamIds = parseAccessList(document.querySelector(`[data-teams="${saveUid}"]`)?.value || '');
+      const allowedModules = parseAccessList(document.querySelector(`[data-modules="${saveUid}"]`)?.value || '');
+      const status = String(document.querySelector(`[data-status="${saveUid}"]`)?.value || 'ACTIVE').toUpperCase();
+      await firebaseFns.setDoc(firebaseFns.doc(db,'staff_members',saveUid), {
+        role,
+        roleLabel:service?.roleLabel ? service.roleLabel(role) : role,
+        permissionLevel,
+        permissionLabel:service?.permissionLabel ? service.permissionLabel(permissionLevel) : permissionLevel,
+        authorizedTeamIds:teamIds,
+        teamIds,
+        allowedTeamIds:teamIds,
+        allowedModules,
+        modulePermissions:modulePermissionsFromSelection(allowedModules, permissionLevel),
+        status,
+        userType:'staff',
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:new Date().toISOString(),
+        updatedBy:currentUser.uid,
+        updatedByEmail:currentUser.email || ''
+      }, {merge:true});
+      alert('Accès utilisateur mis à jour.');
+      await loadMembers();
+    }
+    if(archiveUid){
+      const ref=firebaseFns.doc(db,'staff_members',archiveUid);
+      const snap=await firebaseFns.getDoc(ref);
+      const current=String(snap.data()?.status || 'ACTIVE').toUpperCase();
+      await firebaseFns.setDoc(ref,{status:current==='ARCHIVED'?'ACTIVE':'ARCHIVED', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''},{merge:true});
+      await loadMembers();
+    }
   }catch(err){ alert('Action impossible : '+cleanError(err)); }
+}
+function adminAccessPickerChange(e){
+  if(e.target?.matches?.('[data-access-choice]')) syncAccessPicker(e.target.closest('.access-picker'));
 }
 
 $('#menuBtn').addEventListener('click', () => { if(window.matchMedia('(max-width:1180px)').matches) openDrawer(); else shell.classList.toggle('collapsed'); });
@@ -1969,7 +4121,8 @@ $('#closePlayerBtn').addEventListener('click', closePlayerModal);
 $('#resetPlayerBtn').addEventListener('click', resetPlayerForm);
 $('#savePlayerBtn').addEventListener('click', saveManualPlayer);
 $('#playerModal').addEventListener('click', e => { if(e.target?.id === 'playerModal') closePlayerModal(); if(e.target?.dataset?.deletePlayer) deleteManualPlayer(e.target.dataset.deletePlayer); });
-['playerFirstName','playerLastName','playerCategory','playerTeam','playerFoot','playerBirth'].forEach(id => $('#'+id)?.addEventListener('input', updatePlayerPreview));
+['playerBirth','playerTeam'].forEach(id => { $('#'+id)?.addEventListener('input', updateManualPlayerDerivedCategory); $('#'+id)?.addEventListener('change', updateManualPlayerDerivedCategory); });
+['playerFirstName','playerLastName','playerPoste','playerNumero','playerFoot','playerNationalite'].forEach(id => $('#'+id)?.addEventListener('input', updatePlayerPreview));
 $('#loginBtn').addEventListener('click', signInStaff);
 $('#loginPassword').addEventListener('keydown', e => { if(e.key === 'Enter') signInStaff(); });
 $('#logoutBtn').addEventListener('click', logout);
@@ -1988,8 +4141,8 @@ $('#importBackupInput').addEventListener('change', async e => {
   catch(err){ alert('Fichier de sauvegarde invalide.'); }
   e.target.value='';
 });
-$('#cloudBtn').addEventListener('click', () => { if(!requireAuth()) return setLocked(true); if(!guardAdminAction('Le panneau Cloud est réservé aux administrateurs.')) return; cloudPanel.classList.add('open'); $('#staffEmail').value = currentUser?.email || ''; $('#staffName').value = currentProfile?.name || ''; $('#staffRole').value = currentProfile?.role || ''; });
-$('#cloudClose').addEventListener('click', () => cloudPanel.classList.remove('open'));
+$('#cloudBtn')?.addEventListener('click', openCloudPanel);
+$('#cloudClose').addEventListener('click', () => routeTo('home'));
 $('#saveFirebaseConfig').addEventListener('click', () => alert('Firebase est déjà intégré dans CoachPulse V6.'));
 $('#staffLogin').addEventListener('click', async () => { $('#loginEmail').value=$('#staffEmail').value.trim(); $('#loginPassword').value=$('#staffPassword').value; await signInStaff(); });
 $('#openAdminFromCloud').addEventListener('click', () => { cloudPanel.classList.remove('open'); routeTo('admin'); });
@@ -2001,13 +4154,20 @@ $('#exportCentralJson')?.addEventListener('click', () => exportCentralFirestore(
 $('#exportCentralCsv')?.addEventListener('click', () => exportCentralFirestore('csv'));
 $('#createMemberBtn').addEventListener('click', createMember);
 $('#resetMemberFormBtn').addEventListener('click', () => resetMemberForm(true));
-$('#refreshMembersBtn').addEventListener('click', loadMembers);
+$('#refreshMembersBtn').addEventListener('click', async () => { adminAccessChoiceCache = null; await refreshAdminAccessPickers(); await loadMembers(); });
 $('#membersTbody').addEventListener('click', adminTableClick);
+adminView?.addEventListener('change', adminAccessPickerChange);
 
 window.addEventListener('online', () => { updateSyncState('Retour Internet · sync...'); syncCloud(false); });
 window.addEventListener('offline', () => updateSyncState('Hors ligne · local actif'));
 window.addEventListener('resize', () => { if(window.matchMedia('(max-width:1180px)').matches) shell.classList.remove('collapsed'); });
-window.addEventListener('message', e => { if(e.data?.type === 'coachpulse-local-change') snapshotLocalData(); });
+window.addEventListener('message', e => {
+  if(e.data?.type === 'coachpulse-local-change') snapshotLocalData();
+  if(e.data?.type === 'coachpulse-open-module' && e.data.moduleId){
+    if(e.data.playerId) localStorage.setItem('coachpulse:playerProfile:selectedPlayerId', e.data.playerId);
+    routeTo(e.data.moduleId);
+  }
+});
 frame.addEventListener('load', installFrameLocalStorageWatcher);
 setInterval(() => { snapshotLocalData(); if(currentUser && localStorage.getItem('coachpulse:pendingSync') === '1') scheduleCloudSync(500); }, 5000);
 setInterval(snapshotLocalData, 15000);

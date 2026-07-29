@@ -17,11 +17,14 @@ firebase-debug.*.log*
 *.tar.gz
 backups/
 exports/
+migration-output/
+output/
 
 # Firebase cache
 .firebase/
 
 # Build outputs
+public/
 dist/
 build/
 .cache/

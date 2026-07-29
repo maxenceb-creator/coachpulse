@@ -6,57 +6,255 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function staffPath(uid) {
+      return /databases/$(database)/documents/staff_members/$(uid);
+    }
+
+    function staffExists() {
+      return signedIn() && exists(staffPath(request.auth.uid));
+    }
+
     function staffDoc() {
-      return get(/databases/$(database)/documents/staff_members/$(request.auth.uid));
+      return get(staffPath(request.auth.uid));
+    }
+
+    function staffStatus() {
+      return staffExists() && staffDoc().data.keys().hasAny(['status']) ? staffDoc().data.status : 'ACTIVE';
     }
 
     function hasActiveStaffProfile() {
-      return signedIn()
-        && exists(/databases/$(database)/documents/staff_members/$(request.auth.uid))
-        && staffDoc().data.status != 'ARCHIVED';
+      return staffExists() && !(staffStatus() in ['ARCHIVED', 'INACTIVE', 'DISABLED']);
     }
 
     function role() {
-      return hasActiveStaffProfile() ? staffDoc().data.role : 'NONE';
+      return hasActiveStaffProfile() && staffDoc().data.keys().hasAny(['role']) ? staffDoc().data.role : 'NONE';
     }
 
     function hasRole(roles) {
       return hasActiveStaffProfile() && role() in roles;
     }
 
-    function isAdmin() {
-      return hasRole(['ADMIN']);
+    function permissionLevel() {
+      return hasActiveStaffProfile() && staffDoc().data.keys().hasAny(['permissionLevel']) ? staffDoc().data.permissionLevel : legacyPermissionFromRole();
+    }
+
+    function legacyPermissionFromRole() {
+      return role() == 'ADMIN' ? 'ADMIN'
+        : (role() in ['RESPONSABLE', 'RESPONSABLE_CATEGORIE'] ? 'EDITEUR'
+        : (role() in ['LECTURE', 'LECTURE_SEULE', 'OBSERVATEUR', 'OBSERVATEUR_STAFF', 'JOUEUSE_PARENT'] ? 'LECTEUR' : 'SAISIE'));
+    }
+
+    function canReadData() {
+      return hasActiveStaffProfile() && permissionLevel() in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN'];
+    }
+
+    function canWriteData() {
+      return hasActiveStaffProfile() && permissionLevel() in ['SAISIE', 'EDITEUR', 'ADMIN'];
+    }
+
+    function canEditData() {
+      return hasActiveStaffProfile() && permissionLevel() in ['EDITEUR', 'ADMIN'];
+    }
+
+    function canAccessModule(moduleId) {
+      return hasActiveStaffProfile()
+        && (
+          permissionLevel() == 'ADMIN'
+          || role() == 'ADMIN'
+          || profileList('allowedModules').size() == 0
+          || profileList('allowedModules').hasAny([moduleId])
+        );
+    }
+
+    function canManageUsers() {
+      return canEditData() && canAccessModule('admin');
     }
 
     function canManageCoreData() {
-      return hasRole(['ADMIN', 'RESPONSABLE']);
+      return canEditData() && (canAccessModule('database') || canAccessModule('dataHub'));
+    }
+
+    function canDeleteCoreData(data) {
+      return canManageCoreData() && canAccessScopedData(data);
     }
 
     function canWriteSportData() {
-      return hasRole(['ADMIN', 'RESPONSABLE', 'EDUCATEUR']);
+      return canWriteData();
+    }
+
+    function canWritePhysicalData() {
+      return canWriteData();
+    }
+
+    function canReadMedicalData() {
+      return canReadData() && canAccessModule('medical');
+    }
+
+    function canReadPlayerProfileData(data) {
+      return canReadData() && canAccessModule('playerProfile') && canAccessScopedData(data);
+    }
+
+    function canWriteMedicalData() {
+      return canWriteData() && canAccessModule('medical');
+    }
+
+    function profileList(field) {
+      return staffDoc().data.keys().hasAny([field]) && staffDoc().data[field] is list ? staffDoc().data[field] : [];
+    }
+
+    function hasTeamScope() {
+      return profileList('authorizedTeamIds').size() > 0
+        || profileList('teamIds').size() > 0
+        || profileList('allowedTeamIds').size() > 0
+        || profileList('authorizedTeams').size() > 0
+        || profileList('equipesAutorisees').size() > 0;
+    }
+
+    function canAccessTeam(teamId) {
+      return permissionLevel() == 'ADMIN'
+        || profileList('authorizedTeamIds').hasAny([teamId])
+        || profileList('teamIds').hasAny([teamId])
+        || profileList('allowedTeamIds').hasAny([teamId])
+        || profileList('authorizedTeams').hasAny([teamId])
+        || profileList('equipesAutorisees').hasAny([teamId]);
+    }
+
+    function canAccessTeamList(teamIds) {
+      return permissionLevel() == 'ADMIN'
+        || (
+          teamIds is list
+          && (
+            teamIds.hasAny(profileList('authorizedTeamIds'))
+            || teamIds.hasAny(profileList('teamIds'))
+            || teamIds.hasAny(profileList('allowedTeamIds'))
+            || teamIds.hasAny(profileList('authorizedTeams'))
+            || teamIds.hasAny(profileList('equipesAutorisees'))
+          )
+        );
+    }
+
+    function hasPlayerScope() {
+      return profileList('playerIds').size() > 0 || profileList('allowedPlayerIds').size() > 0;
+    }
+
+    function canAccessPlayerId(playerId) {
+      return permissionLevel() == 'ADMIN'
+        || profileList('playerIds').size() == 0 && profileList('allowedPlayerIds').size() == 0
+        || profileList('playerIds').hasAny([playerId])
+        || profileList('allowedPlayerIds').hasAny([playerId]);
+    }
+
+    function valueOrEmpty(data, key) {
+      return data.keys().hasAny([key]) ? data[key] : '';
+    }
+
+    function canAccessLinkedPlayer(playerId) {
+      return playerId != ''
+        && exists(/databases/$(database)/documents/players/$(playerId))
+        && (
+          canAccessTeam(valueOrEmpty(get(/databases/$(database)/documents/players/$(playerId)).data, 'teamId'))
+          || (
+            get(/databases/$(database)/documents/players/$(playerId)).data.keys().hasAny(['teamIds'])
+            && canAccessTeamList(get(/databases/$(database)/documents/players/$(playerId)).data.teamIds)
+          )
+        );
+    }
+
+    function canAccessLinkedMatch(matchId) {
+      return matchId != ''
+        && exists(/databases/$(database)/documents/matches/$(matchId))
+        && (
+          canAccessTeam(valueOrEmpty(get(/databases/$(database)/documents/matches/$(matchId)).data, 'teamId'))
+          || (
+            get(/databases/$(database)/documents/matches/$(matchId)).data.keys().hasAny(['teamIds'])
+            && canAccessTeamList(get(/databases/$(database)/documents/matches/$(matchId)).data.teamIds)
+          )
+        );
+    }
+
+    function canAccessLinkedSession(sessionId) {
+      return sessionId != ''
+        && exists(/databases/$(database)/documents/sessions/$(sessionId))
+        && (
+          canAccessTeam(valueOrEmpty(get(/databases/$(database)/documents/sessions/$(sessionId)).data, 'teamId'))
+          || (
+            get(/databases/$(database)/documents/sessions/$(sessionId)).data.keys().hasAny(['teamIds'])
+            && canAccessTeamList(get(/databases/$(database)/documents/sessions/$(sessionId)).data.teamIds)
+          )
+        );
+    }
+
+    function hasScopeFields(data) {
+      return data.keys().hasAny(['teamId', 'teamIds']);
+    }
+
+    function canAccessScopedData(data) {
+      return permissionLevel() == 'ADMIN'
+        || (
+          hasScopeFields(data)
+          && (
+            canAccessTeam(valueOrEmpty(data, 'teamId'))
+            || (data.keys().hasAny(['teamIds']) && canAccessTeamList(data.teamIds))
+          )
+        )
+        || (data.keys().hasAny(['playerId']) && canAccessLinkedPlayer(data.playerId))
+        || (data.keys().hasAny(['matchId']) && canAccessLinkedMatch(data.matchId))
+        || (data.keys().hasAny(['sessionId']) && canAccessLinkedSession(data.sessionId));
+    }
+
+    function canReadPlayerDoc(playerId, data) {
+      return canReadData()
+        && canAccessPlayerId(playerId)
+        && canAccessScopedData(data);
     }
 
     function noDelete() {
       return false;
     }
 
-    match /staff_members/{uid} {
-      allow read: if hasActiveStaffProfile();
-      allow create: if signedIn()
-        && request.auth.uid == uid
+    function isSeedAdminEmail() {
+      return signedIn()
+        && request.auth.token.email != null
         && (
-          request.resource.data.role in ['EDUCATEUR', 'LECTURE']
-          || (request.resource.data.role == 'ADMIN'
-            && (
-              request.auth.token.email.matches('.*@asse\\.fr$')
-              || request.auth.token.email.matches('.*maxence\\.boisdron.*')
-            ))
-        )
-        && request.resource.data.status == 'ACTIVE';
-      allow update: if isAdmin()
-        || (signedIn()
+          request.auth.token.email.matches('.*maxence\\.boisdron.*')
+          || request.auth.token.email == 'sylvain.ostard@gmail.com'
+        );
+    }
+
+    function isAllowedSelfStaffMaintenance(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email']);
+    }
+
+    function isAllowedSeedAdminRepair(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && isSeedAdminEmail()
+        && request.resource.data.permissionLevel == 'ADMIN'
+        && request.resource.data.role == 'ADMIN'
+        && request.resource.data.status == 'ACTIVE'
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email', 'legacyRole', 'role', 'roleLabel', 'permissionLevel', 'permissionLabel', 'allowedModules', 'status']);
+    }
+
+    match /staff_members/{uid} {
+      allow read: if canManageUsers() || (signedIn() && request.auth.uid == uid);
+      allow create: if canManageUsers()
+        || (
+          signedIn()
           && request.auth.uid == uid
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email']));
+          && request.resource.data.role in ['RESPONSABLE_POLE', 'ENTRAINEUR', 'ENTRAINEUR_ADJOINT', 'PREPARATEUR_PHYSIQUE', 'KINE', 'MEDECIN', 'DIRIGEANT', 'EDUCATEUR', 'COACH', 'LECTURE', 'OBSERVATEUR_STAFF']
+          && request.resource.data.permissionLevel in ['LECTEUR', 'SAISIE', 'EDITEUR']
+          && request.resource.data.status == 'ACTIVE'
+        )
+        || (
+          signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.permissionLevel == 'ADMIN'
+          && isSeedAdminEmail()
+          && request.resource.data.status == 'ACTIVE'
+        );
+      allow update: if canManageUsers() || isAllowedSelfStaffMaintenance(uid) || isAllowedSeedAdminRepair(uid);
       allow delete: if noDelete();
     }
 
@@ -66,22 +264,25 @@ service cloud.firestore {
     }
 
     match /players/{playerId} {
-      allow read: if hasActiveStaffProfile();
+      allow read: if canReadPlayerDoc(playerId, resource.data) && (canAccessModule('database') || canAccessModule('playerProfile'));
       allow create, update: if canManageCoreData()
+        && canAccessModule('database')
         && request.resource.data.playerId == playerId
-        && request.resource.data.status in ['ACTIVE', 'ARCHIVED', 'active', 'injured', 'left', 'archived'];
-      allow delete: if noDelete();
+        && request.resource.data.status in ['ACTIVE', 'ARCHIVED', 'active', 'injured', 'left', 'archived']
+        && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /teams/{teamId} {
-      allow read: if hasActiveStaffProfile();
+      allow read: if canReadData() && canAccessTeam(teamId);
       allow create, update: if canManageCoreData()
-        && request.resource.data.teamId == teamId;
+        && request.resource.data.teamId == teamId
+        && canAccessTeam(teamId);
       allow delete: if noDelete();
     }
 
     match /settings/{settingsId} {
-      allow read: if hasActiveStaffProfile();
+      allow read: if canReadData();
       allow create, update: if canManageCoreData();
       allow delete: if noDelete();
     }
@@ -99,81 +300,87 @@ service cloud.firestore {
     }
 
     match /matches/{matchId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
+      allow read: if (canReadData() && canAccessModule('stats') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteSportData() && canAccessModule('stats') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /matchEvents/{eventId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadData() && canAccessModule('stats') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteSportData() && canAccessModule('stats') && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /sessions/{sessionId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
+      allow read: if (canReadData() && canAccessModule('methodologie') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteSportData() && canAccessModule('methodologie') && canAccessScopedData(request.resource.data);
       allow delete: if noDelete();
     }
 
     match /attendance/{attendanceId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadData() && canAccessModule('presences') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteSportData() && canAccessModule('presences') && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /technicalTests/{testId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadData() && canAccessModule('tests') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteSportData() && canAccessModule('tests') && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /physicalTests/{testId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadData() && canAccessModule('tests') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWritePhysicalData() && canAccessModule('tests') && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /injuries/{injuryId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /injuryUpdates/{updateId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /medicalAppointments/{appointmentId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /rehabRoutines/{routineId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
+    }
+
+    match /medicalFollowUps/{followUpId} {
+      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /workloads/{workloadId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadData() && canAccessModule('workload') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWritePhysicalData() && canAccessModule('workload') && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /convocations/{convocationId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadData() && canAccessModule('convocations') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteSportData() && canAccessModule('convocations') && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /individualReports/{reportId} {
-      allow read: if hasActiveStaffProfile();
-      allow create, update: if canWriteSportData();
-      allow delete: if noDelete();
+      allow read: if (canReadData() && canAccessModule('individualReports') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
+      allow create, update: if canWriteSportData() && canAccessModule('individualReports') && canAccessScopedData(request.resource.data);
+      allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /{document=**} {
