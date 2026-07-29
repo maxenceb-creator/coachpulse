@@ -55,11 +55,11 @@ button.primary{background:linear-gradient(135deg,var(--green),var(--deep));color
 .panel{padding:14px;min-width:0}
 .stat-section h2{border-bottom:2px solid rgba(205,183,137,.42);padding-bottom:8px;margin-bottom:12px}
 .wide{grid-column:1/-1}
-.season-summary{display:flex;justify-content:space-between;gap:14px;align-items:center;background:linear-gradient(135deg,var(--deep),var(--green));color:#fff;border-color:rgba(205,183,137,.5)}
+.season-summary{display:grid;grid-template-columns:minmax(170px,.44fr) minmax(0,1.56fr);gap:14px;align-items:center;background:linear-gradient(135deg,var(--deep),var(--green));color:#fff;border-color:rgba(205,183,137,.5)}
 .season-summary h2,.season-summary .eyebrow{color:#fff}
-.season-grid{display:grid;grid-template-columns:repeat(4,minmax(90px,1fr));gap:8px;flex:1}
-.season-grid span{border:1px solid rgba(255,255,255,.22);border-radius:8px;background:rgba(255,255,255,.12);padding:10px;font-weight:900}
-.season-grid b{display:block;color:var(--gold);font-size:24px;line-height:1}
+.season-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;min-width:0}
+.season-grid span{min-width:0;border:1px solid rgba(255,255,255,.22);border-radius:8px;background:rgba(255,255,255,.12);padding:10px 8px;font-size:clamp(13px,1.15vw,16px);font-weight:900;line-height:1.08;word-break:normal;overflow-wrap:normal;hyphens:none}
+.season-grid b{display:block;color:var(--gold);font-size:clamp(20px,2.2vw,24px);line-height:1}
 .timeline{display:grid;gap:8px}
 .event{border:1px solid var(--line);border-radius:12px;padding:10px;background:#fff}
 .event b{color:var(--deep)}
@@ -104,5 +104,5 @@ button.primary{background:linear-gradient(135deg,var(--green),var(--deep));color
 .trend-up{color:var(--green);font-weight:1000}.trend-down{color:var(--red);font-weight:1000}.trend-flat{color:var(--muted);font-weight:1000}
 .empty-state{padding:26px;border:1px dashed #b9c8c1;border-radius:16px;background:#fff;color:var(--muted);font-weight:900;text-align:center}
 .notice{border:1px solid rgba(37,99,235,.18);background:#eff6ff;color:#17356f;border-radius:12px;padding:10px;font-weight:900;margin-bottom:10px}
-@media(max-width:1100px){.profile-topbar,.grid,.sheet-grid,.sheet-layout{grid-template-columns:1fr}.filter-grid,.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.season-summary{display:grid}.season-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:1100px){.profile-topbar,.grid,.sheet-grid,.sheet-layout{grid-template-columns:1fr}.filter-grid,.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.season-summary{grid-template-columns:1fr}.season-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:680px){.player-profile-app{padding:10px}.identity{grid-template-columns:1fr;text-align:center}.avatar{margin:auto}.identity-meta,.filter-grid,.kpis,.season-grid{grid-template-columns:1fr}.bar-row{grid-template-columns:1fr}.sheet-tabs{position:static}.sheet-tabs a{flex:1;text-align:center}.data-table{min-width:360px}}
