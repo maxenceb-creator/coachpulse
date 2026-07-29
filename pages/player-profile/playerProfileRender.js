@@ -167,6 +167,7 @@
             <span><b>${esc(summary.kpis.presenceRate)}%</b>Présence</span>
             <span><b>${esc(summary.kpis.sessions)}</b>Séances</span>
             <span><b>${esc(summary.kpis.matches)}</b>Matchs</span>
+            <span><b>${esc(summary.technicalTests.length)}</b>Tests techniques</span>
             <span><b>${esc(summary.physicalTests.length)}</b>Tests athlétiques</span>
           </div>
         </article>

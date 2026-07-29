@@ -57,7 +57,7 @@ button.primary{background:linear-gradient(135deg,var(--green),var(--deep));color
 .wide{grid-column:1/-1}
 .season-summary{display:flex;justify-content:space-between;gap:14px;align-items:center;background:linear-gradient(135deg,var(--deep),var(--green));color:#fff;border-color:rgba(205,183,137,.5)}
 .season-summary h2,.season-summary .eyebrow{color:#fff}
-.season-grid{display:grid;grid-template-columns:repeat(4,minmax(90px,1fr));gap:8px;flex:1}
+.season-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;flex:1}
 .season-grid span{border:1px solid rgba(255,255,255,.22);border-radius:8px;background:rgba(255,255,255,.12);padding:10px;font-weight:900}
 .season-grid b{display:block;color:var(--gold);font-size:24px;line-height:1}
 .timeline{display:grid;gap:8px}
