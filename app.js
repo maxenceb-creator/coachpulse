@@ -3990,7 +3990,7 @@ function openPlayerModal(){
 }
 function closePlayerModal(){ $('#playerModal')?.classList.remove('open'); }
 function resetPlayerForm(){
-  ['playerFirstName','playerLastName','playerBirth','playerPoste','playerNumero','playerCategory','playerSubCategory'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
+  ['playerFirstName','playerLastName','playerBirth','playerPoste','playerNumero','playerCategory','playerSubCategory','playerLeftClub'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
   if($('#playerTeam')) $('#playerTeam').value='U13 A';
   if($('#playerFoot')) $('#playerFoot').value='';
   if($('#playerNationalite')) $('#playerNationalite').value='';
@@ -4019,10 +4019,11 @@ function updatePlayerPreview(){
   const numero=$('#playerNumero')?.value.trim() || '';
   const foot=$('#playerFoot')?.value || '';
   const nationalite=$('#playerNationalite')?.value.trim() || '';
+  const leftClub=$('#playerLeftClub')?.value.trim() || '';
   const name=`${first} ${last.toUpperCase()}`.trim().toUpperCase() || 'Nouvelle joueuse';
   const initials=(first||last||'?').split(/\s+/).map(x=>x[0]).join('').slice(0,2).toUpperCase() || '?';
   const box=$('#playerPreview'); if(!box) return;
-  box.innerHTML=`<div class="player-avatar-preview">${escapeHtml(initials)}</div><div><b>${escapeHtml(name)}</b><br><span>${escapeHtml([team,cat,sub,poste,numero?`N° ${numero}`:'',foot,nationalite].filter(Boolean).join(' · ') || 'Complète le formulaire.')}</span></div>`;
+  box.innerHTML=`<div class="player-avatar-preview">${escapeHtml(initials)}</div><div><b>${escapeHtml(name)}</b><br><span>${escapeHtml([team,cat,sub,poste,numero?`N° ${numero}`:'',foot,nationalite,leftClub?`Dernier club : ${leftClub}`:''].filter(Boolean).join(' · ') || 'Complète le formulaire.')}</span></div>`;
 }
 async function saveManualPlayer(){
   if(!guardAdminAction('La gestion manuelle des joueuses est réservée aux administrateurs.')) return;
@@ -4041,6 +4042,7 @@ async function saveManualPlayer(){
   const numero=$('#playerNumero')?.value.trim() || '';
   const foot=$('#playerFoot')?.value || '';
   const nationalite=$('#playerNationalite')?.value.trim() || '';
+  const leftClub=$('#playerLeftClub')?.value.trim() || '';
   const birth=$('#playerBirth')?.value.trim() || '';
   if(!birth){
     if(msg){ msg.textContent='Date de naissance obligatoire pour générer le playerId unique.'; msg.classList.add('bad'); }
@@ -4057,7 +4059,7 @@ async function saveManualPlayer(){
   const rawPlayer={
     id:baseId, playerId:baseId,
     prenom:prenom.toUpperCase(), nom:nom.toUpperCase(), categorie, subCategory, team, poste, numero,
-    foot, pied:foot, meilleurPiedLabel:foot, nationalite, nationality:nationalite, birth, age:/^\d{1,2}$/.test(birth)?birth:'',
+    foot, pied:foot, meilleurPiedLabel:foot, nationalite, nationality:nationalite, leftClub, dernierClubQuitte:leftClub, birth, age:/^\d{1,2}$/.test(birth)?birth:'',
     photo, source:'Saisie manuelle CoachPulse', createdAt:new Date().toISOString()
   };
   const player=service?.normalizePlayer ? service.normalizePlayer(rawPlayer) : rawPlayer;
@@ -4145,7 +4147,7 @@ $('#resetPlayerBtn').addEventListener('click', resetPlayerForm);
 $('#savePlayerBtn').addEventListener('click', saveManualPlayer);
 $('#playerModal').addEventListener('click', e => { if(e.target?.id === 'playerModal') closePlayerModal(); if(e.target?.dataset?.deletePlayer) deleteManualPlayer(e.target.dataset.deletePlayer); });
 ['playerBirth','playerTeam'].forEach(id => { $('#'+id)?.addEventListener('input', updateManualPlayerDerivedCategory); $('#'+id)?.addEventListener('change', updateManualPlayerDerivedCategory); });
-['playerFirstName','playerLastName','playerPoste','playerNumero','playerFoot','playerNationalite'].forEach(id => $('#'+id)?.addEventListener('input', updatePlayerPreview));
+['playerFirstName','playerLastName','playerPoste','playerNumero','playerFoot','playerNationalite','playerLeftClub'].forEach(id => $('#'+id)?.addEventListener('input', updatePlayerPreview));
 $('#loginBtn').addEventListener('click', signInStaff);
 $('#loginPassword').addEventListener('keydown', e => { if(e.key === 'Enter') signInStaff(); });
 $('#logoutBtn').addEventListener('click', logout);
