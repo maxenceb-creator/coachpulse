@@ -2,6 +2,66 @@
   const Filters = global.PlayerProfileFilters;
   function n(value){ const out = Number(value); return Number.isFinite(out) ? out : 0; }
   function latest(rows=[]){ return rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a)))[0] || null; }
+  function text(value){ return String(value ?? '').trim(); }
+  function calculateBmi(heightCm, weightKg){
+    const height = Number(heightCm || 0) / 100;
+    const weight = Number(weightKg || 0);
+    return height && weight ? Number((weight / (height * height)).toFixed(2)) : null;
+  }
+  function readMedicalProfiles(){
+    try{ return JSON.parse(localStorage.getItem('coachpulse:medicalProfiles') || '{}') || {}; }
+    catch(_e){ return {}; }
+  }
+  function valueFrom(row={}, keys=[]){
+    for(const key of keys){
+      const value = row[key] ?? row.profile?.[key] ?? row.morphology?.[key] ?? row.measurements?.[key] ?? row.medicalProfile?.[key];
+      if(value != null && text(value) !== '') return value;
+    }
+    return '';
+  }
+  function teamMatches(row={}, player={}){
+    const rowTeamId = text(row.teamId || row.playerSnapshot?.teamId || row.profile?.teamId || row.morphology?.teamId || row.medicalProfile?.teamId);
+    const playerTeamId = text(player.teamId || player.playerSnapshot?.teamId);
+    return !rowTeamId || !playerTeamId || rowTeamId === playerTeamId;
+  }
+  function normalizeMedicalProfile(row={}, player={}){
+    const explicitBmi = valueFrom(row, ['imc','bmi']);
+    const heightCm = valueFrom(row, ['heightCm','tailleCm','taille','height']);
+    const weightKg = valueFrom(row, ['weightKg','poidsKg','poids','weight']);
+    const computed = calculateBmi(heightCm, weightKg);
+    const value = Number(explicitBmi || computed);
+    if(!Number.isFinite(value) || !teamMatches(row, player)) return null;
+    return {
+      value,
+      heightCm,
+      weightKg,
+      teamId:text(row.teamId || row.profile?.teamId || row.playerSnapshot?.teamId || player.teamId),
+      season:text(row.season || row.saison || row.profile?.season || row.medicalProfile?.season),
+      date:text(row.date || row.updatedAt || row.updatedAtIso || row.createdAt || row.createdAtIso)
+    };
+  }
+  function medicalProfileBmi(player={}, collections={}, state={}){
+    const playerId = text(player.playerId || player.id);
+    const stored = readMedicalProfiles();
+    const storedRows = [];
+    const profile = stored[playerId];
+    if(profile) storedRows.push({playerId, ...profile});
+    if(Array.isArray(profile?.history)) storedRows.push(...profile.history.map(row => ({playerId, ...row})));
+    const rows = [
+      ...storedRows,
+      ...(collections.injuries || []),
+      ...(collections.injuryUpdates || []),
+      ...(collections.medicalAppointments || []),
+      ...(collections.rehabRoutines || []),
+      ...(collections.medicalFollowUps || [])
+    ];
+    const normalized = rows.map(row => normalizeMedicalProfile(row, player)).filter(Boolean);
+    const inPeriod = normalized.filter(row => {
+      const hasTemporalData = !!(row.season || row.date);
+      return hasTemporalData ? Filters.rowInPeriod(row, Filters.periodFromState(state)) : true;
+    });
+    return latest(inPeriod.length ? inPeriod : normalized);
+  }
   function countActions(events=[]){
     const out = {};
     events.forEach(row => {
@@ -28,6 +88,7 @@
     const medical = Filters.filterRows([...(collections.injuryUpdates || []), ...(collections.medicalAppointments || []), ...(collections.rehabRoutines || []), ...(collections.medicalFollowUps || [])], state);
     const convocations = Filters.filterRows(collections.convocations || [], state);
     const individualReports = Filters.filterRows(collections.individualReports || [], state);
+    const bmi = medicalProfileBmi(player, collections, state);
     const present = attendance.filter(row => ['P','PRESENT','PRÉSENT'].includes(String(row.status || row.code || '').toUpperCase())).length;
     const minutes = attendance.reduce((sum,row) => sum + n(row.minutes || row.duration || row.charge), 0);
     const latestPhysical = latest(physicalTests);
@@ -54,7 +115,12 @@
         minutes,
         matches:new Set(matchEvents.map(row => row.matchId).filter(Boolean)).size,
         injuries:injuries.length,
-        medical:medical.length
+        medical:medical.length,
+        bmi:bmi?.value || null
+      },
+      medicalProfile:{
+        bmi,
+        hasBmi:!!bmi
       },
       latest:{
         physical:latestPhysical,

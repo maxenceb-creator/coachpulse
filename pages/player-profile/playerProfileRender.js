@@ -126,15 +126,17 @@
       </div>`;
   }
   function renderKpis(summary){
+    const bmi = summary.medicalProfile?.hasBmi ? Number(summary.kpis.bmi).toLocaleString('fr-FR', {minimumFractionDigits:1, maximumFractionDigits:2}) : '-';
     const items = [
       ['Présence', `${summary.kpis.presenceRate}%`],
       ['Séances', summary.kpis.sessions],
       ['Charge', `${summary.kpis.minutes} min`],
       ['Matchs', summary.kpis.matches],
       ['Blessures', summary.kpis.injuries],
-      ['Suivi médical', summary.kpis.medical]
+      ['Suivi médical', summary.kpis.medical],
+      ['IMC', bmi, 'bmi-kpi']
     ];
-    return `<section class="kpis">${items.map(([label,value]) => `<article class="kpi"><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}</section>`;
+    return `<section class="kpis">${items.map(([label,value,className]) => `<article class="kpi ${esc(className || '')}"><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}</section>`;
   }
   function bar(label, value, max, suffix=''){
     const pct = max ? Math.min(100, Math.round(value / max * 100)) : 0;
