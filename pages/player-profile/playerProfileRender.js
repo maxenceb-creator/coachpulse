@@ -90,7 +90,10 @@
       </div>
     </section>`;
   }
-  function renderIdentity(player={}, period){
+  function formatBmi(summary={}){
+    return summary.medicalProfile?.hasBmi ? Number(summary.kpis.bmi).toLocaleString('fr-FR', {minimumFractionDigits:1, maximumFractionDigits:2}) : '-';
+  }
+  function renderIdentity(player={}, period, summary={}){
     if(!player.playerId && !player.id){
       return `<div class="avatar">?</div>
         <div class="identity-main">
@@ -101,6 +104,7 @@
             <span><b>Categorie</b>-</span>
             <span><b>Sous-cat.</b>-</span>
             <span><b>Poste</b>-</span>
+            <span><b>IMC</b>-</span>
             <span><b>Saison</b>${esc(period.label)}</span>
           </div>
           <div class="player-id-line">Sélectionne une joueuse pour charger sa fiche complète.</div>
@@ -115,6 +119,7 @@
       ['Poste', player.poste || player.position || '-'],
       ['Pied fort', playerFoot(player) || 'À remplir'],
       ['Nationalité', playerNationality(player) || 'À remplir'],
+      ['IMC', formatBmi(summary)],
       ['Saison', period.label]
     ];
     return `<div class="avatar">${photo ? `<img src="${esc(photo)}" alt="">` : esc(initials)}</div>
@@ -126,15 +131,13 @@
       </div>`;
   }
   function renderKpis(summary){
-    const bmi = summary.medicalProfile?.hasBmi ? Number(summary.kpis.bmi).toLocaleString('fr-FR', {minimumFractionDigits:1, maximumFractionDigits:2}) : '-';
     const items = [
       ['Présence', `${summary.kpis.presenceRate}%`],
       ['Séances', summary.kpis.sessions],
       ['Charge', `${summary.kpis.minutes} min`],
       ['Matchs', summary.kpis.matches],
       ['Blessures', summary.kpis.injuries],
-      ['Suivi médical', summary.kpis.medical],
-      ['IMC', bmi, 'bmi-kpi']
+      ['Suivi médical', summary.kpis.medical]
     ];
     return `<section class="kpis">${items.map(([label,value,className]) => `<article class="kpi ${esc(className || '')}"><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}</section>`;
   }
