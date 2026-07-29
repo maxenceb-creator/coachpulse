@@ -95,6 +95,7 @@ main{padding-top:14px!important}
 <script>
 const $=s=>document.querySelector(s);
 const api=()=>window.parent?.CoachPulseCentralData;
+const APP_OPEN_DATE=new Date();
 const zones=[
 ['Tête',50,8],['Cou',50,15],['Épaule gauche',36,21],['Épaule droite',64,21],['Bras gauche',27,32],['Bras droit',73,32],['Coude gauche',22,43],['Coude droit',78,43],['Poignet gauche',19,55],['Poignet droit',81,55],['Main gauche',17,64],['Main droite',83,64],['Dos',50,31],['Lombaires',50,45],['Hanche gauche',42,52],['Hanche droite',58,52],['Cuisse gauche',42,65],['Cuisse droite',58,65],['Genou gauche',41,78],['Genou droit',59,78],['Mollet gauche',40,88],['Mollet droit',60,88],['Cheville gauche',39,96],['Cheville droite',61,96],['Pied gauche',35,99],['Pied droit',65,99]];
 let players=[], data={injuries:[],injuryUpdates:[],medicalAppointments:[],rehabRoutines:[]}, selectedZone='', filtered=[], caps={canRead:false,canWrite:false,canExport:false,role:'STAFF'};
@@ -117,7 +118,10 @@ function getProfile(playerId){return profileStore()[playerId]||{}}
 function saveProfile(playerId,profile){const all=profileStore();all[playerId]={...(all[playerId]||{}),...profile,updatedAt:new Date().toISOString()};localStorage.setItem('coachpulse:medicalProfiles',JSON.stringify(all))}
 function calculateBmi(heightCm,weightKg){const h=Number(heightCm||0)/100,w=Number(weightKg||0);return h&&w?Number((w/(h*h)).toFixed(2)):null}
 function bmiInfo(v){if(!v)return{label:'À compléter',cls:'',pct:0};if(v<18.5)return{label:'Insuffisance pondérale',cls:'bmi-blue',pct:Math.max(4,Math.min(24,(v/18.5)*24))};if(v<25)return{label:'Corpulence normale',cls:'bmi-green',pct:25+((v-18.5)/6.5)*30};if(v<30)return{label:'Surpoids',cls:'bmi-orange',pct:55+((v-25)/5)*23};return{label:'Obésité',cls:'bmi-red',pct:Math.min(96,78+((v-30)/12)*18)}}
-function ageFromBirth(date){if(!date)return'-';const d=new Date(date);if(Number.isNaN(d.getTime()))return'-';const n=new Date();let a=n.getFullYear()-d.getFullYear();const m=n.getMonth()-d.getMonth();if(m<0||(m===0&&n.getDate()<d.getDate()))a--;return a>=0?`${a} ans`:'-'}
+function validDate(y,m,d){const date=new Date(Number(y),Number(m)-1,Number(d));return date.getFullYear()===Number(y)&&date.getMonth()===Number(m)-1&&date.getDate()===Number(d)?date:null}
+function parseBirthDate(value){const raw=String(value??'').trim();if(!raw)return null;const iso=raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);if(iso)return validDate(iso[1],iso[2],iso[3]);const fr=raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.]((?:19|20)?\d{2})/);if(fr){let year=fr[3];if(year.length===2)year=Number(year)>40?`19${year}`:`20${year}`;return validDate(year,fr[2],fr[1])}const parsed=new Date(raw);return Number.isNaN(parsed.getTime())?null:parsed}
+function formatBirthDate(value){const d=parseBirthDate(value);return d?d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'}):(value||'-')}
+function ageFromBirth(date,referenceDate=APP_OPEN_DATE){const d=parseBirthDate(date);if(!d)return'-';const n=referenceDate instanceof Date?referenceDate:new Date(referenceDate);let a=n.getFullYear()-d.getFullYear();const m=n.getMonth()-d.getMonth();if(m<0||(m===0&&n.getDate()<d.getDate()))a--;return a>=0?`${a} ans`:'-'}
 function preferredPlayerId(){return $('#playerSelect').value||$('#filterPlayer').value||''}
 function currentSeason(){return api()?.currentSeason?.()||'2026-2027'}
 function injurySeason(i){return i.season||api()?.seasonFromDate?.(i.declaredAt||i.date)||currentSeason()}
@@ -200,7 +204,7 @@ function renderPlayerMedical(){
   $('#playerMedical').innerHTML=`
     <div class="player-card">${p.photo?`<img class="avatar" src="${esc(p.photo)}" alt="">`:`<div class="avatar">${esc((p.prenom||p.nom||'?').slice(0,1))}</div>`}<div><b>${esc(playerName(p))}</b><br><span class="muted">${esc([playerMainCategory(p),playerSubCategory(p),p.team,p.poste].filter(Boolean).join(' · '))}</span></div></div>
     <div class="profile-grid">
-      <div class="profile-tile"><span>Date de naissance</span><b>${esc(birth||'-')}</b></div>
+      <div class="profile-tile"><span>Date de naissance</span><b>${esc(formatBirthDate(birth))}</b></div>
       <div class="profile-tile"><span>Âge</span><b>${esc(ageFromBirth(birth))}</b></div>
       <div class="profile-tile"><span>Taille (cm)</span><input id="morphHeight" type="number" min="90" max="230" value="${esc(profile.heightCm||'')}" placeholder="162"></div>
       <div class="profile-tile"><span>Poids (kg)</span><input id="morphWeight" type="number" min="20" max="180" step="0.1" value="${esc(profile.weightKg||'')}" placeholder="55"></div>
