@@ -90,7 +90,10 @@
       </div>
     </section>`;
   }
-  function renderIdentity(player={}, period){
+  function formatBmi(summary={}){
+    return summary.medicalProfile?.hasBmi ? Number(summary.kpis.bmi).toLocaleString('fr-FR', {minimumFractionDigits:1, maximumFractionDigits:2}) : '-';
+  }
+  function renderIdentity(player={}, period, summary={}){
     if(!player.playerId && !player.id){
       return `<div class="avatar">?</div>
         <div class="identity-main">
@@ -101,6 +104,7 @@
             <span><b>Categorie</b>-</span>
             <span><b>Sous-cat.</b>-</span>
             <span><b>Poste</b>-</span>
+            <span><b>IMC</b>-</span>
             <span><b>Saison</b>${esc(period.label)}</span>
           </div>
           <div class="player-id-line">Sélectionne une joueuse pour charger sa fiche complète.</div>
@@ -115,6 +119,7 @@
       ['Poste', player.poste || player.position || '-'],
       ['Pied fort', playerFoot(player) || 'À remplir'],
       ['Nationalité', playerNationality(player) || 'À remplir'],
+      ['IMC', formatBmi(summary)],
       ['Saison', period.label]
     ];
     return `<div class="avatar">${photo ? `<img src="${esc(photo)}" alt="">` : esc(initials)}</div>
@@ -134,7 +139,7 @@
       ['Blessures', summary.kpis.injuries],
       ['Suivi médical', summary.kpis.medical]
     ];
-    return `<section class="kpis">${items.map(([label,value]) => `<article class="kpi"><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}</section>`;
+    return `<section class="kpis">${items.map(([label,value,className]) => `<article class="kpi ${esc(className || '')}"><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}</section>`;
   }
   function bar(label, value, max, suffix=''){
     const pct = max ? Math.min(100, Math.round(value / max * 100)) : 0;
@@ -162,6 +167,7 @@
             <span><b>${esc(summary.kpis.presenceRate)}%</b>Présence</span>
             <span><b>${esc(summary.kpis.sessions)}</b>Séances</span>
             <span><b>${esc(summary.kpis.matches)}</b>Matchs</span>
+            <span><b>${esc(summary.technicalTests.length)}</b>Tests techniques</span>
             <span><b>${esc(summary.physicalTests.length)}</b>Tests athlétiques</span>
           </div>
         </article>

@@ -286,7 +286,7 @@
     }
     if(renderToken !== state.renderToken) return;
     root.innerHTML = Render.renderControls(state) + Render.renderKpis(summary) + body;
-    document.getElementById('identityCard').innerHTML = Render.renderIdentity(selectedPlayer, period);
+    document.getElementById('identityCard').innerHTML = Render.renderIdentity(selectedPlayer, period, summary);
     document.querySelectorAll('[data-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.view === state.view));
     bind();
     logPerf('playerProfile.render', start);

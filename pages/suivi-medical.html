@@ -175,7 +175,9 @@ function renderBmi(profile){
 }
 function updateBmiDisplay(playerId){
   const h=$('#morphHeight'),w=$('#morphWeight'),box=$('#bmiBox');if(!h||!w||!box)return;
-  const profile={heightCm:h.value,weightKg:w.value};saveProfile(playerId,profile);box.innerHTML=renderBmi(profile);
+  const player=playerForSeasonView(playerById(playerId),selectedMedicalSeason());
+  const profile={playerId,teamId:player.teamId||'',team:player.team||'',season:selectedMedicalSeason(),heightCm:h.value,weightKg:w.value};
+  saveProfile(playerId,profile);box.innerHTML=renderBmi(profile);
 }
 function bindProfileInputs(playerId){
   ['morphHeight','morphWeight'].forEach(id=>{$('#'+id)?.addEventListener('input',()=>updateBmiDisplay(playerId))});
