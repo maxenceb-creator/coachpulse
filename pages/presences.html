@@ -1115,6 +1115,19 @@
       font-size:13px;
       font-weight:900;
     }
+    .presence-panel:not(.active){
+      display:none;
+    }
+    .presence-panel.active.presence-dashboard,
+    .presence-panel.active.sessions-shell,
+    .presence-panel.active.reports-page,
+    .presence-panel.active.prevention-page,
+    .presence-panel.active.settings-page{
+      display:grid;
+    }
+    .presence-panel.active.calendar-page{
+      display:block;
+    }
     @media(max-width:760px){
       main{padding:0 8px 18px}
       .presence-tabs{
