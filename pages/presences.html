@@ -217,6 +217,16 @@
       border-right:1px solid var(--line);
       border-bottom:1px solid var(--line);
       background:#fff;
+      cursor:pointer;
+      text-align:left;
+    }
+    .calendar-day:hover,
+    .calendar-day:focus{
+      position:relative;
+      z-index:1;
+      outline:2px solid rgba(0,132,61,.25);
+      outline-offset:-2px;
+      background:#f0fbf5;
     }
     .calendar-day:nth-child(7n){
       border-right:0;
@@ -1119,7 +1129,7 @@
           `).join("");
           const more = dayEvents.length > 3 ? `<div class="event-more">+${dayEvents.length - 3} autre(s)</div>` : "";
           days.push(`
-            <div class="calendar-day ${date.getMonth() === month ? "" : "muted"} ${sameDay(date,today) ? "today" : ""}">
+            <div class="calendar-day ${date.getMonth() === month ? "" : "muted"} ${sameDay(date,today) ? "today" : ""}" role="button" tabindex="0" data-create-date="${isoDate(date)}" title="Créer un événement le ${isoDate(date)}">
               <div class="day-number"><b>${date.getDate()}</b><span>${dayEvents.length ? dayEvents.length : ""}</span></div>
               ${chips}${more}
             </div>
@@ -1243,10 +1253,10 @@
           comment:""
         };
       }
-      function emptyAttendanceForEvent(teamId, dateValue){
+      function emptyAttendanceForEvent(teamId, dateValue, duration){
         return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => [player.playerId, {
-          status:"absent",
-          minutes:0,
+          status:"present",
+          minutes:Number(duration || 0),
           comment:""
         }]));
       }
@@ -1428,7 +1438,7 @@
             teamId:team.teamId,
             team:team.name,
             category:team.category || "",
-            attendance:emptyAttendanceForEvent(team.teamId, eventDate),
+            attendance:emptyAttendanceForEvent(team.teamId, eventDate, duration),
             recurrence,
             recurrenceId,
             recurrenceEnd:recurrence === "none" ? "" : recurrenceEnd,
@@ -1476,15 +1486,37 @@
         updateRecurrenceUi();
         renderSessionList();
       }
+      function activateTab(tab){
+        document.querySelectorAll(".presence-tab").forEach(item => item.classList.toggle("active", item.dataset.tab === tab));
+        document.querySelectorAll(".presence-panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${tab}`));
+      }
+      function openSessionCreationForDate(dateValue){
+        const dateInput = document.getElementById("sessionDate");
+        if(dateInput) dateInput.value = dateValue;
+        activateTab("sessions");
+        updateRecurrenceUi();
+        setSessionMessage(`Création prête pour le ${dateValue}.`, "success");
+        document.getElementById("sessionTeam")?.focus();
+      }
       function initTabs(){
         document.querySelectorAll(".presence-tab[data-tab]").forEach(button => {
           button.addEventListener("click", () => {
-            const tab = button.dataset.tab;
-            document.querySelectorAll(".presence-tab").forEach(item => item.classList.toggle("active", item === button));
-            document.querySelectorAll(".presence-panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${tab}`));
+            activateTab(button.dataset.tab);
           });
         });
       }
+      document.getElementById("calendarGrid")?.addEventListener("click", event => {
+        const day = event.target.closest("[data-create-date]");
+        if(!day) return;
+        openSessionCreationForDate(day.dataset.createDate);
+      });
+      document.getElementById("calendarGrid")?.addEventListener("keydown", event => {
+        if(event.key !== "Enter" && event.key !== " ") return;
+        const day = event.target.closest("[data-create-date]");
+        if(!day) return;
+        event.preventDefault();
+        openSessionCreationForDate(day.dataset.createDate);
+      });
       function render(){
         const events = loadEvents();
         renderKpis(events);
