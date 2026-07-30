@@ -232,6 +232,9 @@ function playersService(){
 function teamsService(){
   return window.CoachPulseTeamsService || null;
 }
+function presenceEventsService(){
+  return window.CoachPulsePresenceEventsService || null;
+}
 function permissionsService(){
   return window.CoachPulsePermissionsService || null;
 }
@@ -1223,6 +1226,9 @@ async function playerProfileLoadData(options={}){
     for(let i = 0; i < values.length; i += 10) out.push(values.slice(i, i + 10));
     return out;
   }
+  function mergeRows(rows=[], keyFn){
+    return [...new Map(rows.map(row => [keyFn(row), row])).values()];
+  }
   const chunks = chunksForValues(aliases);
   const playerIdChunks = chunksForValues(playerId ? [playerId] : aliases);
   async function readWhereIn(collectionName, field='playerId', queryChunks=chunks){
@@ -1294,6 +1300,11 @@ async function playerProfileLoadData(options={}){
   payload.collections.players = enrichPlayersWithTechnicalFootHints(payload.collections.players, technicalHints);
   if(playerId && !payload.collections.players.some(player => (player.playerId || player.id) === playerId)) throw new Error('Accès non autorisé à cette joueuse.');
   await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
+  const localPresence = presenceEventsService()?.collectionsForPlayer(aliases) || {sessions:[], attendance:[]};
+  payload.collections.attendance = mergeRows([
+    ...(payload.collections.attendance || []),
+    ...(localPresence.attendance || [])
+  ], row => row.id || row.attendanceId || `${row.sessionId}:${row.playerId}`);
   const seedTechnicalTests = await seedTechnicalTestsForProfile(aliases);
   const needsAthleticFallback = canUseAthletic('read') && !(payload.collections.physicalTests || []).length;
   const profilePhysicalTests = needsAthleticFallback ? await athleticListData({playerId, season:'all'}).catch(() => []) : [];
@@ -1321,7 +1332,10 @@ async function playerProfileLoadData(options={}){
     readDocsByIdsOrField('sessions', sessionIds, 'sessionId'),
     readDocsByIdsOrField('matches', matchIds, 'matchId')
   ]);
-  payload.collections.sessions = sessions;
+  payload.collections.sessions = mergeRows([
+    ...sessions,
+    ...(localPresence.sessions || [])
+  ], row => row.id || row.sessionId);
   payload.collections.matches = matches;
   if(cacheKey) appDataCache.playerProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
   return payload;
@@ -1341,6 +1355,9 @@ function rowTeamIds(row={}){
 function rowMatchesTeamId(row={}, teamId=''){
   const target = String(teamId || '').trim();
   return Boolean(target && rowTeamIds(row).includes(target));
+}
+function uniqueProfileRows(rows=[], keyFn){
+  return [...new Map(rows.map(row => [keyFn(row), row])).values()];
 }
 function playerMatchesTeamIdForAnySeason(player={}, teamId=''){
   if(!teamId) return false;
@@ -1364,6 +1381,15 @@ async function teamProfileLoadData(options={}){
   if(!db || !currentUser){
     const docs = collectCentralFirestoreDocs();
     names.forEach(name => { payload.collections[name] = [...(docs[name] || new Map()).values()]; });
+    const localPresence = presenceEventsService()?.collectionsForTeam(teamId) || {sessions:[], attendance:[]};
+    payload.collections.sessions = uniqueProfileRows([
+      ...(payload.collections.sessions || []),
+      ...(localPresence.sessions || [])
+    ], row => row.id || row.sessionId);
+    payload.collections.attendance = uniqueProfileRows([
+      ...(payload.collections.attendance || []),
+      ...(localPresence.attendance || [])
+    ], row => row.id || row.attendanceId || `${row.sessionId}:${row.playerId}`);
 	    payload.collections.teams = (payload.collections.teams || []).filter(team => !teamId || (team.teamId || team.id) === teamId);
 	    payload.collections.players = (payload.collections.players || []).filter(player => !teamId || playerMatchesTeamIdForAnySeason(player, teamId));
 	    if(summaryOnly){
@@ -1484,7 +1510,9 @@ async function teamProfileLoadData(options={}){
 	    }))
 	  ]);
 	  payload.collections.matchEvents = uniqueRows([...matchEventsByTeam, ...matchEventsByMatch]);
-	  payload.collections.attendance = uniqueRows([...attendanceByTeam, ...attendanceBySession, ...attendanceByPlayer]);
+	  const localPresence = presenceEventsService()?.collectionsForTeam(teamId) || {sessions:[], attendance:[]};
+	  payload.collections.sessions = uniqueRows([...(payload.collections.sessions || []), ...(localPresence.sessions || [])]);
+	  payload.collections.attendance = uniqueRows([...attendanceByTeam, ...attendanceBySession, ...attendanceByPlayer, ...(localPresence.attendance || [])]);
 	  playerLinkedRows.forEach(item => { payload.collections[item.name] = item.rows; });
 	  medicalLinkedRows.forEach(item => { payload.collections[item.name] = item.rows; });
   if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});

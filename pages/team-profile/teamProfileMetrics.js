@@ -186,15 +186,21 @@
     const matchIds = new Set(periodMatches.map(match => match.matchId || match.id).filter(Boolean));
     const players = (collections.players || []).map(player => Data.playerForSeason(player, period.season || Data.currentSeason())).filter(player => !team?.teamId || Data.rowMatchesTeam(player, team.teamId));
     const events = Filters.filterRows(collections.matchEvents || [], state).filter(row => !matchIds.size || matchIds.has(row.matchId) || Data.rowMatchesTeam(row, team?.teamId));
+    const sessions = Filters.filterRows(collections.sessions || [], state);
     const attendance = Filters.filterRows(collections.attendance || [], state);
     const technicalTests = Filters.filterRows(collections.technicalTests || [], state);
     const physicalTests = Filters.filterRows(collections.physicalTests || [], state);
     const injuries = Filters.filterRows(collections.injuries || [], state);
     const stats = collectiveStats(events);
-    const kpis = computeKpis(periodMatches);
+    const kpis = {
+      ...computeKpis(periodMatches),
+      sessions:sessions.length,
+      attendance:attendance.length,
+      attendanceMinutes:sum(attendance, row => row.minutes || row.duration)
+    };
     const xg = xgStats(periodMatches, events);
     return {
-      team, period, matches:periodMatches, events, players, attendance, technicalTests, physicalTests, injuries,
+      team, period, matches:periodMatches, events, players, sessions, attendance, technicalTests, physicalTests, injuries,
       kpis, stats, xg,
       squad:squad(players, attendance, events),
       heatmaps:{
