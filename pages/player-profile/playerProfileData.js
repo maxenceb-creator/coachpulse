@@ -140,6 +140,7 @@
     const aliases = playerAliases(player);
     if(api().playerProfileLoadData) return api().playerProfileLoadData({playerId, aliases});
     const players = await listPlayers();
+    const localPresence = global.CoachPulsePresenceEventsService?.collectionsForPlayer([playerId, ...aliases]) || {sessions:[], attendance:[]};
     return {
       app:'CoachPulse',
       module:'playerProfile',
@@ -147,7 +148,7 @@
       loadedAt:new Date().toISOString(),
       collections:{
         players:playerId ? players.filter(player => idOf(player) === playerId) : players,
-        sessions:[], attendance:[], matches:[], matchEvents:[], technicalTests:[], physicalTests:[],
+        sessions:localPresence.sessions || [], attendance:localPresence.attendance || [], matches:[], matchEvents:[], technicalTests:[], physicalTests:[],
         injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], workloads:[], medicalFollowUps:[], convocations:[], individualReports:[]
       }
     };

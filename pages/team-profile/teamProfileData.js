@@ -46,7 +46,8 @@
   async function loadTeamData(teamId, options={}){
     if(api().teamProfileLoadData) return api().teamProfileLoadData({teamId, ...options});
     const teams = await listTeams();
-    return {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), teamId, collections:{teams:teams.filter(team => !teamId || teamIdOf(team) === teamId), players:[], matches:[], matchEvents:[], sessions:[], attendance:[], technicalTests:[], physicalTests:[], injuries:[], workloads:[]}};
+    const localPresence = global.CoachPulsePresenceEventsService?.collectionsForTeam(teamId) || {sessions:[], attendance:[]};
+    return {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), teamId, collections:{teams:teams.filter(team => !teamId || teamIdOf(team) === teamId), players:[], matches:[], matchEvents:[], sessions:localPresence.sessions || [], attendance:localPresence.attendance || [], technicalTests:[], physicalTests:[], injuries:[], workloads:[]}};
   }
   function normalizeCollections(payload={}){
     const c = payload.collections || {};

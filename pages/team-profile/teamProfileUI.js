@@ -54,7 +54,8 @@
       ['Matchs', kpis.played], ['Victoires', kpis.wins], ['Nuls', kpis.draws], ['Défaites', kpis.losses],
       ['Taux victoire', `${kpis.winRate}%`], ['Sans défaite', `${kpis.unbeatenRate}%`], ['Pts / match', kpis.pointsPerMatch],
       ['Buts pour', kpis.goalsFor], ['Buts contre', kpis.goalsAgainst], ['Diff.', kpis.goalDiff],
-      ['Clean sheets', kpis.cleanSheets], ['Série', kpis.currentSeries]
+      ['Clean sheets', kpis.cleanSheets], ['Série', kpis.currentSeries], ['Séances', kpis.sessions || 0],
+      ['Présences', kpis.attendance || 0], ['Minutes présence', kpis.attendanceMinutes || 0]
     ];
     return `<section class="team-kpis">${items.map(([label,value]) => `<article><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}</section>`;
   }
