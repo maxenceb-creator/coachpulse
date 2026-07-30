@@ -1251,7 +1251,7 @@
       <article class="session-card">
         <header>
           <h1 id="sessionsTitle">Créer un événement</h1>
-          <p>Création locale pour préparer la future reconstruction du module Présences.</p>
+          <p id="sessionsIntro">Crée ou modifie un événement relié au cloud, au teamId et aux présences par playerId.</p>
         </header>
         <form id="sessionForm" class="session-form">
           <div class="field">
@@ -1311,8 +1311,9 @@
           </fieldset>
           <div class="form-actions">
             <div id="sessionMessage" class="session-message" role="status"></div>
+            <button id="cancelSessionEdit" type="button" hidden>Annuler la modification</button>
             <button type="reset">Réinitialiser</button>
-            <button class="primary" type="submit">Créer l'événement</button>
+            <button id="sessionSubmitButton" class="primary" type="submit">Créer l'événement</button>
           </div>
         </form>
       </article>
@@ -1568,6 +1569,7 @@
       let calendarPageMonth = new Date();
       let selectedCalendarDate = isoDate(new Date());
       let selectedAttendanceEventId = "";
+      let editingEventId = "";
       let calendarTeamFilterIds = new Set();
       let cloudReady = false;
       const DEFAULT_PRESENCE_SETTINGS = {
@@ -2340,6 +2342,92 @@
           comment:""
         }]));
       }
+      function mergeAttendanceForEvent(previousEvent, teamId, dateValue, duration){
+        return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => {
+          const previous = previousEvent?.attendance?.[player.playerId] ? attendanceEntry(previousEvent, player.playerId) : null;
+          return [player.playerId, previous ? {
+            ...previous,
+            minutes:previous.status === "present" || previous.status === "late"
+              ? Number(previous.minutes || duration || 0)
+              : Number(previous.minutes || 0)
+          } : {
+            status:"present",
+            minutes:Number(duration || 0),
+            comment:""
+          }];
+        }));
+      }
+      function setSessionFormMode(eventId=""){
+        editingEventId = eventId;
+        setText("sessionsTitle", eventId ? "Modifier un événement" : "Créer un événement");
+        const submit = document.getElementById("sessionSubmitButton");
+        const cancel = document.getElementById("cancelSessionEdit");
+        if(submit) submit.textContent = eventId ? "Enregistrer les modifications" : "Créer l'événement";
+        if(cancel) cancel.hidden = !eventId;
+      }
+      function resetSessionForm(){
+        const form = document.getElementById("sessionForm");
+        const dateInput = document.getElementById("sessionDate");
+        form?.reset();
+        if(dateInput) dateInput.value = isoDate(new Date());
+        setSessionFormMode("");
+        applySessionDefaults(true);
+        setSessionMessage("");
+        updateRecurrenceUi();
+      }
+      function fillSessionForm(event){
+        const form = document.getElementById("sessionForm");
+        if(!form || !event) return;
+        form.date.value = event.date || "";
+        form.teamId.value = event.teamId || "";
+        form.startTime.value = event.startTime || "";
+        form.endTime.value = event.endTime || "";
+        form.duration.value = event.duration || "";
+        form.type.value = event.type || "entrainement";
+        form.recurrence.value = event.recurrence || "none";
+        form.recurrenceEnd.value = event.recurrenceEnd || "";
+        setSessionFormMode(event.id || "");
+        updateRecurrenceUi();
+        setSessionMessage(`Modification de l'événement du ${event.date}.`, "success");
+        document.getElementById("sessionDate")?.focus();
+      }
+      function eventPayloadFromForm(form, previousEvent=null){
+        const date = form.date.value;
+        const teamId = form.teamId.value;
+        const team = teamById(teamId);
+        const startTime = form.startTime.value;
+        const endTime = form.endTime.value;
+        const duration = Number(form.duration.value || minutesBetween(startTime, endTime));
+        const type = form.type.value;
+        const recurrence = form.recurrence.value || "none";
+        const recurrenceEnd = form.recurrenceEnd.value || "";
+        if(!date || !startTime || !endTime || !duration || duration <= 0){
+          throw new Error("Complète le jour, les horaires et une durée valide.");
+        }
+        if(!team) throw new Error("Choisis une équipe reliée à un teamId.");
+        return {
+          ...(previousEvent || {}),
+          id:previousEvent?.id || `presence-event-${Date.now()}-0`,
+          date,
+          startTime,
+          endTime,
+          duration,
+          type,
+          title:typeLabel(type),
+          teamId:team.teamId,
+          team:team.name,
+          category:team.category || "",
+          attendance:previousEvent
+            ? mergeAttendanceForEvent(previousEvent, team.teamId, date, duration)
+            : emptyAttendanceForEvent(team.teamId, date, duration),
+          recurrence,
+          recurrenceId:previousEvent?.recurrenceId || "",
+          recurrenceEnd:recurrence === "none" ? "" : recurrenceEnd,
+          createdAt:previousEvent?.createdAt || new Date().toISOString(),
+          updatedAt:new Date().toISOString(),
+          source:"Présences"
+        };
+      }
       function renderSessionList(){
         const list = document.getElementById("sessionList");
         if(!list) return;
@@ -2363,6 +2451,7 @@
             </div>
             <div class="event-actions">
               <span class="session-type">${esc(typeLabel(event.type))}</span>
+              <button class="event-open-button" type="button" data-edit-event="${esc(event.id)}">Modifier</button>
               <button class="event-open-button ${event.id === selectedAttendanceEventId ? "active" : ""}" type="button" data-open-attendance="${esc(event.id)}">Feuille de présence</button>
               <button class="event-delete-button" type="button" data-delete-event="${esc(event.id)}">Supprimer</button>
             </div>
@@ -2538,76 +2627,67 @@
         document.getElementById("sessionForm")?.addEventListener("submit", async event => {
           event.preventDefault();
           const form = event.currentTarget;
-          const date = form.date.value;
-          const teamId = form.teamId.value;
-          const team = teamById(teamId);
-          const startTime = form.startTime.value;
-          const endTime = form.endTime.value;
-          const duration = Number(form.duration.value || minutesBetween(startTime, endTime));
-          const type = form.type.value;
-          const recurrence = form.recurrence.value || "none";
-          const recurrenceEnd = form.recurrenceEnd.value || "";
-          const dates = buildRecurrenceDates(date, recurrence, recurrenceEnd);
-          if(!date || !startTime || !endTime || !duration || duration <= 0){
-            setSessionMessage("Complète le jour, les horaires et une durée valide.", "error");
-            return;
-          }
-          if(!team){
-            setSessionMessage("Choisis une équipe reliée à un teamId.", "error");
-            return;
-          }
-          if(!dates.length){
-            setSessionMessage("La récurrence n'est pas valide : vérifie la date de fin.", "error");
-            return;
-          }
-          const recurrenceId = recurrence === "none" ? "" : `presence-recurrence-${Date.now()}`;
-          const newItems = dates.map((eventDate, index) => ({
-            id:`presence-event-${Date.now()}-${index}`,
-            date:eventDate,
-            startTime,
-            endTime,
-            duration,
-            type,
-            title:typeLabel(type),
-            teamId:team.teamId,
-            team:team.name,
-            category:team.category || "",
-            attendance:emptyAttendanceForEvent(team.teamId, eventDate, duration),
-            recurrence,
-            recurrenceId,
-            recurrenceEnd:recurrence === "none" ? "" : recurrenceEnd,
-            createdAt:new Date().toISOString(),
-            source:"Présences"
-          }));
           const previousEvents = loadPresenceEvents();
-          savePresenceEvents([...previousEvents, ...newItems]);
-          selectedAttendanceEventId = newItems[0]?.id || "";
+          const previousEvent = editingEventId ? previousEvents.find(item => item.id === editingEventId) : null;
+          if(editingEventId && !previousEvent){
+            setSessionMessage("Événement à modifier introuvable.", "error");
+            setSessionFormMode("");
+            return;
+          }
+          let nextEvents = previousEvents;
+          let savedItems = [];
           try{
-            await Promise.all(newItems.map(item => pushPresenceEventToCloud(item)));
+            if(previousEvent){
+              const updatedEvent = eventPayloadFromForm(form, previousEvent);
+              nextEvents = previousEvents.map(item => item.id === updatedEvent.id ? updatedEvent : item);
+              savePresenceEvents(nextEvents);
+              await pushPresenceEventToCloud(updatedEvent);
+              selectedAttendanceEventId = updatedEvent.id;
+              savedItems = [updatedEvent];
+            }else{
+              const baseEvent = eventPayloadFromForm(form);
+              const date = baseEvent.date;
+              const recurrence = form.recurrence.value || "none";
+              const recurrenceEnd = form.recurrenceEnd.value || "";
+              const dates = buildRecurrenceDates(date, recurrence, recurrenceEnd);
+              if(!dates.length) throw new Error("La récurrence n'est pas valide : vérifie la date de fin.");
+              const recurrenceId = recurrence === "none" ? "" : `presence-recurrence-${Date.now()}`;
+              savedItems = dates.map((eventDate, index) => ({
+                ...baseEvent,
+                id:`presence-event-${Date.now()}-${index}`,
+                date:eventDate,
+                attendance:emptyAttendanceForEvent(baseEvent.teamId, eventDate, baseEvent.duration),
+                recurrenceId,
+                recurrenceEnd:recurrence === "none" ? "" : recurrenceEnd
+              }));
+              nextEvents = [...previousEvents, ...savedItems];
+              savePresenceEvents(nextEvents);
+              selectedAttendanceEventId = savedItems[0]?.id || "";
+              await Promise.all(savedItems.map(item => pushPresenceEventToCloud(item)));
+            }
           }catch(error){
             savePresenceEvents(previousEvents);
-            selectedAttendanceEventId = "";
+            if(!previousEvent) selectedAttendanceEventId = "";
             render();
             renderSessionList();
-            setSessionMessage(`Création cloud impossible : ${error?.message || error}.`, "error");
+            setSessionMessage(`Sauvegarde impossible : ${error?.message || error}.`, "error");
             return;
           }
-          form.reset();
-          if(dateInput) dateInput.value = isoDate(new Date());
-          applySessionDefaults(true);
-          updateRecurrenceUi();
+          resetSessionForm();
           render();
           renderSessionList();
-          setSessionMessage(`${newItems.length} événement(s) créé(s) dans le cloud.`, "success");
+          setSessionMessage(previousEvent ? "Événement modifié dans le cloud." : `${savedItems.length} événement(s) créé(s) dans le cloud.`, "success");
         });
         document.getElementById("sessionForm")?.addEventListener("reset", () => {
           setTimeout(() => {
             if(dateInput) dateInput.value = isoDate(new Date());
+            setSessionFormMode("");
             applySessionDefaults(true);
             setSessionMessage("");
             updateRecurrenceUi();
           }, 0);
         });
+        document.getElementById("cancelSessionEdit")?.addEventListener("click", resetSessionForm);
         document.getElementById("sessionDate")?.addEventListener("change", updateRecurrenceUi);
         document.getElementById("sessionRecurrence")?.addEventListener("change", updateRecurrenceUi);
         document.getElementById("sessionRecurrenceEnd")?.addEventListener("change", updateRecurrenceUi);
@@ -2615,6 +2695,13 @@
           const deleteButton = event.target.closest("[data-delete-event]");
           if(deleteButton){
             deletePresenceEvent(deleteButton.dataset.deleteEvent || "");
+            return;
+          }
+          const editButton = event.target.closest("[data-edit-event]");
+          if(editButton){
+            const eventToEdit = loadPresenceEvents().find(item => item.id === editButton.dataset.editEvent);
+            fillSessionForm(eventToEdit);
+            document.getElementById("sessionForm")?.scrollIntoView({behavior:"smooth", block:"start"});
             return;
           }
           const button = event.target.closest("[data-open-attendance]");

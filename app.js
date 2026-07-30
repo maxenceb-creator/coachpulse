@@ -3714,15 +3714,24 @@ async function presenceSaveEvent(event={}){
     createdAtIso:session.createdAt || event.createdAt || now
   }, {merge:true});
   const attendanceRows = service?.attendanceRowsFromEvent ? service.attendanceRowsFromEvent(event) : [];
-  await Promise.all(attendanceRows.map(row => firebaseFns.setDoc(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
-    ...row,
-    source:'Présences',
-    createdFromPresenceModule:true,
-    updatedAt:firebaseFns.serverTimestamp(),
-    updatedAtIso:now,
-    updatedBy:currentUser.uid,
-    updatedByEmail:currentUser.email || ''
-  }, {merge:true})));
+  const nextAttendanceIds = new Set(attendanceRows.map(row => row.attendanceId || row.id).filter(Boolean));
+  const existingAttendanceSnap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)));
+  const staleAttendanceDeletes = [];
+  existingAttendanceSnap.forEach(docSnap => {
+    if(!nextAttendanceIds.has(docSnap.id)) staleAttendanceDeletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'attendance', docSnap.id)));
+  });
+  await Promise.all([
+    ...staleAttendanceDeletes,
+    ...attendanceRows.map(row => firebaseFns.setDoc(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
+      ...row,
+      source:'Présences',
+      createdFromPresenceModule:true,
+      updatedAt:firebaseFns.serverTimestamp(),
+      updatedAtIso:now,
+      updatedBy:currentUser.uid,
+      updatedByEmail:currentUser.email || ''
+    }, {merge:true}))
+  ]);
   invalidateAppDataCaches('teamProfiles');
   return {sessionId, attendance:attendanceRows.length};
 }
