@@ -782,6 +782,79 @@
       font-size:clamp(15px,2vw,18px);
       line-height:1.45;
     }
+    .calendar-page{
+      max-width:1320px;
+      margin:0 auto;
+    }
+    .calendar-page-shell{
+      display:grid;
+      grid-template-columns:minmax(0,1.25fr) minmax(290px,.75fr);
+      gap:16px;
+    }
+    .calendar-page .calendar-card,
+    .calendar-day-detail{
+      min-height:0;
+    }
+    .calendar-page .calendar-day{
+      min-height:142px;
+    }
+    .calendar-day.selected{
+      position:relative;
+      z-index:1;
+      outline:3px solid rgba(200,164,77,.55);
+      outline-offset:-3px;
+      background:#fffdf5;
+    }
+    .calendar-day-detail{
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 14px 34px rgba(16,37,27,.08);
+      overflow:hidden;
+    }
+    .day-detail-header{
+      padding:16px 18px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(135deg,#003b22,#00843d);
+      color:#fff;
+    }
+    .day-detail-header h2{
+      margin:0;
+      color:#fff;
+      font-size:clamp(22px,2.6vw,32px);
+      line-height:1;
+    }
+    .day-detail-header p{
+      margin:8px 0 0;
+      color:rgba(255,255,255,.78);
+      font-weight:850;
+    }
+    .day-detail-list{
+      display:grid;
+      gap:10px;
+      padding:14px;
+      max-height:680px;
+      overflow:auto;
+    }
+    .day-detail-item{
+      border:1px solid var(--event-border, var(--line));
+      border-left:5px solid var(--event-color, var(--green));
+      border-radius:14px;
+      background:var(--event-bg, #fff);
+      padding:12px;
+    }
+    .day-detail-item strong{
+      display:block;
+      color:var(--dark);
+      font-size:16px;
+      line-height:1.2;
+    }
+    .day-detail-actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin-top:10px;
+    }
     @media(max-width:760px){
       main{padding:0 8px 18px}
       .presence-tabs{
@@ -798,7 +871,8 @@
       }
       .presence-tab span{font-size:17px}
       .presence-dashboard,
-      .dashboard-hero{
+      .dashboard-hero,
+      .calendar-page-shell{
         grid-template-columns:1fr;
       }
       .kpi-grid{
@@ -977,9 +1051,43 @@
       </article>
     </section>
 
-    <section id="panel-calendar" class="presence-panel pause-panel" aria-labelledby="calendarPauseTitle">
-      <h1 id="calendarPauseTitle">Calendrier détaillé en pause</h1>
-      <p>La vue calendrier complète sera reconstruite après validation de la création des événements.</p>
+    <section id="panel-calendar" class="presence-panel calendar-page" aria-labelledby="calendarPageTitle">
+      <div class="dashboard-hero">
+        <div>
+          <h1 id="calendarPageTitle">Calendrier Présences</h1>
+          <p>Planning complet des événements par équipe. Clique sur une journée pour créer un événement ou consulter son détail.</p>
+        </div>
+        <div class="kpi-grid" aria-label="Résumé du calendrier détaillé">
+          <div class="kpi-card"><strong id="calendarPageTotal">0</strong><span>Événements</span></div>
+          <div class="kpi-card"><strong id="calendarPageMonth">0</strong><span>Ce mois</span></div>
+          <div class="kpi-card"><strong id="calendarPageSelectedCount">0</strong><span>Jour choisi</span></div>
+          <div class="kpi-card"><strong id="calendarPageNext">-</strong><span>Prochain</span></div>
+        </div>
+      </div>
+      <div class="calendar-page-shell">
+        <article class="calendar-card" aria-label="Calendrier détaillé des événements programmés">
+          <header class="calendar-header">
+            <h2 id="calendarPageMonthTitle">Calendrier</h2>
+            <div class="calendar-actions">
+              <button id="calendarPagePrevMonth" type="button">← Mois précédent</button>
+              <button id="calendarPageTodayMonth" class="primary" type="button">Aujourd'hui</button>
+              <button id="calendarPageNextMonth" type="button">Mois suivant →</button>
+            </div>
+          </header>
+          <div id="calendarPageTeamFilters" class="calendar-team-filter" aria-label="Filtrer le calendrier détaillé par équipe"></div>
+          <div class="calendar-weekdays" aria-hidden="true">
+            <div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div>Sam</div><div>Dim</div>
+          </div>
+          <div id="calendarPageGrid" class="calendar-grid"></div>
+        </article>
+        <aside class="calendar-day-detail" aria-label="Détail de la journée sélectionnée">
+          <header class="day-detail-header">
+            <h2 id="calendarDayTitle">Aujourd'hui</h2>
+            <p id="calendarDaySubtitle">Événements du jour sélectionné.</p>
+          </header>
+          <div id="calendarDayList" class="day-detail-list"></div>
+        </aside>
+      </div>
     </section>
     <section id="panel-reports" class="presence-panel pause-panel" aria-labelledby="reportsPauseTitle">
       <h1 id="reportsPauseTitle">Bilans en pause</h1>
@@ -1015,6 +1123,8 @@
       ];
       const TEAM_COLORS = ["#1d995b","#0f766e","#2563eb","#7c3aed","#c2410c","#be123c","#b45309","#047857"];
       let currentMonth = new Date();
+      let calendarPageMonth = new Date();
+      let selectedCalendarDate = isoDate(new Date());
       let selectedAttendanceEventId = "";
       let calendarTeamFilterIds = new Set();
       let cloudReady = false;
@@ -1260,12 +1370,13 @@
         setText("eventsWeek", events.filter(event => event.date >= weekStart && event.date <= weekEnd).length);
         setText("eventsNext", next ? `${String(next.date.getDate()).padStart(2,"0")}/${String(next.date.getMonth()+1).padStart(2,"0")}` : "-");
       }
-      function renderCalendar(events){
-        const grid = document.getElementById("calendarGrid");
-        const title = document.getElementById("calendarTitle");
+      function renderCalendarGrid(options){
+        const {events, gridId, titleId, monthDate, selectable=false} = options;
+        const grid = document.getElementById(gridId);
+        const title = document.getElementById(titleId);
         if(!grid || !title) return;
-        const year = currentMonth.getFullYear();
-        const month = currentMonth.getMonth();
+        const year = monthDate.getFullYear();
+        const month = monthDate.getMonth();
         title.textContent = `${monthNames[month]} ${year}`;
         const first = new Date(year, month, 1);
         const offset = (first.getDay() + 6) % 7;
@@ -1275,6 +1386,7 @@
         for(let i=0;i<42;i++){
           const date = new Date(start);
           date.setDate(start.getDate() + i);
+          const dateIso = isoDate(date);
           const dayEvents = events.filter(event => sameDay(event.date, date));
           const chips = dayEvents.slice(0,3).map(event => `
             <span class="event-chip ${event.source}" style="${esc(eventStyle(event))}" title="${esc(event.title)} · ${esc(eventTeamLabel(event))}">
@@ -1284,7 +1396,7 @@
           `).join("");
           const more = dayEvents.length > 3 ? `<div class="event-more">+${dayEvents.length - 3} autre(s)</div>` : "";
           days.push(`
-            <div class="calendar-day ${date.getMonth() === month ? "" : "muted"} ${sameDay(date,today) ? "today" : ""}" role="button" tabindex="0" data-create-date="${isoDate(date)}" title="Créer un événement le ${isoDate(date)}">
+            <div class="calendar-day ${date.getMonth() === month ? "" : "muted"} ${sameDay(date,today) ? "today" : ""} ${selectable && dateIso === selectedCalendarDate ? "selected" : ""}" role="button" tabindex="0" data-create-date="${dateIso}" ${selectable ? `data-select-date="${dateIso}"` : ""} title="Créer un événement le ${dateIso}">
               <div class="day-number"><b>${date.getDate()}</b><span>${dayEvents.length ? dayEvents.length : ""}</span></div>
               ${chips}${more}
             </div>
@@ -1292,8 +1404,11 @@
         }
         grid.innerHTML = days.join("");
       }
-      function renderCalendarTeamFilters(){
-        const root = document.getElementById("calendarTeamFilters");
+      function renderCalendar(events){
+        renderCalendarGrid({events, gridId:"calendarGrid", titleId:"calendarTitle", monthDate:currentMonth});
+      }
+      function renderCalendarTeamFilters(rootId="calendarTeamFilters"){
+        const root = document.getElementById(rootId);
         if(!root) return;
         const teams = officialTeams();
         root.innerHTML = `
@@ -1311,6 +1426,52 @@
             `;
           }).join("")}
         `;
+      }
+      function renderCalendarPageKpis(events){
+        const monthStart = new Date(calendarPageMonth.getFullYear(), calendarPageMonth.getMonth(), 1);
+        const monthEnd = new Date(calendarPageMonth.getFullYear(), calendarPageMonth.getMonth() + 1, 0);
+        const selectedCount = events.filter(event => event.iso === selectedCalendarDate).length;
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const next = events.find(event => event.date >= today);
+        setText("calendarPageTotal", events.length);
+        setText("calendarPageMonth", events.filter(event => event.date >= monthStart && event.date <= monthEnd).length);
+        setText("calendarPageSelectedCount", selectedCount);
+        setText("calendarPageNext", next ? `${String(next.date.getDate()).padStart(2,"0")}/${String(next.date.getMonth()+1).padStart(2,"0")}` : "-");
+      }
+      function renderCalendarDayDetail(events){
+        const title = document.getElementById("calendarDayTitle");
+        const subtitle = document.getElementById("calendarDaySubtitle");
+        const list = document.getElementById("calendarDayList");
+        const selected = parseDate(selectedCalendarDate) || new Date();
+        const dayEvents = events.filter(event => event.iso === selectedCalendarDate);
+        if(title) title.textContent = `${String(selected.getDate()).padStart(2,"0")}/${String(selected.getMonth()+1).padStart(2,"0")}/${selected.getFullYear()}`;
+        if(subtitle) subtitle.textContent = `${dayEvents.length} événement(s) sur la journée sélectionnée.`;
+        if(!list) return;
+        if(!dayEvents.length){
+          list.innerHTML = '<div class="empty-state">Aucun événement sur cette journée. Clique sur la date dans le calendrier pour en créer un.</div>';
+          return;
+        }
+        list.innerHTML = dayEvents.map(event => `
+          <article class="day-detail-item" style="${esc(eventStyle(event))}">
+            <strong>${esc(event.title)}</strong>
+            <div class="agenda-meta">
+              ${esc(event.startTime || event.time || event.start || "-")} - ${esc(event.endTime || event.end || "-")}
+              ${event.duration ? " · " + esc(event.duration) + " min" : ""}
+              ${eventTeamLabel(event) ? " · " + esc(eventTeamLabel(event)) : ""}
+            </div>
+            <div class="day-detail-actions">
+              <button class="event-open-button" type="button" data-calendar-open-attendance="${esc(event.id)}">Feuille de présence</button>
+              <button class="event-delete-button" type="button" data-calendar-delete-event="${esc(event.id)}">Supprimer</button>
+            </div>
+          </article>
+        `).join("");
+      }
+      function renderCalendarPage(events){
+        renderCalendarPageKpis(events);
+        renderCalendarGrid({events, gridId:"calendarPageGrid", titleId:"calendarPageMonthTitle", monthDate:calendarPageMonth, selectable:true});
+        renderCalendarTeamFilters("calendarPageTeamFilters");
+        renderCalendarDayDetail(events);
       }
       function renderAgenda(events){
         const list = document.getElementById("agendaList");
@@ -1705,6 +1866,7 @@
       function activateTab(tab){
         document.querySelectorAll(".presence-tab").forEach(item => item.classList.toggle("active", item.dataset.tab === tab));
         document.querySelectorAll(".presence-panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${tab}`));
+        if(tab === "calendar") render();
       }
       function openSessionCreationForDate(dateValue){
         const dateInput = document.getElementById("sessionDate");
@@ -1736,7 +1898,30 @@
         event.preventDefault();
         openSessionCreationForDate(day.dataset.createDate);
       });
+      document.getElementById("calendarPageGrid")?.addEventListener("click", event => {
+        const day = event.target.closest("[data-select-date]");
+        if(!day) return;
+        selectedCalendarDate = day.dataset.selectDate;
+        render();
+        if(event.target.closest(".event-chip") || day.querySelector(".event-chip")) return;
+        openSessionCreationForDate(day.dataset.selectDate);
+      });
+      document.getElementById("calendarPageGrid")?.addEventListener("keydown", event => {
+        if(event.key !== "Enter" && event.key !== " ") return;
+        const day = event.target.closest("[data-select-date]");
+        if(!day) return;
+        event.preventDefault();
+        selectedCalendarDate = day.dataset.selectDate;
+        render();
+      });
       document.getElementById("calendarTeamFilters")?.addEventListener("change", event => {
+        const input = event.target.closest("input[type='checkbox']");
+        if(!input) return;
+        if(input.checked) calendarTeamFilterIds.add(input.value);
+        else calendarTeamFilterIds.delete(input.value);
+        render();
+      });
+      document.getElementById("calendarPageTeamFilters")?.addEventListener("change", event => {
         const input = event.target.closest("input[type='checkbox']");
         if(!input) return;
         if(input.checked) calendarTeamFilterIds.add(input.value);
@@ -1749,12 +1934,32 @@
         calendarTeamFilterIds = new Set();
         render();
       });
+      document.getElementById("calendarPageTeamFilters")?.addEventListener("click", event => {
+        const clear = event.target.closest("[data-clear-team-filters]");
+        if(!clear) return;
+        calendarTeamFilterIds = new Set();
+        render();
+      });
+      document.getElementById("calendarDayList")?.addEventListener("click", event => {
+        const deleteButton = event.target.closest("[data-calendar-delete-event]");
+        if(deleteButton){
+          deletePresenceEvent(deleteButton.dataset.calendarDeleteEvent || "");
+          return;
+        }
+        const openButton = event.target.closest("[data-calendar-open-attendance]");
+        if(!openButton) return;
+        selectedAttendanceEventId = openButton.dataset.calendarOpenAttendance || "";
+        activateTab("sessions");
+        renderSessionList();
+        document.getElementById("attendanceDetail")?.scrollIntoView({behavior:"smooth", block:"start"});
+      });
       function render(){
         const events = filteredEvents(loadEvents());
         renderCalendarTeamFilters();
         renderKpis(events);
         renderCalendar(events);
         renderAgenda(events);
+        renderCalendarPage(events);
       }
       async function initPresenceCloud(){
         try{
@@ -1777,6 +1982,19 @@
       });
       document.getElementById("todayMonth")?.addEventListener("click", () => {
         currentMonth = new Date();
+        render();
+      });
+      document.getElementById("calendarPagePrevMonth")?.addEventListener("click", () => {
+        calendarPageMonth = new Date(calendarPageMonth.getFullYear(), calendarPageMonth.getMonth() - 1, 1);
+        render();
+      });
+      document.getElementById("calendarPageNextMonth")?.addEventListener("click", () => {
+        calendarPageMonth = new Date(calendarPageMonth.getFullYear(), calendarPageMonth.getMonth() + 1, 1);
+        render();
+      });
+      document.getElementById("calendarPageTodayMonth")?.addEventListener("click", () => {
+        calendarPageMonth = new Date();
+        selectedCalendarDate = isoDate(new Date());
         render();
       });
       initTabs();
