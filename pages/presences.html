@@ -84,27 +84,223 @@
       border-color:#8e6f20;
       box-shadow:inset 0 0 0 2px rgba(142,111,32,.18);
     }
-    .presence-placeholder{
-      max-width:980px;
-      margin:40px auto 0;
-      padding:28px;
+    .presence-dashboard{
+      display:grid;
+      grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);
+      gap:16px;
+      max-width:1320px;
+      margin:0 auto;
+    }
+    .dashboard-hero,
+    .calendar-card,
+    .agenda-card,
+    .kpi-card{
       border:1px solid var(--line);
       border-radius:18px;
       background:#fff;
       box-shadow:0 14px 34px rgba(16,37,27,.08);
     }
-    .presence-placeholder h1{
-      margin:0 0 10px;
+    .dashboard-hero{
+      grid-column:1/-1;
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:14px;
+      align-items:center;
+      padding:18px;
+      background:linear-gradient(135deg,#fff 0%,#f7fbf8 54%,#edf8f2 100%);
+    }
+    .dashboard-hero h1{
+      margin:0;
       color:var(--dark);
       font-size:clamp(28px,4vw,44px);
       line-height:1;
     }
-    .presence-placeholder p{
-      margin:0;
+    .dashboard-hero p,
+    .empty-state{
+      margin:8px 0 0;
       color:#66756d;
       font-weight:800;
       font-size:clamp(15px,2vw,18px);
       line-height:1.45;
+    }
+    .kpi-grid{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(120px,1fr));
+      gap:10px;
+    }
+    .kpi-card{
+      padding:14px 16px;
+      border-left:5px solid var(--green);
+      min-height:92px;
+    }
+    .kpi-card strong{
+      display:block;
+      color:var(--dark);
+      font-size:clamp(24px,3vw,38px);
+      line-height:1;
+    }
+    .kpi-card span{
+      display:block;
+      margin-top:7px;
+      color:#64756d;
+      font-size:12px;
+      font-weight:1000;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .calendar-card,
+    .agenda-card{
+      overflow:hidden;
+    }
+    .calendar-header,
+    .agenda-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:14px 16px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(90deg,#fff,#f7fbf8);
+    }
+    .calendar-header h2,
+    .agenda-header h2{
+      margin:0;
+      color:var(--dark);
+      font-size:clamp(22px,2.5vw,30px);
+      line-height:1;
+    }
+    .calendar-actions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .calendar-actions button{
+      min-height:40px;
+      border:1px solid #d6e7dd;
+      border-radius:12px;
+      background:#fff;
+      color:var(--dark);
+      font-weight:1000;
+      cursor:pointer;
+      padding:8px 12px;
+    }
+    .calendar-actions button.primary{
+      background:var(--green);
+      border-color:var(--green);
+      color:#fff;
+    }
+    .calendar-weekdays,
+    .calendar-grid{
+      display:grid;
+      grid-template-columns:repeat(7,minmax(0,1fr));
+    }
+    .calendar-weekdays div{
+      padding:10px 8px;
+      text-align:center;
+      color:#66756d;
+      background:#fff9e8;
+      border-bottom:1px solid var(--line);
+      font-size:11px;
+      font-weight:1000;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .calendar-day{
+      min-height:118px;
+      padding:9px;
+      border-right:1px solid var(--line);
+      border-bottom:1px solid var(--line);
+      background:#fff;
+    }
+    .calendar-day:nth-child(7n){
+      border-right:0;
+    }
+    .calendar-day.muted{
+      background:#f7faf8;
+      color:#9aa49d;
+    }
+    .day-number{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:5px;
+      margin-bottom:7px;
+      font-weight:1000;
+      color:var(--dark);
+    }
+    .calendar-day.today .day-number b{
+      display:inline-grid;
+      place-items:center;
+      min-width:27px;
+      height:27px;
+      border-radius:999px;
+      background:var(--green);
+      color:#fff;
+    }
+    .event-chip{
+      display:block;
+      width:100%;
+      margin-top:5px;
+      padding:6px 7px;
+      border:1px solid #d7eadc;
+      border-left:4px solid var(--green);
+      border-radius:10px;
+      background:#f0fbf5;
+      color:var(--dark);
+      font-size:11px;
+      font-weight:950;
+      line-height:1.18;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .event-chip.methodologie{
+      border-left-color:var(--gold);
+      background:#fff9e8;
+    }
+    .event-more{
+      margin-top:5px;
+      color:#66756d;
+      font-size:10px;
+      font-weight:1000;
+    }
+    .agenda-list{
+      display:grid;
+      gap:9px;
+      padding:14px;
+      max-height:620px;
+      overflow:auto;
+    }
+    .agenda-item{
+      border:1px solid var(--line);
+      border-left:5px solid var(--green);
+      border-radius:14px;
+      padding:11px 12px;
+      background:#fff;
+    }
+    .agenda-item.methodologie{
+      border-left-color:var(--gold);
+    }
+    .agenda-item strong{
+      display:block;
+      color:var(--dark);
+      font-size:15px;
+      line-height:1.2;
+    }
+    .agenda-meta{
+      margin-top:6px;
+      color:#66756d;
+      font-size:12px;
+      font-weight:850;
+      line-height:1.35;
+    }
+    .empty-state{
+      margin:14px;
+      padding:22px;
+      border:1px dashed #c8d8d0;
+      border-radius:16px;
+      text-align:center;
+      background:#fbfdfc;
     }
     @media(max-width:760px){
       main{padding:0 8px 18px}
@@ -121,6 +317,23 @@
         font-size:8.5px;
       }
       .presence-tab span{font-size:17px}
+      .presence-dashboard,
+      .dashboard-hero{
+        grid-template-columns:1fr;
+      }
+      .kpi-grid{
+        grid-template-columns:repeat(2,minmax(0,1fr));
+      }
+      .calendar-card{
+        overflow:auto;
+      }
+      .calendar-weekdays,
+      .calendar-grid{
+        min-width:720px;
+      }
+      .calendar-day{
+        min-height:104px;
+      }
     }
   </style>
 </head>
@@ -134,10 +347,206 @@
       <button class="presence-tab" type="button"><span>⚡</span>Prévention<small>Charge</small></button>
       <button class="presence-tab" type="button"><span>🧩</span>Paramètres<small>Réglages</small></button>
     </nav>
-    <section class="presence-placeholder" aria-labelledby="presenceTitle">
-      <h1 id="presenceTitle">Module Présences mis en pause</h1>
-      <p>Le bandeau est conservé. La création, la sauvegarde, les imports, les bilans et la synchronisation des séances ont été retirés pour repartir sur une base saine.</p>
+    <section class="presence-dashboard" aria-labelledby="presenceTitle">
+      <div class="dashboard-hero">
+        <div>
+          <h1 id="presenceTitle">Tableau de bord Présences</h1>
+          <p>Vue calendrier des événements programmés. Lecture locale uniquement, sans création ni synchronisation de séances.</p>
+        </div>
+        <div class="kpi-grid" aria-label="Résumé des événements">
+          <div class="kpi-card"><strong id="eventsTotal">0</strong><span>Événements</span></div>
+          <div class="kpi-card"><strong id="eventsMonth">0</strong><span>Ce mois</span></div>
+          <div class="kpi-card"><strong id="eventsWeek">0</strong><span>Cette semaine</span></div>
+          <div class="kpi-card"><strong id="eventsNext">-</strong><span>Prochain</span></div>
+        </div>
+      </div>
+
+      <article class="calendar-card" aria-label="Calendrier des événements programmés">
+        <header class="calendar-header">
+          <h2 id="calendarTitle">Calendrier</h2>
+          <div class="calendar-actions">
+            <button id="prevMonth" type="button">← Mois précédent</button>
+            <button id="todayMonth" class="primary" type="button">Aujourd'hui</button>
+            <button id="nextMonth" type="button">Mois suivant →</button>
+          </div>
+        </header>
+        <div class="calendar-weekdays" aria-hidden="true">
+          <div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div>Sam</div><div>Dim</div>
+        </div>
+        <div id="calendarGrid" class="calendar-grid"></div>
+      </article>
+
+      <aside class="agenda-card" aria-label="Liste des prochains événements">
+        <header class="agenda-header">
+          <h2>À venir</h2>
+        </header>
+        <div id="agendaList" class="agenda-list"></div>
+      </aside>
     </section>
   </main>
+  <script>
+    (function(){
+      const EVENT_KEY = "methodo_events_v24";
+      const LEGACY_PRESENCE_KEY = "presenceSeanceV3_6_Excel";
+      const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+      let currentMonth = new Date();
+
+      function esc(value){
+        return String(value ?? "").replace(/[&<>"']/g, char => ({
+          "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+        }[char]));
+      }
+      function readJson(key, fallback){
+        try{
+          const value = localStorage.getItem(key);
+          return value ? JSON.parse(value) : fallback;
+        }catch(_error){
+          return fallback;
+        }
+      }
+      function parseDate(value){
+        if(!value) return null;
+        const text = String(value).slice(0,10);
+        const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if(match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+      }
+      function isoDate(date){
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, "0");
+        const d = String(date.getDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+      function sameDay(a,b){
+        return a && b && isoDate(a) === isoDate(b);
+      }
+      function eventTitle(event){
+        return event.title || event.theme || event.type || event.text || "Événement";
+      }
+      function eventMeta(event){
+        return [
+          event.time || event.startTime || event.start || "",
+          event.team || event.category || event.categorie || "",
+          event.place || event.location || event.lieu || ""
+        ].filter(Boolean).join(" · ");
+      }
+      function normalizeEvent(event, source){
+        const date = parseDate(event?.date || event?.startDate || event?.day || event?.start);
+        if(!date) return null;
+        return {
+          ...event,
+          date,
+          iso:isoDate(date),
+          title:eventTitle(event),
+          meta:eventMeta(event),
+          source
+        };
+      }
+      function loadEvents(){
+        const methodo = Array.isArray(readJson(EVENT_KEY, [])) ? readJson(EVENT_KEY, []) : [];
+        const legacy = readJson(LEGACY_PRESENCE_KEY, null);
+        const legacySessions = Array.isArray(legacy?.sessions) ? legacy.sessions : [];
+        return [
+          ...methodo.map(event => normalizeEvent(event, "methodologie")),
+          ...legacySessions.map(event => normalizeEvent(event, "presences"))
+        ].filter(Boolean).sort((a,b) => a.date - b.date);
+      }
+      function startOfWeek(date){
+        const d = new Date(date);
+        const day = (d.getDay() + 6) % 7;
+        d.setDate(d.getDate() - day);
+        d.setHours(0,0,0,0);
+        return d;
+      }
+      function setText(id, value){
+        const node = document.getElementById(id);
+        if(node) node.textContent = value;
+      }
+      function renderKpis(events){
+        const now = new Date();
+        const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+        const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+        const weekStart = startOfWeek(now);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const next = events.find(event => event.date >= new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+        setText("eventsTotal", events.length);
+        setText("eventsMonth", events.filter(event => event.date >= monthStart && event.date <= monthEnd).length);
+        setText("eventsWeek", events.filter(event => event.date >= weekStart && event.date <= weekEnd).length);
+        setText("eventsNext", next ? `${String(next.date.getDate()).padStart(2,"0")}/${String(next.date.getMonth()+1).padStart(2,"0")}` : "-");
+      }
+      function renderCalendar(events){
+        const grid = document.getElementById("calendarGrid");
+        const title = document.getElementById("calendarTitle");
+        if(!grid || !title) return;
+        const year = currentMonth.getFullYear();
+        const month = currentMonth.getMonth();
+        title.textContent = `${monthNames[month]} ${year}`;
+        const first = new Date(year, month, 1);
+        const offset = (first.getDay() + 6) % 7;
+        const start = new Date(year, month, 1 - offset);
+        const today = new Date();
+        const days = [];
+        for(let i=0;i<42;i++){
+          const date = new Date(start);
+          date.setDate(start.getDate() + i);
+          const dayEvents = events.filter(event => sameDay(event.date, date));
+          const chips = dayEvents.slice(0,3).map(event => `
+            <span class="event-chip ${event.source}" title="${esc(event.title)}">
+              ${esc(event.title)}
+            </span>
+          `).join("");
+          const more = dayEvents.length > 3 ? `<div class="event-more">+${dayEvents.length - 3} autre(s)</div>` : "";
+          days.push(`
+            <div class="calendar-day ${date.getMonth() === month ? "" : "muted"} ${sameDay(date,today) ? "today" : ""}">
+              <div class="day-number"><b>${date.getDate()}</b><span>${dayEvents.length ? dayEvents.length : ""}</span></div>
+              ${chips}${more}
+            </div>
+          `);
+        }
+        grid.innerHTML = days.join("");
+      }
+      function renderAgenda(events){
+        const list = document.getElementById("agendaList");
+        if(!list) return;
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const upcoming = events.filter(event => event.date >= today).slice(0,10);
+        if(!upcoming.length){
+          list.innerHTML = '<div class="empty-state">Aucun événement programmé à venir.</div>';
+          return;
+        }
+        list.innerHTML = upcoming.map(event => `
+          <article class="agenda-item ${event.source}">
+            <strong>${esc(event.title)}</strong>
+            <div class="agenda-meta">
+              ${String(event.date.getDate()).padStart(2,"0")}/${String(event.date.getMonth()+1).padStart(2,"0")}/${event.date.getFullYear()}
+              ${event.meta ? " · " + esc(event.meta) : ""}
+            </div>
+          </article>
+        `).join("");
+      }
+      function render(){
+        const events = loadEvents();
+        renderKpis(events);
+        renderCalendar(events);
+        renderAgenda(events);
+      }
+      document.getElementById("prevMonth")?.addEventListener("click", () => {
+        currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+        render();
+      });
+      document.getElementById("nextMonth")?.addEventListener("click", () => {
+        currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+        render();
+      });
+      document.getElementById("todayMonth")?.addEventListener("click", () => {
+        currentMonth = new Date();
+        render();
+      });
+      render();
+    })();
+  </script>
 </body>
 </html>
