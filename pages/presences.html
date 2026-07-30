@@ -480,6 +480,72 @@
       font-weight:1000;
       padding:7px 10px;
     }
+    .attendance-roster{
+      grid-column:1/-1;
+      display:grid;
+      gap:7px;
+      margin-top:6px;
+      padding-top:10px;
+      border-top:1px dashed var(--line);
+    }
+    .attendance-row{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:8px;
+      align-items:center;
+      padding:8px;
+      border:1px solid #e2ebe6;
+      border-radius:12px;
+      background:#fbfdfc;
+    }
+    .attendance-player{
+      min-width:0;
+    }
+    .attendance-player strong{
+      font-size:14px;
+    }
+    .attendance-player small{
+      display:block;
+      margin-top:3px;
+      color:#66756d;
+      font-size:11px;
+      font-weight:850;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .attendance-actions{
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .attendance-actions button{
+      min-height:34px;
+      border:1px solid #d6e7dd;
+      border-radius:999px;
+      background:#fff;
+      color:var(--dark);
+      font-size:11px;
+      font-weight:1000;
+      cursor:pointer;
+      padding:6px 9px;
+    }
+    .attendance-actions button.active.present{
+      background:var(--green);
+      border-color:var(--green);
+      color:#fff;
+    }
+    .attendance-actions button.active.absent{
+      background:#fff1f1;
+      border-color:#fac8c8;
+      color:#a21919;
+    }
+    .attendance-summary{
+      color:#66756d;
+      font-size:12px;
+      font-weight:1000;
+    }
     .pause-panel{
       max-width:980px;
       margin:0 auto;
@@ -543,6 +609,12 @@
       }
       .session-type{
         justify-self:flex-start;
+      }
+      .attendance-row{
+        grid-template-columns:1fr;
+      }
+      .attendance-actions{
+        justify-content:flex-start;
       }
     }
   </style>
@@ -691,6 +763,7 @@
     </section>
   </main>
   <script src="../shared/services/teams-service.js"></script>
+  <script src="../shared/services/players-service.js"></script>
   <script>
     (function(){
       const PRESENCE_EVENTS_KEY = "coachpulse:presenceEvents:v1";
@@ -771,6 +844,46 @@
       }
       function teamById(teamId){
         return officialTeams().find(team => String(team.teamId) === String(teamId)) || null;
+      }
+      function playersService(){
+        try{
+          return window.CoachPulsePlayersService || window.parent?.CoachPulsePlayersService || null;
+        }catch(_error){
+          return window.CoachPulsePlayersService || null;
+        }
+      }
+      function playerName(player){
+        const service = playersService();
+        if(service?.displayName) return service.displayName(player);
+        return [player.prenom || player.firstName || "", player.nom || player.lastName || ""].filter(Boolean).join(" ") || player.displayName || player.name || "Joueuse";
+      }
+      function eventSeason(dateValue){
+        const service = playersService();
+        return service?.seasonFromDate ? service.seasonFromDate(parseDate(dateValue) || new Date()) : "";
+      }
+      function playerForEventSeason(player, dateValue){
+        const service = playersService();
+        const season = eventSeason(dateValue);
+        return service?.playerForSeason ? service.playerForSeason(player, season) : player;
+      }
+      function playerMatchesTeam(player, teamId, dateValue){
+        const seasonal = playerForEventSeason(player, dateValue);
+        if(String(seasonal.teamId || "") === String(teamId || "")) return true;
+        const ids = Array.isArray(seasonal.teamIds) ? seasonal.teamIds : [];
+        return ids.map(String).includes(String(teamId || ""));
+      }
+      function playersForTeam(teamId, dateValue){
+        const service = playersService();
+        const rows = service?.readCachedPlayers ? service.readCachedPlayers() : [
+          ...readJson("coachpulse:centralPlayers", []),
+          ...readJson("coachpulse:customPlayers", [])
+        ];
+        const normalized = (Array.isArray(rows) ? rows : [])
+          .map(player => playerForEventSeason(player, dateValue))
+          .filter(player => player?.playerId && String(player.status || "active").toLowerCase() !== "archived")
+          .filter(player => playerMatchesTeam(player, teamId, dateValue));
+        const deduped = service?.dedupePlayers ? service.dedupePlayers(normalized) : normalized;
+        return deduped.sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
       }
       function eventTitle(event){
         return event.title || event.theme || event.label || event.type || event.text || "Événement";
@@ -966,7 +1079,7 @@
           return;
         }
         list.innerHTML = events.map(event => `
-          <article class="session-item">
+          <article class="session-item" data-event-id="${esc(event.id)}">
             <div>
               <strong>${esc(typeLabel(event.type))}</strong>
               <div class="session-item-meta">
@@ -975,8 +1088,54 @@
               </div>
             </div>
             <span class="session-type">${esc(typeLabel(event.type))}</span>
+            ${renderAttendanceRoster(event)}
           </article>
         `).join("");
+      }
+      function attendanceStatus(event, playerId){
+        return event.attendance?.[playerId] || "absent";
+      }
+      function renderAttendanceRoster(event){
+        const players = playersForTeam(event.teamId, event.date);
+        if(!event.teamId){
+          return '<div class="empty-state">Aucune équipe reliée à cet événement.</div>';
+        }
+        if(!players.length){
+          return '<div class="empty-state">Aucune joueuse trouvée pour cette équipe.</div>';
+        }
+        const presentCount = players.filter(player => attendanceStatus(event, player.playerId) === "present").length;
+        const rows = players.map(player => {
+          const status = attendanceStatus(event, player.playerId);
+          return `
+            <div class="attendance-row">
+              <div class="attendance-player">
+                <strong>${esc(playerName(player))}</strong>
+                <small>playerId ${esc(player.playerId)} · ${esc(player.team || event.team || "")}</small>
+              </div>
+              <div class="attendance-actions">
+                <button type="button" class="present ${status === "present" ? "active" : ""}" data-attendance-event="${esc(event.id)}" data-player-id="${esc(player.playerId)}" data-status="present">Présente</button>
+                <button type="button" class="absent ${status === "absent" ? "active" : ""}" data-attendance-event="${esc(event.id)}" data-player-id="${esc(player.playerId)}" data-status="absent">Absente</button>
+              </div>
+            </div>
+          `;
+        }).join("");
+        return `<div class="attendance-roster">
+          <div class="attendance-summary">${presentCount}/${players.length} présente(s)</div>
+          ${rows}
+        </div>`;
+      }
+      function setAttendanceStatus(eventId, playerId, status){
+        const events = loadPresenceEvents();
+        const index = events.findIndex(event => event.id === eventId);
+        if(index < 0) return;
+        const current = events[index];
+        events[index] = {
+          ...current,
+          attendance:{...(current.attendance || {}), [playerId]:status},
+          updatedAt:new Date().toISOString()
+        };
+        savePresenceEvents(events);
+        renderSessionList();
       }
       function updateDurationFromTimes(){
         const start = document.getElementById("sessionStart")?.value || "";
@@ -1037,6 +1196,7 @@
             teamId:team.teamId,
             team:team.name,
             category:team.category || "",
+            attendance:Object.fromEntries(playersForTeam(team.teamId, eventDate).map(player => [player.playerId, "absent"])),
             recurrence,
             recurrenceId,
             recurrenceEnd:recurrence === "none" ? "" : recurrenceEnd,
@@ -1061,6 +1221,11 @@
         document.getElementById("sessionDate")?.addEventListener("change", updateRecurrenceUi);
         document.getElementById("sessionRecurrence")?.addEventListener("change", updateRecurrenceUi);
         document.getElementById("sessionRecurrenceEnd")?.addEventListener("change", updateRecurrenceUi);
+        document.getElementById("sessionList")?.addEventListener("click", event => {
+          const button = event.target.closest("[data-attendance-event][data-player-id][data-status]");
+          if(!button) return;
+          setAttendanceStatus(button.dataset.attendanceEvent, button.dataset.playerId, button.dataset.status);
+        });
         updateRecurrenceUi();
         renderSessionList();
       }
