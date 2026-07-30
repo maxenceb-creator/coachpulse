@@ -414,6 +414,29 @@
       font-size:13px;
       font-weight:900;
     }
+    .recurrence-box{
+      display:grid;
+      gap:12px;
+      padding:12px;
+      border:1px solid #dbe8e1;
+      border-radius:14px;
+      background:#fbfdfc;
+    }
+    .recurrence-box legend{
+      padding:0 6px;
+      color:var(--dark);
+      font-size:12px;
+      font-weight:1000;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .recurrence-help{
+      margin:0;
+      color:#66756d;
+      font-size:12px;
+      font-weight:850;
+      line-height:1.35;
+    }
     .session-list{
       display:grid;
       gap:10px;
@@ -608,6 +631,24 @@
               </select>
             </div>
           </div>
+          <fieldset class="recurrence-box">
+            <legend>Récurrence</legend>
+            <div class="form-row">
+              <div class="field">
+                <label for="sessionRecurrence">Répéter</label>
+                <select id="sessionRecurrence" name="recurrence">
+                  <option value="none">Aucune récurrence</option>
+                  <option value="weekly">Chaque semaine</option>
+                  <option value="biweekly">Toutes les 2 semaines</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="sessionRecurrenceEnd">Jusqu'au</label>
+                <input id="sessionRecurrenceEnd" name="recurrenceEnd" type="date" disabled>
+              </div>
+            </div>
+            <p id="recurrencePreview" class="recurrence-help">Un seul événement sera créé.</p>
+          </fieldset>
           <div class="form-actions">
             <div id="sessionMessage" class="session-message" role="status"></div>
             <button type="reset">Réinitialiser</button>
@@ -676,6 +717,11 @@
         const m = String(date.getMonth() + 1).padStart(2, "0");
         const d = String(date.getDate()).padStart(2, "0");
         return `${y}-${m}-${d}`;
+      }
+      function addDays(date, days){
+        const next = new Date(date);
+        next.setDate(next.getDate() + days);
+        return next;
       }
       function sameDay(a,b){
         return a && b && isoDate(a) === isoDate(b);
@@ -815,6 +861,47 @@
         if(total < 0) total += 24 * 60;
         return total || "";
       }
+      function buildRecurrenceDates(dateValue, recurrence, endValue){
+        const firstDate = parseDate(dateValue);
+        if(!firstDate) return [];
+        if(recurrence === "none") return [isoDate(firstDate)];
+        const endDate = parseDate(endValue);
+        if(!endDate || endDate < firstDate) return [];
+        const step = recurrence === "biweekly" ? 14 : 7;
+        const dates = [];
+        let cursor = firstDate;
+        while(cursor <= endDate && dates.length < 80){
+          dates.push(isoDate(cursor));
+          cursor = addDays(cursor, step);
+        }
+        return dates;
+      }
+      function recurrenceLabel(recurrence){
+        return ({
+          weekly:"Chaque semaine",
+          biweekly:"Toutes les 2 semaines"
+        })[recurrence] || "Aucune récurrence";
+      }
+      function updateRecurrenceUi(){
+        const recurrence = document.getElementById("sessionRecurrence")?.value || "none";
+        const dateValue = document.getElementById("sessionDate")?.value || "";
+        const endInput = document.getElementById("sessionRecurrenceEnd");
+        const preview = document.getElementById("recurrencePreview");
+        if(endInput){
+          endInput.disabled = recurrence === "none";
+          if(recurrence === "none") endInput.value = "";
+          if(recurrence !== "none" && dateValue && !endInput.value) endInput.value = dateValue;
+        }
+        const dates = buildRecurrenceDates(dateValue, recurrence, endInput?.value || "");
+        if(!preview) return;
+        if(recurrence === "none"){
+          preview.textContent = "Un seul événement sera créé.";
+        }else if(!dates.length){
+          preview.textContent = "Choisis une date de fin égale ou postérieure au jour de départ.";
+        }else{
+          preview.textContent = `${dates.length} événement(s) seront créés · ${recurrenceLabel(recurrence)}.`;
+        }
+      }
       function setSessionMessage(message, tone){
         const node = document.getElementById("sessionMessage");
         if(!node) return;
@@ -861,34 +948,51 @@
           const endTime = form.endTime.value;
           const duration = Number(form.duration.value || minutesBetween(startTime, endTime));
           const type = form.type.value;
+          const recurrence = form.recurrence.value || "none";
+          const recurrenceEnd = form.recurrenceEnd.value || "";
+          const dates = buildRecurrenceDates(date, recurrence, recurrenceEnd);
           if(!date || !startTime || !endTime || !duration || duration <= 0){
             setSessionMessage("Complète le jour, les horaires et une durée valide.", "error");
             return;
           }
-          const item = {
-            id:`presence-event-${Date.now()}`,
-            date,
+          if(!dates.length){
+            setSessionMessage("La récurrence n'est pas valide : vérifie la date de fin.", "error");
+            return;
+          }
+          const recurrenceId = recurrence === "none" ? "" : `presence-recurrence-${Date.now()}`;
+          const newItems = dates.map((eventDate, index) => ({
+            id:`presence-event-${Date.now()}-${index}`,
+            date:eventDate,
             startTime,
             endTime,
             duration,
             type,
             title:typeLabel(type),
+            recurrence,
+            recurrenceId,
+            recurrenceEnd:recurrence === "none" ? "" : recurrenceEnd,
             createdAt:new Date().toISOString(),
             source:"Présences"
-          };
-          savePresenceEvents([...loadPresenceEvents(), item]);
+          }));
+          savePresenceEvents([...loadPresenceEvents(), ...newItems]);
           form.reset();
           if(dateInput) dateInput.value = isoDate(new Date());
+          updateRecurrenceUi();
           render();
           renderSessionList();
-          setSessionMessage("Événement créé en local.", "success");
+          setSessionMessage(`${newItems.length} événement(s) créé(s) en local.`, "success");
         });
         document.getElementById("sessionForm")?.addEventListener("reset", () => {
           setTimeout(() => {
             if(dateInput) dateInput.value = isoDate(new Date());
             setSessionMessage("");
+            updateRecurrenceUi();
           }, 0);
         });
+        document.getElementById("sessionDate")?.addEventListener("change", updateRecurrenceUi);
+        document.getElementById("sessionRecurrence")?.addEventListener("change", updateRecurrenceUi);
+        document.getElementById("sessionRecurrenceEnd")?.addEventListener("change", updateRecurrenceUi);
+        updateRecurrenceUi();
         renderSessionList();
       }
       function initTabs(){
