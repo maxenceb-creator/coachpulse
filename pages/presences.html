@@ -855,6 +855,126 @@
       gap:8px;
       margin-top:10px;
     }
+    .reports-page{
+      display:grid;
+      gap:16px;
+      max-width:1320px;
+      margin:0 auto;
+    }
+    .reports-grid{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(150px,1fr));
+      gap:12px;
+    }
+    .report-card,
+    .report-table-card{
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 14px 34px rgba(16,37,27,.08);
+      overflow:hidden;
+    }
+    .report-card{
+      padding:16px;
+      border-left:5px solid var(--green);
+    }
+    .report-card strong{
+      display:block;
+      color:var(--dark);
+      font-size:clamp(28px,3vw,42px);
+      line-height:1;
+    }
+    .report-card span{
+      display:block;
+      margin-top:8px;
+      color:#66756d;
+      font-size:12px;
+      font-weight:1000;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .report-sections{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+      gap:16px;
+    }
+    .report-table-card header{
+      padding:15px 17px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(90deg,#fff,#f7fbf8);
+    }
+    .report-table-card h2{
+      margin:0;
+      color:var(--dark);
+      font-size:clamp(22px,2.5vw,30px);
+      line-height:1;
+    }
+    .report-table-card p{
+      margin:7px 0 0;
+      color:#66756d;
+      font-weight:850;
+      line-height:1.35;
+    }
+    .report-table-wrap{
+      overflow:auto;
+    }
+    .report-table{
+      width:100%;
+      min-width:620px;
+      border-collapse:collapse;
+    }
+    .report-table th,
+    .report-table td{
+      padding:12px 14px;
+      border-bottom:1px solid var(--line);
+      text-align:left;
+      vertical-align:top;
+    }
+    .report-table th{
+      color:#66756d;
+      background:#fff9e8;
+      font-size:11px;
+      font-weight:1000;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .report-table td{
+      color:var(--text);
+      font-weight:850;
+    }
+    .report-pill-list{
+      display:grid;
+      gap:10px;
+      padding:14px;
+    }
+    .report-pill-row{
+      border:1px solid var(--event-border, var(--line));
+      border-left:5px solid var(--event-color, var(--green));
+      border-radius:14px;
+      background:var(--event-bg, #fff);
+      padding:12px;
+    }
+    .report-pill-top{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      color:var(--dark);
+      font-weight:1000;
+    }
+    .report-bar{
+      height:9px;
+      margin-top:9px;
+      border-radius:999px;
+      background:#e8efe9;
+      overflow:hidden;
+    }
+    .report-bar span{
+      display:block;
+      height:100%;
+      width:0;
+      border-radius:inherit;
+      background:var(--event-color, var(--green));
+    }
     @media(max-width:760px){
       main{padding:0 8px 18px}
       .presence-tabs{
@@ -873,6 +993,10 @@
       .presence-dashboard,
       .dashboard-hero,
       .calendar-page-shell{
+        grid-template-columns:1fr;
+      }
+      .reports-grid,
+      .report-sections{
         grid-template-columns:1fr;
       }
       .kpi-grid{
@@ -1089,9 +1213,63 @@
         </aside>
       </div>
     </section>
-    <section id="panel-reports" class="presence-panel pause-panel" aria-labelledby="reportsPauseTitle">
-      <h1 id="reportsPauseTitle">Bilans en pause</h1>
-      <p>Les bilans seront reconnectés après stabilisation des séances.</p>
+    <section id="panel-reports" class="presence-panel reports-page" aria-labelledby="reportsTitle">
+      <div class="dashboard-hero">
+        <div>
+          <h1 id="reportsTitle">Bilans Présences</h1>
+          <p>Synthèse collective des événements, présences, absences, retards, maladies, blessures et minutes réalisées.</p>
+        </div>
+        <div class="kpi-grid" aria-label="Résumé des bilans de présence">
+          <div class="kpi-card"><strong id="reportsPresenceRate">0%</strong><span>Taux présence</span></div>
+          <div class="kpi-card"><strong id="reportsSessions">0</strong><span>Séances</span></div>
+          <div class="kpi-card"><strong id="reportsPlayers">0</strong><span>Joueuses suivies</span></div>
+          <div class="kpi-card"><strong id="reportsMinutes">0</strong><span>Minutes</span></div>
+        </div>
+      </div>
+      <div id="reportsTeamFilters" class="calendar-team-filter" aria-label="Filtrer les bilans par équipe"></div>
+      <div class="reports-grid">
+        <div class="report-card"><strong id="reportsPresent">0</strong><span>Présences</span></div>
+        <div class="report-card"><strong id="reportsAbsent">0</strong><span>Absences</span></div>
+        <div class="report-card"><strong id="reportsLate">0</strong><span>Retards</span></div>
+        <div class="report-card"><strong id="reportsUnavailable">0</strong><span>Malade/blessée</span></div>
+      </div>
+      <div class="report-sections">
+        <article class="report-table-card">
+          <header>
+            <h2>Bilan par équipe</h2>
+            <p>Lecture basée sur les événements reliés au `teamId`.</p>
+          </header>
+          <div class="report-table-wrap">
+            <table class="report-table">
+              <thead>
+                <tr><th>Équipe</th><th>Événements</th><th>Présentes</th><th>Absentes</th><th>Minutes</th><th>Taux</th></tr>
+              </thead>
+              <tbody id="reportsTeamRows"></tbody>
+            </table>
+          </div>
+        </article>
+        <article class="report-table-card">
+          <header>
+            <h2>Types d'événements</h2>
+            <p>Répartition des entraînements, matchs, tournois, futsal et tests.</p>
+          </header>
+          <div id="reportsTypeRows" class="report-pill-list"></div>
+        </article>
+      </div>
+      <article class="report-table-card">
+        <header>
+          <h2>Joueuses les plus suivies</h2>
+          <p>Présences et minutes cumulées par `playerId` sur les événements filtrés.</p>
+        </header>
+        <div class="report-table-wrap">
+          <table class="report-table">
+            <thead>
+              <tr><th>Joueuse</th><th>Équipe</th><th>Présences</th><th>Absences</th><th>Minutes</th><th>Taux</th></tr>
+            </thead>
+            <tbody id="reportsPlayerRows"></tbody>
+          </table>
+        </div>
+      </article>
     </section>
     <section id="panel-prevention" class="presence-panel pause-panel" aria-labelledby="preventionPauseTitle">
       <h1 id="preventionPauseTitle">Prévention en pause</h1>
@@ -1589,6 +1767,116 @@
           comment:""
         };
       }
+      function attendanceEntries(event){
+        return Object.entries(event.attendance || {}).map(([playerId, raw]) => ({
+          playerId,
+          ...attendanceEntry(event, playerId)
+        }));
+      }
+      function playerById(playerId, dateValue){
+        const service = playersService();
+        const rows = service?.readCachedPlayers ? service.readCachedPlayers() : [
+          ...readJson("coachpulse:centralPlayers", []),
+          ...readJson("coachpulse:customPlayers", [])
+        ];
+        const player = (Array.isArray(rows) ? rows : []).find(row => String(row.playerId || row.id || "") === String(playerId || ""));
+        return player ? playerForEventSeason(player, dateValue) : null;
+      }
+      function emptyReportsRow(){
+        return '<tr><td colspan="6">Aucune donnée de présence sur ce filtre.</td></tr>';
+      }
+      function percent(value, total){
+        return total ? `${Math.round((value / total) * 100)}%` : "0%";
+      }
+      function reportTypeLabel(type){
+        return typeLabel(type);
+      }
+      function renderReports(events){
+        renderCalendarTeamFilters("reportsTeamFilters");
+        const presenceEvents = events.filter(event => event.source === "presences" && event.id);
+        const entries = presenceEvents.flatMap(event => attendanceEntries(event).map(entry => ({...entry, event})));
+        const presentEntries = entries.filter(entry => entry.status === "present" || entry.status === "late");
+        const absentEntries = entries.filter(entry => entry.status === "absent");
+        const lateEntries = entries.filter(entry => entry.status === "late");
+        const unavailableEntries = entries.filter(entry => entry.status === "sick" || entry.status === "injured");
+        const playerIds = new Set(entries.map(entry => entry.playerId).filter(Boolean));
+        const minutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+        setText("reportsPresenceRate", percent(presentEntries.length, entries.length));
+        setText("reportsSessions", presenceEvents.length);
+        setText("reportsPlayers", playerIds.size);
+        setText("reportsMinutes", minutes);
+        setText("reportsPresent", presentEntries.length);
+        setText("reportsAbsent", absentEntries.length);
+        setText("reportsLate", lateEntries.length);
+        setText("reportsUnavailable", unavailableEntries.length);
+
+        const teamMap = new Map();
+        presenceEvents.forEach(event => {
+          const key = event.teamId || "sans-equipe";
+          const row = teamMap.get(key) || {teamId:key, name:eventTeamLabel(event) || "Sans équipe", events:0, present:0, absent:0, total:0, minutes:0};
+          row.events += 1;
+          attendanceEntries(event).forEach(entry => {
+            row.total += 1;
+            row.minutes += Number(entry.minutes || 0);
+            if(entry.status === "present" || entry.status === "late") row.present += 1;
+            if(entry.status === "absent") row.absent += 1;
+          });
+          teamMap.set(key, row);
+        });
+        const teamRows = document.getElementById("reportsTeamRows");
+        if(teamRows){
+          const rows = [...teamMap.values()].sort((a,b) => a.name.localeCompare(b.name, "fr"));
+          teamRows.innerHTML = rows.length ? rows.map(row => `
+            <tr>
+              <td>${esc(row.name)}</td>
+              <td>${row.events}</td>
+              <td>${row.present}</td>
+              <td>${row.absent}</td>
+              <td>${row.minutes}</td>
+              <td>${percent(row.present, row.total)}</td>
+            </tr>
+          `).join("") : emptyReportsRow();
+        }
+
+        const maxType = Math.max(1, ...presenceEvents.reduce((map, event) => map.set(event.type, (map.get(event.type) || 0) + 1), new Map()).values());
+        const typeRows = document.getElementById("reportsTypeRows");
+        if(typeRows){
+          const typeMap = presenceEvents.reduce((map, event) => map.set(event.type, (map.get(event.type) || 0) + 1), new Map());
+          const rows = [...typeMap.entries()].sort((a,b) => b[1] - a[1]);
+          typeRows.innerHTML = rows.length ? rows.map(([type, count]) => `
+            <div class="report-pill-row">
+              <div class="report-pill-top"><span>${esc(reportTypeLabel(type))}</span><b>${count}</b></div>
+              <div class="report-bar"><span style="width:${Math.round((count / maxType) * 100)}%"></span></div>
+            </div>
+          `).join("") : '<div class="empty-state">Aucun type d’événement à afficher.</div>';
+        }
+
+        const playerMap = new Map();
+        entries.forEach(entry => {
+          const player = playerById(entry.playerId, entry.event.date);
+          const key = entry.playerId;
+          const row = playerMap.get(key) || {playerId:key, name:player ? playerName(player) : key, team:player?.team || entry.event.team || "", present:0, absent:0, total:0, minutes:0};
+          row.total += 1;
+          row.minutes += Number(entry.minutes || 0);
+          if(entry.status === "present" || entry.status === "late") row.present += 1;
+          if(entry.status === "absent") row.absent += 1;
+          playerMap.set(key, row);
+        });
+        const playerRows = document.getElementById("reportsPlayerRows");
+        if(playerRows){
+          const rows = [...playerMap.values()].sort((a,b) => b.minutes - a.minutes || b.present - a.present).slice(0,20);
+          playerRows.innerHTML = rows.length ? rows.map(row => `
+            <tr>
+              <td>${esc(row.name)}</td>
+              <td>${esc(row.team || "-")}</td>
+              <td>${row.present}</td>
+              <td>${row.absent}</td>
+              <td>${row.minutes}</td>
+              <td>${percent(row.present, row.total)}</td>
+            </tr>
+          `).join("") : emptyReportsRow();
+        }
+      }
       async function deletePresenceEvent(eventId){
         const events = loadPresenceEvents();
         const event = events.find(item => item.id === eventId);
@@ -1940,6 +2228,19 @@
         calendarTeamFilterIds = new Set();
         render();
       });
+      document.getElementById("reportsTeamFilters")?.addEventListener("change", event => {
+        const input = event.target.closest("input[type='checkbox']");
+        if(!input) return;
+        if(input.checked) calendarTeamFilterIds.add(input.value);
+        else calendarTeamFilterIds.delete(input.value);
+        render();
+      });
+      document.getElementById("reportsTeamFilters")?.addEventListener("click", event => {
+        const clear = event.target.closest("[data-clear-team-filters]");
+        if(!clear) return;
+        calendarTeamFilterIds = new Set();
+        render();
+      });
       document.getElementById("calendarDayList")?.addEventListener("click", event => {
         const deleteButton = event.target.closest("[data-calendar-delete-event]");
         if(deleteButton){
@@ -1960,6 +2261,7 @@
         renderCalendar(events);
         renderAgenda(events);
         renderCalendarPage(events);
+        renderReports(events);
       }
       async function initPresenceCloud(){
         try{
