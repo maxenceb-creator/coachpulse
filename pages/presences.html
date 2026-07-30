@@ -84,6 +84,12 @@
       border-color:#8e6f20;
       box-shadow:inset 0 0 0 2px rgba(142,111,32,.18);
     }
+    .presence-panel{
+      display:none;
+    }
+    .presence-panel.active{
+      display:block;
+    }
     .presence-dashboard{
       display:grid;
       grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);
@@ -302,6 +308,177 @@
       text-align:center;
       background:#fbfdfc;
     }
+    .sessions-shell{
+      display:grid;
+      grid-template-columns:minmax(320px,.75fr) minmax(0,1.25fr);
+      gap:16px;
+      max-width:1320px;
+      margin:0 auto;
+    }
+    .session-card{
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 14px 34px rgba(16,37,27,.08);
+      overflow:hidden;
+    }
+    .session-card header{
+      padding:16px 18px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(90deg,#fff,#f7fbf8);
+    }
+    .session-card h1,
+    .session-card h2{
+      margin:0;
+      color:var(--dark);
+      line-height:1;
+    }
+    .session-card h1{
+      font-size:clamp(28px,4vw,42px);
+    }
+    .session-card h2{
+      font-size:clamp(22px,3vw,30px);
+    }
+    .session-card p{
+      margin:8px 0 0;
+      color:#66756d;
+      font-weight:800;
+      line-height:1.4;
+    }
+    .session-form{
+      display:grid;
+      gap:12px;
+      padding:16px 18px 18px;
+    }
+    .form-row{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+    }
+    .field{
+      display:grid;
+      gap:6px;
+      min-width:0;
+    }
+    .field label{
+      color:#66756d;
+      font-size:11px;
+      font-weight:1000;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .field input,
+    .field select{
+      width:100%;
+      min-height:44px;
+      border:1px solid #d5e3dc;
+      border-radius:12px;
+      background:#fff;
+      color:var(--text);
+      font:inherit;
+      font-weight:850;
+      padding:9px 11px;
+      outline:none;
+    }
+    .field input:focus,
+    .field select:focus{
+      border-color:var(--green);
+      box-shadow:0 0 0 4px rgba(0,132,61,.12);
+    }
+    .form-actions{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:flex-end;
+      padding-top:4px;
+    }
+    .form-actions button{
+      min-height:44px;
+      border:1px solid #d6e7dd;
+      border-radius:12px;
+      background:#fff;
+      color:var(--dark);
+      font-weight:1000;
+      cursor:pointer;
+      padding:9px 14px;
+    }
+    .form-actions button.primary{
+      background:var(--green);
+      border-color:var(--green);
+      color:#fff;
+    }
+    .session-message{
+      min-height:20px;
+      color:#66756d;
+      font-size:13px;
+      font-weight:900;
+    }
+    .session-list{
+      display:grid;
+      gap:10px;
+      padding:16px 18px 18px;
+      max-height:650px;
+      overflow:auto;
+    }
+    .session-item{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:10px;
+      align-items:center;
+      border:1px solid var(--line);
+      border-left:5px solid var(--green);
+      border-radius:14px;
+      padding:12px;
+      background:#fff;
+    }
+    .session-item strong{
+      display:block;
+      color:var(--dark);
+      font-size:16px;
+      line-height:1.15;
+    }
+    .session-item-meta{
+      margin-top:6px;
+      color:#66756d;
+      font-size:13px;
+      font-weight:850;
+      line-height:1.35;
+    }
+    .session-type{
+      display:inline-flex;
+      justify-content:center;
+      min-width:92px;
+      border-radius:999px;
+      background:#f0fbf5;
+      border:1px solid #d7eadc;
+      color:var(--dark);
+      font-size:12px;
+      font-weight:1000;
+      padding:7px 10px;
+    }
+    .pause-panel{
+      max-width:980px;
+      margin:0 auto;
+      padding:28px;
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 14px 34px rgba(16,37,27,.08);
+    }
+    .pause-panel h1{
+      margin:0 0 10px;
+      color:var(--dark);
+      font-size:clamp(28px,4vw,44px);
+      line-height:1;
+    }
+    .pause-panel p{
+      margin:0;
+      color:#66756d;
+      font-weight:800;
+      font-size:clamp(15px,2vw,18px);
+      line-height:1.45;
+    }
     @media(max-width:760px){
       main{padding:0 8px 18px}
       .presence-tabs{
@@ -334,20 +511,30 @@
       .calendar-day{
         min-height:104px;
       }
+      .sessions-shell,
+      .form-row{
+        grid-template-columns:1fr;
+      }
+      .session-item{
+        grid-template-columns:1fr;
+      }
+      .session-type{
+        justify-self:flex-start;
+      }
     }
   </style>
 </head>
 <body>
   <main>
     <nav class="presence-tabs" aria-label="Navigation Présences">
-      <button class="presence-tab active" type="button"><span>🏠</span>Tableau de bord<small>Vue globale</small></button>
-      <button class="presence-tab" type="button"><span>✅</span>Séances<small>Présences</small></button>
-      <button class="presence-tab" type="button"><span>📅</span>Calendrier<small>Planning</small></button>
-      <button class="presence-tab" type="button"><span>📊</span>Bilans<small>Suivi collectif</small></button>
-      <button class="presence-tab" type="button"><span>⚡</span>Prévention<small>Charge</small></button>
-      <button class="presence-tab" type="button"><span>🧩</span>Paramètres<small>Réglages</small></button>
+      <button class="presence-tab active" data-tab="dashboard" type="button"><span>🏠</span>Tableau de bord<small>Vue globale</small></button>
+      <button class="presence-tab" data-tab="sessions" type="button"><span>✅</span>Séances<small>Présences</small></button>
+      <button class="presence-tab" data-tab="calendar" type="button"><span>📅</span>Calendrier<small>Planning</small></button>
+      <button class="presence-tab" data-tab="reports" type="button"><span>📊</span>Bilans<small>Suivi collectif</small></button>
+      <button class="presence-tab" data-tab="prevention" type="button"><span>⚡</span>Prévention<small>Charge</small></button>
+      <button class="presence-tab" data-tab="settings" type="button"><span>🧩</span>Paramètres<small>Réglages</small></button>
     </nav>
-    <section class="presence-dashboard" aria-labelledby="presenceTitle">
+    <section id="panel-dashboard" class="presence-panel presence-dashboard active" aria-labelledby="presenceTitle">
       <div class="dashboard-hero">
         <div>
           <h1 id="presenceTitle">Tableau de bord Présences</h1>
@@ -383,9 +570,81 @@
         <div id="agendaList" class="agenda-list"></div>
       </aside>
     </section>
+
+    <section id="panel-sessions" class="presence-panel sessions-shell" aria-labelledby="sessionsTitle">
+      <article class="session-card">
+        <header>
+          <h1 id="sessionsTitle">Créer un événement</h1>
+          <p>Création locale pour préparer la future reconstruction du module Présences.</p>
+        </header>
+        <form id="sessionForm" class="session-form">
+          <div class="field">
+            <label for="sessionDate">Jour</label>
+            <input id="sessionDate" name="date" type="date" required>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label for="sessionStart">Heure de début</label>
+              <input id="sessionStart" name="startTime" type="time" required>
+            </div>
+            <div class="field">
+              <label for="sessionEnd">Heure de fin</label>
+              <input id="sessionEnd" name="endTime" type="time" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label for="sessionDuration">Durée en minutes</label>
+              <input id="sessionDuration" name="duration" type="number" min="1" step="1" placeholder="Calculée automatiquement">
+            </div>
+            <div class="field">
+              <label for="sessionType">Type d'événement</label>
+              <select id="sessionType" name="type" required>
+                <option value="entrainement">Entraînement</option>
+                <option value="match">Match</option>
+                <option value="tournoi">Tournoi</option>
+                <option value="futsal">Futsal</option>
+                <option value="test">Test</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-actions">
+            <div id="sessionMessage" class="session-message" role="status"></div>
+            <button type="reset">Réinitialiser</button>
+            <button class="primary" type="submit">Créer l'événement</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="session-card">
+        <header>
+          <h2>Événements créés</h2>
+          <p>Ces événements restent stockés en local dans le navigateur pour le moment.</p>
+        </header>
+        <div id="sessionList" class="session-list"></div>
+      </article>
+    </section>
+
+    <section id="panel-calendar" class="presence-panel pause-panel" aria-labelledby="calendarPauseTitle">
+      <h1 id="calendarPauseTitle">Calendrier détaillé en pause</h1>
+      <p>La vue calendrier complète sera reconstruite après validation de la création des événements.</p>
+    </section>
+    <section id="panel-reports" class="presence-panel pause-panel" aria-labelledby="reportsPauseTitle">
+      <h1 id="reportsPauseTitle">Bilans en pause</h1>
+      <p>Les bilans seront reconnectés après stabilisation des séances.</p>
+    </section>
+    <section id="panel-prevention" class="presence-panel pause-panel" aria-labelledby="preventionPauseTitle">
+      <h1 id="preventionPauseTitle">Prévention en pause</h1>
+      <p>La charge et la prévention seront reconstruites étape par étape.</p>
+    </section>
+    <section id="panel-settings" class="presence-panel pause-panel" aria-labelledby="settingsPauseTitle">
+      <h1 id="settingsPauseTitle">Paramètres en pause</h1>
+      <p>Les réglages seront repris quand la base des événements sera validée.</p>
+    </section>
   </main>
   <script>
     (function(){
+      const PRESENCE_EVENTS_KEY = "coachpulse:presenceEvents:v1";
       const EVENT_KEY = "methodo_events_v24";
       const LEGACY_PRESENCE_KEY = "presenceSeanceV3_6_Excel";
       const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
@@ -422,11 +681,13 @@
         return a && b && isoDate(a) === isoDate(b);
       }
       function eventTitle(event){
-        return event.title || event.theme || event.type || event.text || "Événement";
+        return event.title || event.theme || event.label || event.type || event.text || "Événement";
       }
       function eventMeta(event){
         return [
           event.time || event.startTime || event.start || "",
+          event.endTime ? `fin ${event.endTime}` : "",
+          event.duration ? `${event.duration} min` : "",
           event.team || event.category || event.categorie || "",
           event.place || event.location || event.lieu || ""
         ].filter(Boolean).join(" · ");
@@ -444,13 +705,22 @@
         };
       }
       function loadEvents(){
+        const presenceEvents = Array.isArray(readJson(PRESENCE_EVENTS_KEY, [])) ? readJson(PRESENCE_EVENTS_KEY, []) : [];
         const methodo = Array.isArray(readJson(EVENT_KEY, [])) ? readJson(EVENT_KEY, []) : [];
         const legacy = readJson(LEGACY_PRESENCE_KEY, null);
         const legacySessions = Array.isArray(legacy?.sessions) ? legacy.sessions : [];
         return [
+          ...presenceEvents.map(event => normalizeEvent(event, "presences")),
           ...methodo.map(event => normalizeEvent(event, "methodologie")),
           ...legacySessions.map(event => normalizeEvent(event, "presences"))
         ].filter(Boolean).sort((a,b) => a.date - b.date);
+      }
+      function loadPresenceEvents(){
+        const events = readJson(PRESENCE_EVENTS_KEY, []);
+        return Array.isArray(events) ? events : [];
+      }
+      function savePresenceEvents(events){
+        localStorage.setItem(PRESENCE_EVENTS_KEY, JSON.stringify(events));
       }
       function startOfWeek(date){
         const d = new Date(date);
@@ -527,6 +797,109 @@
           </article>
         `).join("");
       }
+      function typeLabel(type){
+        return ({
+          entrainement:"Entraînement",
+          match:"Match",
+          tournoi:"Tournoi",
+          futsal:"Futsal",
+          test:"Test"
+        })[type] || "Événement";
+      }
+      function minutesBetween(start, end){
+        if(!start || !end) return "";
+        const [sh, sm] = String(start).split(":").map(Number);
+        const [eh, em] = String(end).split(":").map(Number);
+        if([sh, sm, eh, em].some(Number.isNaN)) return "";
+        let total = (eh * 60 + em) - (sh * 60 + sm);
+        if(total < 0) total += 24 * 60;
+        return total || "";
+      }
+      function setSessionMessage(message, tone){
+        const node = document.getElementById("sessionMessage");
+        if(!node) return;
+        node.textContent = message || "";
+        node.style.color = tone === "success" ? "var(--green)" : tone === "error" ? "#b42318" : "#66756d";
+      }
+      function renderSessionList(){
+        const list = document.getElementById("sessionList");
+        if(!list) return;
+        const events = loadPresenceEvents().slice().sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+        if(!events.length){
+          list.innerHTML = '<div class="empty-state">Aucun événement créé pour le moment.</div>';
+          return;
+        }
+        list.innerHTML = events.map(event => `
+          <article class="session-item">
+            <div>
+              <strong>${esc(typeLabel(event.type))}</strong>
+              <div class="session-item-meta">
+                ${esc(event.date)} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min
+              </div>
+            </div>
+            <span class="session-type">${esc(typeLabel(event.type))}</span>
+          </article>
+        `).join("");
+      }
+      function updateDurationFromTimes(){
+        const start = document.getElementById("sessionStart")?.value || "";
+        const end = document.getElementById("sessionEnd")?.value || "";
+        const duration = minutesBetween(start, end);
+        const input = document.getElementById("sessionDuration");
+        if(input && duration) input.value = duration;
+      }
+      function initSessions(){
+        const dateInput = document.getElementById("sessionDate");
+        if(dateInput && !dateInput.value) dateInput.value = isoDate(new Date());
+        document.getElementById("sessionStart")?.addEventListener("change", updateDurationFromTimes);
+        document.getElementById("sessionEnd")?.addEventListener("change", updateDurationFromTimes);
+        document.getElementById("sessionForm")?.addEventListener("submit", event => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const date = form.date.value;
+          const startTime = form.startTime.value;
+          const endTime = form.endTime.value;
+          const duration = Number(form.duration.value || minutesBetween(startTime, endTime));
+          const type = form.type.value;
+          if(!date || !startTime || !endTime || !duration || duration <= 0){
+            setSessionMessage("Complète le jour, les horaires et une durée valide.", "error");
+            return;
+          }
+          const item = {
+            id:`presence-event-${Date.now()}`,
+            date,
+            startTime,
+            endTime,
+            duration,
+            type,
+            title:typeLabel(type),
+            createdAt:new Date().toISOString(),
+            source:"Présences"
+          };
+          savePresenceEvents([...loadPresenceEvents(), item]);
+          form.reset();
+          if(dateInput) dateInput.value = isoDate(new Date());
+          render();
+          renderSessionList();
+          setSessionMessage("Événement créé en local.", "success");
+        });
+        document.getElementById("sessionForm")?.addEventListener("reset", () => {
+          setTimeout(() => {
+            if(dateInput) dateInput.value = isoDate(new Date());
+            setSessionMessage("");
+          }, 0);
+        });
+        renderSessionList();
+      }
+      function initTabs(){
+        document.querySelectorAll(".presence-tab[data-tab]").forEach(button => {
+          button.addEventListener("click", () => {
+            const tab = button.dataset.tab;
+            document.querySelectorAll(".presence-tab").forEach(item => item.classList.toggle("active", item === button));
+            document.querySelectorAll(".presence-panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${tab}`));
+          });
+        });
+      }
       function render(){
         const events = loadEvents();
         renderKpis(events);
@@ -545,6 +918,8 @@
         currentMonth = new Date();
         render();
       });
+      initTabs();
+      initSessions();
       render();
     })();
   </script>
