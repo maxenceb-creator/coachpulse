@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-69-20260729-presences-local-priority';
+const CACHE_NAME = 'coachpulse-v6-4-67-20260729-tablet-cache-refresh';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
@@ -7,23 +7,12 @@ const CORE_ASSETS = [
   './assets/coachpulse-logo-transparent.png', './assets/coachpulse-logo-clean.png', './assets/asse-logo-officiel.png', './assets/asse-logo.svg',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-1024.png',
   './pages/coach-stats.html', './pages/methodologie.html', './pages/presences.html', './pages/tests-techniques.html', './pages/tests-athletiques.html', './pages/data-hub.html', './pages/admin-database.html', './pages/suivi-medical.html', './pages/player-profile.html', './pages/team-profile.html',
-  './modules/presences/presences-base.css', './modules/presences/presences-embed.css', './modules/presences/presences-initial-state.js', './modules/presences/presences-main.js', './modules/presences/presences-methodo-sync.js', './modules/presences/presences-pwa-sync.js',
-  './modules/presences/assets/asse-logo.png', './modules/presences/assets/coachpulse-logo.png',
   './pages/player-profile/playerProfile.css', './pages/player-profile/playerProfileData.js', './pages/player-profile/playerProfileFilters.js', './pages/player-profile/playerProfileStats.js', './pages/player-profile/playerProfileCompare.js', './pages/player-profile/playerProfileRender.js', './pages/player-profile/playerProfile.js',
   './pages/team-profile/teamProfile.css', './pages/team-profile/teamProfileData.js', './pages/team-profile/teamProfileFilters.js', './pages/team-profile/teamProfileMetrics.js', './pages/team-profile/teamProfileCharts.js', './pages/team-profile/teamProfileUI.js', './pages/team-profile/teamProfile.js',
   './connectors/fichesJoueusesConnector.js', './connectors/presencesConnector.js',
   './connectors/testsConnectorCore.js', './connectors/testsTechniquesConnector.js', './connectors/testsPhysiquesConnector.js'
 ];
-const NETWORK_FIRST_ASSETS = new Set([
-  './',
-  './index.html',
-  './app.js',
-  './css/responsive.css',
-  './pages/presences.html',
-  './modules/presences/presences-main.js',
-  './modules/presences/presences-methodo-sync.js',
-  './modules/presences/presences-pwa-sync.js'
-]);
+const NETWORK_FIRST_ASSETS = new Set(['./', './index.html', './app.js', './css/responsive.css']);
 
 function assetKey(url) {
   if(url.origin !== self.location.origin) return '';

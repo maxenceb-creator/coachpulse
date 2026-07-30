@@ -582,7 +582,6 @@ function clearSensitiveLocalData(){
     'coachStatsV13Rows',
     'coachStatsV170',
     'presenceSeanceV3_6_Excel',
-    'presenceSeanceV3_6_Excel:meta',
     'methodo_events_v24'
   ].forEach(key => localStorage.removeItem(key));
   Object.keys(localStorage).filter(key => key.startsWith('coachpulse:autoBackup')).forEach(key => localStorage.removeItem(key));
@@ -652,21 +651,6 @@ function scheduleCloudSync(delay=900){
   clearTimeout(cloudWriteTimer);
   cloudWriteTimer = setTimeout(() => syncCloud(false), delay);
 }
-function hasPendingLocalSync(){
-  return localStorage.getItem('coachpulse:pendingSync') === '1';
-}
-function parseCloudItemJson(items, key, fallback){
-  try{return JSON.parse((items || {})[key] || '');}catch(_e){return fallback;}
-}
-function shouldKeepLocalPresenceOverCloud(items){
-  const localMeta = parseStoredJson('presenceSeanceV3_6_Excel:meta', null);
-  if(!localMeta?.updatedAtMs) return false;
-  const cloudMeta = parseCloudItemJson(items, 'presenceSeanceV3_6_Excel:meta', null);
-  const localMs = Number(localMeta.updatedAtMs || 0);
-  const cloudMs = Number(cloudMeta?.updatedAtMs || 0);
-  if(localMs && !cloudMs && localStorage.getItem('presenceSeanceV3_6_Excel')) return true;
-  return localMs > cloudMs + 500;
-}
 function getCloudRef(){
   if(!db || !currentUser) return null;
   return firebaseFns.doc(db, 'coachpulse_common_base', currentUser.uid);
@@ -686,11 +670,6 @@ function startRealtimeSync(){
     const items = data.items || {};
     const incomingHash = hashItems(items);
     const updatedByClient = data.updatedByClient || '';
-    if(shouldKeepLocalPresenceOverCloud(items)){
-      updateSyncState('Séance locale plus récente · cloud non appliqué');
-      scheduleCloudSync(500);
-      return;
-    }
     if(incomingHash === lastCloudItemsHash){ updateSyncState('Cloud synchronisé'); return; }
     if(updatedByClient === CLIENT_ID){
       lastCloudItemsHash = incomingHash;
@@ -698,11 +677,6 @@ function startRealtimeSync(){
       localStorage.removeItem('coachpulse:pendingSync');
       updateCloudKpis();
       updateSyncState('Cloud synchronisé');
-      return;
-    }
-    if(hasPendingLocalSync()){
-      updateSyncState('Modifications locales en attente · cloud non appliqué');
-      scheduleCloudSync(500);
       return;
     }
     applyingCloud = true;
@@ -1106,13 +1080,11 @@ function collectCentralFirestoreDocs(){
   const presenceSessions = Array.isArray(presence?.sessions) ? presence.sessions : [];
   presenceSessions.forEach(s => {
     const sessionId = s.sessionId || s.id || stableFirestoreId('session', s.date, s.type, s.theme);
-    const sessionTeamIds = Array.isArray(s.teamIds) && s.teamIds.length ? s.teamIds : [s.teamId].filter(Boolean);
-    addDoc(docs,'sessions',sessionId,{sessionId,date:s.date || '',start:s.start || '',end:s.end || '',duration:Number(s.duration||0),type:s.type || 'Séance',theme:s.theme || '',categories:s.categories || [],rawCategories:s.rawCategories || [],teamId:sessionTeamIds[0] || '',teamIds:sessionTeamIds,teamSnapshot:s.teamSnapshot || [],source:s.source || 'Présences'});
+    addDoc(docs,'sessions',sessionId,{sessionId,date:s.date || '',start:s.start || '',end:s.end || '',duration:Number(s.duration||0),type:s.type || 'Séance',theme:s.theme || '',categories:s.categories || [],source:s.source || 'Présences'});
     Object.entries(s.entries || {}).forEach(([pid, entry]) => {
       const playerId = pid;
       addDoc(docs,'attendance',stableFirestoreId('attendance',sessionId,playerId),{
         attendanceId:stableFirestoreId('attendance',sessionId,playerId), sessionId, playerId,
-        teamId:sessionTeamIds[0] || '', teamIds:sessionTeamIds,
         status:entry?.code || '', minutes:Number(entry?.minutes || 0), note:entry?.note || '', date:s.date || '', source:'Présences'
       });
     });
@@ -3692,23 +3664,12 @@ async function syncCloud(manual=false){
 }
 async function pullCloud(){
   if(!db || !currentUser) return;
-  if(hasPendingLocalSync()){
-    updateSyncState('Modifications locales en attente · récupération cloud reportée');
-    scheduleCloudSync(500);
-    return;
-  }
   const snap = await firebaseFns.getDoc(getCloudRef());
   if(snap.exists()){
-    const cloudItems = snap.data().items || {};
-    if(shouldKeepLocalPresenceOverCloud(cloudItems)){
-      updateSyncState('Séance locale plus récente · récupération cloud reportée');
-      scheduleCloudSync(500);
-      return;
-    }
     applyingCloud = true;
     try{
-      Object.entries(cloudItems).forEach(([k,v]) => { if(k !== 'coachpulse:clientId') localStorage.setItem(k,v); });
-      lastCloudItemsHash = hashItems(cloudItems);
+      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId') localStorage.setItem(k,v); });
+      lastCloudItemsHash = hashItems(snap.data().items || {});
       localStorage.removeItem('coachpulse:pendingSync');
       localStorage.setItem('coachpulse:lastCloudSync', new Date().toISOString());
       snapshotLocalData({fromCloud:true}); updateCloudKpis(); updateSyncState('Cloud récupéré'); notifyFramesCloudUpdated();
