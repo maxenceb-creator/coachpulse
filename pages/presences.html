@@ -1017,6 +1017,7 @@
       let currentMonth = new Date();
       let selectedAttendanceEventId = "";
       let calendarTeamFilterIds = new Set();
+      let cloudReady = false;
 
       function esc(value){
         return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -1114,6 +1115,13 @@
           return window.CoachPulsePlayersService || null;
         }
       }
+      function centralDataApi(){
+        try{
+          return window.parent?.CoachPulseCentralData || null;
+        }catch(_error){
+          return null;
+        }
+      }
       function playerName(player){
         const service = playersService();
         if(service?.displayName) return service.displayName(player);
@@ -1197,6 +1205,36 @@
       }
       function savePresenceEvents(events){
         localStorage.setItem(PRESENCE_EVENTS_KEY, JSON.stringify(events));
+      }
+      function mergePresenceEvents(localEvents=[], cloudEvents=[]){
+        const byId = new Map();
+        [...localEvents, ...cloudEvents].forEach(event => {
+          if(!event?.id) return;
+          const current = byId.get(event.id);
+          const currentTime = Date.parse(current?.updatedAt || current?.createdAt || '') || 0;
+          const nextTime = Date.parse(event.updatedAt || event.createdAt || '') || 0;
+          byId.set(event.id, !current || nextTime >= currentTime ? {...current, ...event} : current);
+        });
+        return [...byId.values()].sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+      }
+      async function pullPresenceEventsFromCloud(){
+        const api = centralDataApi();
+        if(!api?.presenceListEvents) return [];
+        const cloudEvents = await api.presenceListEvents();
+        const merged = mergePresenceEvents(loadPresenceEvents(), Array.isArray(cloudEvents) ? cloudEvents : []);
+        savePresenceEvents(merged);
+        cloudReady = true;
+        return merged;
+      }
+      async function pushPresenceEventToCloud(event){
+        const api = centralDataApi();
+        if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
+        return api.presenceSaveEvent(event);
+      }
+      async function deletePresenceEventFromCloud(event){
+        const api = centralDataApi();
+        if(!api?.presenceDeleteEvent) throw new Error("Suppression cloud indisponible.");
+        return api.presenceDeleteEvent(event);
       }
       function startOfWeek(date){
         const d = new Date(date);
@@ -1390,17 +1428,23 @@
           comment:""
         };
       }
-      function deletePresenceEvent(eventId){
+      async function deletePresenceEvent(eventId){
         const events = loadPresenceEvents();
         const event = events.find(item => item.id === eventId);
         if(!event) return;
         const label = `${typeLabel(event.type)} du ${event.date}${event.team ? " · " + event.team : ""}`;
         if(!confirm(`Supprimer définitivement cet événement ?\n\n${label}`)) return;
+        try{
+          await deletePresenceEventFromCloud(event);
+        }catch(error){
+          setSessionMessage(`Suppression cloud impossible : ${error?.message || error}.`, "error");
+          return;
+        }
         savePresenceEvents(events.filter(item => item.id !== eventId));
         if(selectedAttendanceEventId === eventId) selectedAttendanceEventId = "";
         render();
         renderSessionList();
-        setSessionMessage("Événement supprimé.", "success");
+        setSessionMessage("Événement supprimé du cloud et du local.", "success");
       }
       function emptyAttendanceForEvent(teamId, dateValue, duration){
         return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => [player.playerId, {
@@ -1511,7 +1555,7 @@
           </div>
         `;
       }
-      function updateAttendanceEntry(eventId, playerId, patch){
+      async function updateAttendanceEntry(eventId, playerId, patch){
         const events = loadPresenceEvents();
         const index = events.findIndex(event => event.id === eventId);
         if(index < 0) return;
@@ -1528,6 +1572,12 @@
         };
         savePresenceEvents(events);
         renderSessionList();
+        try{
+          await pushPresenceEventToCloud(events[index]);
+          setSessionMessage("Feuille de présence synchronisée.", "success");
+        }catch(error){
+          setSessionMessage(`Sauvegarde cloud impossible : ${error?.message || error}.`, "error");
+        }
       }
       function updateDurationFromTimes(){
         const start = document.getElementById("sessionStart")?.value || "";
@@ -1551,7 +1601,7 @@
         populateTeamSelect();
         document.getElementById("sessionStart")?.addEventListener("change", updateDurationFromTimes);
         document.getElementById("sessionEnd")?.addEventListener("change", updateDurationFromTimes);
-        document.getElementById("sessionForm")?.addEventListener("submit", event => {
+        document.getElementById("sessionForm")?.addEventListener("submit", async event => {
           event.preventDefault();
           const form = event.currentTarget;
           const date = form.date.value;
@@ -1595,14 +1645,25 @@
             createdAt:new Date().toISOString(),
             source:"Présences"
           }));
-          savePresenceEvents([...loadPresenceEvents(), ...newItems]);
+          const previousEvents = loadPresenceEvents();
+          savePresenceEvents([...previousEvents, ...newItems]);
           selectedAttendanceEventId = newItems[0]?.id || "";
+          try{
+            await Promise.all(newItems.map(item => pushPresenceEventToCloud(item)));
+          }catch(error){
+            savePresenceEvents(previousEvents);
+            selectedAttendanceEventId = "";
+            render();
+            renderSessionList();
+            setSessionMessage(`Création cloud impossible : ${error?.message || error}.`, "error");
+            return;
+          }
           form.reset();
           if(dateInput) dateInput.value = isoDate(new Date());
           updateRecurrenceUi();
           render();
           renderSessionList();
-          setSessionMessage(`${newItems.length} événement(s) créé(s) en local.`, "success");
+          setSessionMessage(`${newItems.length} événement(s) créé(s) dans le cloud.`, "success");
         });
         document.getElementById("sessionForm")?.addEventListener("reset", () => {
           setTimeout(() => {
@@ -1695,6 +1756,17 @@
         renderCalendar(events);
         renderAgenda(events);
       }
+      async function initPresenceCloud(){
+        try{
+          await pullPresenceEventsFromCloud();
+          render();
+          renderSessionList();
+          if(cloudReady) setSessionMessage("Événements chargés depuis le cloud.", "success");
+        }catch(error){
+          cloudReady = false;
+          setSessionMessage(`Cloud indisponible : affichage local uniquement. ${error?.message || error}`, "error");
+        }
+      }
       document.getElementById("prevMonth")?.addEventListener("click", () => {
         currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
         render();
@@ -1710,6 +1782,7 @@
       initTabs();
       initSessions();
       render();
+      initPresenceCloud();
     })();
   </script>
 </body>

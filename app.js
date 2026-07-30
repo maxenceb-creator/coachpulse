@@ -3624,6 +3624,122 @@ async function athleticExport(format='json'){
     downloadText(rows.map(row => row.map(csvEscape).join(';')).join('\n'), 'coachpulse_tests_athletiques.csv', 'text/csv;charset=utf-8');
   }else exportJson(payload, 'coachpulse_tests_athletiques.json');
 }
+function presenceUiStatusFromCode(value=''){
+  const code = String(value || '').trim().toUpperCase();
+  return {P:'present', A:'absent', R:'late', M:'sick', B:'injured'}[code] || String(value || '').trim() || 'absent';
+}
+function presenceCloudEventFromSession(session={}, attendanceRows=[]){
+  const sessionId = String(session.sessionId || session.id || '').trim();
+  const attendance = {};
+  attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId).forEach(row => {
+    attendance[row.playerId] = {
+      status:presenceUiStatusFromCode(row.status),
+      minutes:Number(row.minutes ?? row.duration ?? 0) || 0,
+      comment:row.comment || row.note || '',
+      attendanceId:row.attendanceId || row.id || ''
+    };
+  });
+  return {
+    id:sessionId,
+    sessionId,
+    date:session.date || '',
+    startTime:session.startTime || session.start || '',
+    endTime:session.endTime || session.end || '',
+    duration:Number(session.duration || 0),
+    type:session.type || 'entrainement',
+    title:session.theme || session.title || 'Séance',
+    teamId:session.teamId || '',
+    team:session.team || '',
+    category:session.category || session.categorie || '',
+    attendance,
+    recurrence:session.recurrence || '',
+    recurrenceId:session.recurrenceId || '',
+    recurrenceEnd:session.recurrenceEnd || '',
+    createdAt:session.createdAtIso || session.createdAt || '',
+    updatedAt:session.updatedAtIso || session.updatedAt || '',
+    source:'Présences'
+  };
+}
+async function presenceListEvents(){
+  if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const docsFromSnap = snap => {
+    const rows = [];
+    snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
+    return rows;
+  };
+  const readWhere = async (collectionName, field, operator, value) => {
+    const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, operator, value));
+    return docsFromSnap(await firebaseFns.getDocs(q));
+  };
+  const authorizedTeamIds = getAuthorizedTeamIds();
+  const teamChunks = [];
+  for(let i=0;i<authorizedTeamIds.length;i+=10) teamChunks.push(authorizedTeamIds.slice(i,i+10));
+  const sessionRows = isAdmin() || !teamChunks.length
+    ? docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'sessions')))
+    : (await Promise.all(teamChunks.map(chunk => readWhere('sessions', 'teamId', 'in', chunk)))).flat();
+  const sessions = filterAuthorizedRecords(sessionRows)
+    .filter(row => row.sessionId || row.id)
+    .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true);
+  const sessionIds = [...new Set(sessions.map(row => row.sessionId || row.id).filter(Boolean))];
+  const sessionChunks = [];
+  for(let i=0;i<sessionIds.length;i+=10) sessionChunks.push(sessionIds.slice(i,i+10));
+  const attendanceRows = sessionChunks.length
+    ? (await Promise.all(sessionChunks.map(chunk => readWhere('attendance', 'sessionId', 'in', chunk)))).flat()
+    : [];
+  const attendance = filterAuthorizedRecords(attendanceRows);
+  return sessions
+    .map(session => presenceCloudEventFromSession(session, attendance))
+    .filter(event => event.id && event.date)
+    .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+}
+async function presenceSaveEvent(event={}){
+  if(!canEditModule('presences')) throw new Error('Modification Présences non autorisée.');
+  if(!event.teamId || !canAccessTeamId(event.teamId)) throw new Error('Accès non autorisé à cette équipe.');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const service = presenceEventsService();
+  const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
+  const sessionId = session.sessionId || event.id;
+  const now = new Date().toISOString();
+  await firebaseFns.setDoc(firebaseFns.doc(db, 'sessions', sessionId), {
+    ...session,
+    id:sessionId,
+    sessionId,
+    source:'Présences',
+    createdFromPresenceModule:true,
+    updatedAt:firebaseFns.serverTimestamp(),
+    updatedAtIso:now,
+    updatedBy:currentUser.uid,
+    updatedByEmail:currentUser.email || '',
+    createdAtIso:session.createdAt || event.createdAt || now
+  }, {merge:true});
+  const attendanceRows = service?.attendanceRowsFromEvent ? service.attendanceRowsFromEvent(event) : [];
+  await Promise.all(attendanceRows.map(row => firebaseFns.setDoc(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
+    ...row,
+    source:'Présences',
+    createdFromPresenceModule:true,
+    updatedAt:firebaseFns.serverTimestamp(),
+    updatedAtIso:now,
+    updatedBy:currentUser.uid,
+    updatedByEmail:currentUser.email || ''
+  }, {merge:true})));
+  invalidateAppDataCaches('teamProfiles');
+  return {sessionId, attendance:attendanceRows.length};
+}
+async function presenceDeleteEvent(event={}){
+  if(!canEditModule('presences')) throw new Error('Suppression Présences non autorisée.');
+  if(event.teamId && !canAccessTeamId(event.teamId)) throw new Error('Accès non autorisé à cette équipe.');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const sessionId = String(event.sessionId || event.id || '').trim();
+  if(!sessionId) throw new Error('Événement introuvable.');
+  const attendanceSnap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)));
+  const deletes = [];
+  attendanceSnap.forEach(docSnap => deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'attendance', docSnap.id))));
+  deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'sessions', sessionId)));
+  await Promise.all(deletes);
+  invalidateAppDataCaches('teamProfiles');
+  return {sessionId, deleted:deletes.length};
+}
 function getModuleCatalog(){
   return moduleRegistry().map(module => ({id:module.id,name:module.name,icon:module.icon,section:module.section,active:module.active !== false,collection:module.collection,relatedCollections:module.relatedCollections || [],screen:module.screen,permissions:module.permissions,settings:module.settings,visible:hasModulePermission(module,'read') && module.active !== false}));
 }
@@ -3657,7 +3773,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedRecords});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
