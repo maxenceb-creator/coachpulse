@@ -3646,6 +3646,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
     startTime:session.startTime || session.start || '',
     endTime:session.endTime || session.end || '',
     duration:Number(session.duration || 0),
+    procedure:session.procedure || session.sessionProcedure || {},
     type:session.type || 'entrainement',
     title:session.theme || session.title || 'Séance',
     teamId:session.teamId || '',

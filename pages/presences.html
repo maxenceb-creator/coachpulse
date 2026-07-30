@@ -1291,6 +1291,30 @@
             </div>
           </div>
           <fieldset class="recurrence-box">
+            <legend>Contenu de séance</legend>
+            <div class="form-row">
+              <div class="field">
+                <label for="sessionWarmupMinutes">Échauffement</label>
+                <input id="sessionWarmupMinutes" name="warmupMinutes" type="number" min="0" step="1" placeholder="0">
+              </div>
+              <div class="field">
+                <label for="sessionTechnicalMinutes">Technique</label>
+                <input id="sessionTechnicalMinutes" name="technicalMinutes" type="number" min="0" step="1" placeholder="0">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label for="sessionSituationMinutes">Situation</label>
+                <input id="sessionSituationMinutes" name="situationMinutes" type="number" min="0" step="1" placeholder="0">
+              </div>
+              <div class="field">
+                <label for="sessionGameMinutes">Jeu</label>
+                <input id="sessionGameMinutes" name="gameMinutes" type="number" min="0" step="1" placeholder="0">
+              </div>
+            </div>
+            <p id="sessionProcedurePreview" class="recurrence-help">Aucun procédé renseigné.</p>
+          </fieldset>
+          <fieldset class="recurrence-box">
             <legend>Récurrence</legend>
             <div class="form-row">
               <div class="field">
@@ -2342,6 +2366,46 @@
           comment:""
         }]));
       }
+      function sessionProcedureFromForm(form){
+        return {
+          warmup:Number(form.warmupMinutes?.value || 0),
+          technical:Number(form.technicalMinutes?.value || 0),
+          situation:Number(form.situationMinutes?.value || 0),
+          game:Number(form.gameMinutes?.value || 0)
+        };
+      }
+      function normalizeSessionProcedure(value={}){
+        return {
+          warmup:Number(value.warmup || value.echauffement || 0),
+          technical:Number(value.technical || value.technique || 0),
+          situation:Number(value.situation || 0),
+          game:Number(value.game || value.jeu || 0)
+        };
+      }
+      function procedureTotal(procedure={}){
+        const clean = normalizeSessionProcedure(procedure);
+        return clean.warmup + clean.technical + clean.situation + clean.game;
+      }
+      function procedureSummary(procedure={}){
+        const clean = normalizeSessionProcedure(procedure);
+        return [
+          clean.warmup ? `Échauffement ${clean.warmup} min` : "",
+          clean.technical ? `Technique ${clean.technical} min` : "",
+          clean.situation ? `Situation ${clean.situation} min` : "",
+          clean.game ? `Jeu ${clean.game} min` : ""
+        ].filter(Boolean).join(" · ");
+      }
+      function updateProcedurePreview(){
+        const form = document.getElementById("sessionForm");
+        const preview = document.getElementById("sessionProcedurePreview");
+        if(!form || !preview) return;
+        const procedure = sessionProcedureFromForm(form);
+        const total = procedureTotal(procedure);
+        const duration = Number(form.duration.value || 0);
+        preview.textContent = total
+          ? `${procedureSummary(procedure)} · Total ${total} min${duration ? ` / séance ${duration} min` : ""}`
+          : "Aucun procédé renseigné.";
+      }
       function mergeAttendanceForEvent(previousEvent, teamId, dateValue, duration){
         return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => {
           const previous = previousEvent?.attendance?.[player.playerId] ? attendanceEntry(previousEvent, player.playerId) : null;
@@ -2384,9 +2448,15 @@
         form.endTime.value = event.endTime || "";
         form.duration.value = event.duration || "";
         form.type.value = event.type || "entrainement";
+        const procedure = normalizeSessionProcedure(event.procedure || event.sessionProcedure || {});
+        form.warmupMinutes.value = procedure.warmup || "";
+        form.technicalMinutes.value = procedure.technical || "";
+        form.situationMinutes.value = procedure.situation || "";
+        form.gameMinutes.value = procedure.game || "";
         form.recurrence.value = event.recurrence || "none";
         form.recurrenceEnd.value = event.recurrenceEnd || "";
         setSessionFormMode(event.id || "");
+        updateProcedurePreview();
         updateRecurrenceUi();
         setSessionMessage(`Modification de l'événement du ${event.date}.`, "success");
         document.getElementById("sessionDate")?.focus();
@@ -2412,6 +2482,7 @@
           startTime,
           endTime,
           duration,
+          procedure:sessionProcedureFromForm(form),
           type,
           title:typeLabel(type),
           teamId:team.teamId,
@@ -2448,6 +2519,7 @@
                 ${esc(event.date)} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min
                 ${event.team ? " · " + esc(event.team) : ""}
               </div>
+              ${procedureSummary(event.procedure || event.sessionProcedure) ? `<div class="session-item-meta">${esc(procedureSummary(event.procedure || event.sessionProcedure))}</div>` : ""}
             </div>
             <div class="event-actions">
               <span class="session-type">${esc(typeLabel(event.type))}</span>
@@ -2509,6 +2581,7 @@
             <div>
               <h2>Feuille de présence</h2>
               <p>${esc(event.date)} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min · ${esc(event.team || "")}</p>
+              ${procedureSummary(event.procedure || event.sessionProcedure) ? `<p>${esc(procedureSummary(event.procedure || event.sessionProcedure))}</p>` : ""}
             </div>
             <span class="attendance-event-pill">${esc(typeLabel(event.type))}</span>
           </header>
@@ -2561,6 +2634,7 @@
         const duration = minutesBetween(start, end);
         const input = document.getElementById("sessionDuration");
         if(input && duration) input.value = duration;
+        updateProcedurePreview();
       }
       function applySessionDefaults(force=false){
         const settings = presenceSettings();
@@ -2624,6 +2698,10 @@
         applySessionDefaults(false);
         document.getElementById("sessionStart")?.addEventListener("change", updateDurationFromTimes);
         document.getElementById("sessionEnd")?.addEventListener("change", updateDurationFromTimes);
+        document.getElementById("sessionDuration")?.addEventListener("input", updateProcedurePreview);
+        ["sessionWarmupMinutes","sessionTechnicalMinutes","sessionSituationMinutes","sessionGameMinutes"].forEach(id => {
+          document.getElementById(id)?.addEventListener("input", updateProcedurePreview);
+        });
         document.getElementById("sessionForm")?.addEventListener("submit", async event => {
           event.preventDefault();
           const form = event.currentTarget;

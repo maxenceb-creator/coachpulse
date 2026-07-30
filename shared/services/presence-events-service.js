@@ -41,6 +41,7 @@
       startTime:text(event.startTime || event.start),
       endTime:text(event.endTime || event.end),
       duration:Number(event.duration || 0),
+      procedure:event.procedure || event.sessionProcedure || {},
       type:text(event.type || 'entrainement'),
       theme:text(event.title || event.theme || 'Séance'),
       teamId:text(event.teamId),
