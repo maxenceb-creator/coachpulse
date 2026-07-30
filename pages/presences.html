@@ -975,6 +975,77 @@
       border-radius:inherit;
       background:var(--event-color, var(--green));
     }
+    .prevention-page{
+      display:grid;
+      gap:16px;
+      max-width:1320px;
+      margin:0 auto;
+    }
+    .prevention-grid{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(190px,1fr));
+      gap:12px;
+    }
+    .prevention-card{
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 14px 34px rgba(16,37,27,.08);
+      overflow:hidden;
+    }
+    .prevention-card header{
+      padding:15px 17px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(90deg,#fff,#f7fbf8);
+    }
+    .prevention-card h2{
+      margin:0;
+      color:var(--dark);
+      font-size:clamp(21px,2.4vw,29px);
+      line-height:1;
+    }
+    .prevention-card p{
+      margin:7px 0 0;
+      color:#66756d;
+      font-weight:850;
+      line-height:1.35;
+    }
+    .prevention-list{
+      display:grid;
+      gap:10px;
+      padding:14px;
+    }
+    .prevention-alert{
+      border:1px solid #eadbb7;
+      border-left:5px solid var(--gold);
+      border-radius:14px;
+      background:#fff9e8;
+      padding:12px;
+    }
+    .prevention-alert.high{
+      border-color:#ffd0d0;
+      border-left-color:#b42318;
+      background:#fff5f5;
+    }
+    .prevention-alert.good{
+      border-color:#d7eadc;
+      border-left-color:var(--green);
+      background:#f0fbf5;
+    }
+    .prevention-alert strong{
+      display:block;
+      color:var(--dark);
+      font-size:15px;
+      line-height:1.2;
+    }
+    .prevention-alert small{
+      display:block;
+      margin-top:6px;
+      color:#66756d;
+      font-size:12px;
+      font-weight:850;
+      line-height:1.35;
+    }
     @media(max-width:760px){
       main{padding:0 8px 18px}
       .presence-tabs{
@@ -996,7 +1067,8 @@
         grid-template-columns:1fr;
       }
       .reports-grid,
-      .report-sections{
+      .report-sections,
+      .prevention-grid{
         grid-template-columns:1fr;
       }
       .kpi-grid{
@@ -1271,9 +1343,43 @@
         </div>
       </article>
     </section>
-    <section id="panel-prevention" class="presence-panel pause-panel" aria-labelledby="preventionPauseTitle">
-      <h1 id="preventionPauseTitle">Prévention en pause</h1>
-      <p>La charge et la prévention seront reconstruites étape par étape.</p>
+    <section id="panel-prevention" class="presence-panel prevention-page" aria-labelledby="preventionTitle">
+      <div class="dashboard-hero">
+        <div>
+          <h1 id="preventionTitle">Prévention & charge</h1>
+          <p>Repérage simple des joueuses à surveiller à partir des présences, minutes, statuts malade/blessée et commentaires de séance.</p>
+        </div>
+        <div class="kpi-grid" aria-label="Résumé prévention">
+          <div class="kpi-card"><strong id="preventionTotalLoad">0</strong><span>Minutes suivies</span></div>
+          <div class="kpi-card"><strong id="preventionAvgLoad">0</strong><span>Moyenne joueuse</span></div>
+          <div class="kpi-card"><strong id="preventionAlerts">0</strong><span>Alertes</span></div>
+          <div class="kpi-card"><strong id="preventionAvailability">0%</strong><span>Disponibilité</span></div>
+        </div>
+      </div>
+      <div id="preventionTeamFilters" class="calendar-team-filter" aria-label="Filtrer la prévention par équipe"></div>
+      <div class="prevention-grid">
+        <article class="prevention-card">
+          <header>
+            <h2>Charge élevée</h2>
+            <p>Joueuses avec le plus de minutes cumulées sur les événements filtrés.</p>
+          </header>
+          <div id="preventionLoadList" class="prevention-list"></div>
+        </article>
+        <article class="prevention-card">
+          <header>
+            <h2>Indisponibilités</h2>
+            <p>Statuts malade, blessée, absente ou retards répétés.</p>
+          </header>
+          <div id="preventionUnavailableList" class="prevention-list"></div>
+        </article>
+        <article class="prevention-card">
+          <header>
+            <h2>Commentaires à lire</h2>
+            <p>Notes de séance contenant douleur, fatigue, blessure ou reprise.</p>
+          </header>
+          <div id="preventionCommentList" class="prevention-list"></div>
+        </article>
+      </div>
     </section>
     <section id="panel-settings" class="presence-panel pause-panel" aria-labelledby="settingsPauseTitle">
       <h1 id="settingsPauseTitle">Paramètres en pause</h1>
@@ -1877,6 +1983,91 @@
           `).join("") : emptyReportsRow();
         }
       }
+      function preventionEntries(events){
+        return events.filter(event => event.source === "presences" && event.id)
+          .flatMap(event => attendanceEntries(event).map(entry => {
+            const player = playerById(entry.playerId, event.date);
+            return {
+              ...entry,
+              event,
+              player,
+              playerName:player ? playerName(player) : entry.playerId,
+              team:player?.team || event.team || ""
+            };
+          }));
+      }
+      function riskLevel(row, avgMinutes){
+        if(row.injured || row.sick || row.absent >= 2) return "high";
+        if(row.minutes > Math.max(120, avgMinutes * 1.35)) return "high";
+        if(row.late || row.absent || row.comments) return "";
+        return "good";
+      }
+      function renderPrevention(events){
+        renderCalendarTeamFilters("preventionTeamFilters");
+        const entries = preventionEntries(events);
+        const present = entries.filter(entry => entry.status === "present" || entry.status === "late").length;
+        const totalMinutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+        const grouped = new Map();
+        entries.forEach(entry => {
+          const key = entry.playerId;
+          const row = grouped.get(key) || {playerId:key, name:entry.playerName, team:entry.team, minutes:0, present:0, absent:0, late:0, sick:0, injured:0, comments:[]};
+          row.minutes += Number(entry.minutes || 0);
+          row.present += entry.status === "present" ? 1 : 0;
+          row.absent += entry.status === "absent" ? 1 : 0;
+          row.late += entry.status === "late" ? 1 : 0;
+          row.sick += entry.status === "sick" ? 1 : 0;
+          row.injured += entry.status === "injured" ? 1 : 0;
+          if(entry.comment) row.comments.push({text:entry.comment, date:entry.event.date, team:entry.team});
+          grouped.set(key, row);
+        });
+        const rows = [...grouped.values()];
+        const avg = rows.length ? Math.round(totalMinutes / rows.length) : 0;
+        const alerts = rows.filter(row => riskLevel(row, avg) === "high").length;
+        setText("preventionTotalLoad", totalMinutes);
+        setText("preventionAvgLoad", avg);
+        setText("preventionAlerts", alerts);
+        setText("preventionAvailability", percent(present, entries.length));
+
+        const loadList = document.getElementById("preventionLoadList");
+        if(loadList){
+          const loadRows = rows.sort((a,b) => b.minutes - a.minutes).slice(0,8);
+          loadList.innerHTML = loadRows.length ? loadRows.map(row => `
+            <article class="prevention-alert ${riskLevel(row, avg)}">
+              <strong>${esc(row.name)}</strong>
+              <small>${esc(row.team || "-")} · ${row.minutes} min · ${row.present} présence(s)</small>
+            </article>
+          `).join("") : '<div class="empty-state">Aucune charge à afficher.</div>';
+        }
+
+        const unavailableList = document.getElementById("preventionUnavailableList");
+        if(unavailableList){
+          const unavailableRows = rows
+            .filter(row => row.absent || row.late || row.sick || row.injured)
+            .sort((a,b) => (b.injured + b.sick + b.absent + b.late) - (a.injured + a.sick + a.absent + a.late))
+            .slice(0,10);
+          unavailableList.innerHTML = unavailableRows.length ? unavailableRows.map(row => `
+            <article class="prevention-alert ${riskLevel(row, avg)}">
+              <strong>${esc(row.name)}</strong>
+              <small>${esc(row.team || "-")} · A ${row.absent} · R ${row.late} · M ${row.sick} · B ${row.injured}</small>
+            </article>
+          `).join("") : '<div class="empty-state">Aucune indisponibilité détectée.</div>';
+        }
+
+        const commentList = document.getElementById("preventionCommentList");
+        if(commentList){
+          const keywords = /douleur|fatigue|bless|reprise|gêne|gene|alerte|soin|kin[ée]é?/i;
+          const comments = rows.flatMap(row => row.comments
+            .filter(comment => keywords.test(comment.text))
+            .map(comment => ({...comment, playerName:row.name, team:row.team})))
+            .slice(0,12);
+          commentList.innerHTML = comments.length ? comments.map(comment => `
+            <article class="prevention-alert high">
+              <strong>${esc(comment.playerName)}</strong>
+              <small>${esc(comment.date || "-")} · ${esc(comment.team || "-")}<br>${esc(comment.text)}</small>
+            </article>
+          `).join("") : '<div class="empty-state">Aucun commentaire sensible détecté.</div>';
+        }
+      }
       async function deletePresenceEvent(eventId){
         const events = loadPresenceEvents();
         const event = events.find(item => item.id === eventId);
@@ -2241,6 +2432,19 @@
         calendarTeamFilterIds = new Set();
         render();
       });
+      document.getElementById("preventionTeamFilters")?.addEventListener("change", event => {
+        const input = event.target.closest("input[type='checkbox']");
+        if(!input) return;
+        if(input.checked) calendarTeamFilterIds.add(input.value);
+        else calendarTeamFilterIds.delete(input.value);
+        render();
+      });
+      document.getElementById("preventionTeamFilters")?.addEventListener("click", event => {
+        const clear = event.target.closest("[data-clear-team-filters]");
+        if(!clear) return;
+        calendarTeamFilterIds = new Set();
+        render();
+      });
       document.getElementById("calendarDayList")?.addEventListener("click", event => {
         const deleteButton = event.target.closest("[data-calendar-delete-event]");
         if(deleteButton){
@@ -2262,6 +2466,7 @@
         renderAgenda(events);
         renderCalendarPage(events);
         renderReports(events);
+        renderPrevention(events);
       }
       async function initPresenceCloud(){
         try{
