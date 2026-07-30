@@ -760,28 +760,6 @@
       border-color:var(--green);
       box-shadow:0 0 0 4px rgba(0,132,61,.12);
     }
-    .pause-panel{
-      max-width:980px;
-      margin:0 auto;
-      padding:28px;
-      border:1px solid var(--line);
-      border-radius:18px;
-      background:#fff;
-      box-shadow:0 14px 34px rgba(16,37,27,.08);
-    }
-    .pause-panel h1{
-      margin:0 0 10px;
-      color:var(--dark);
-      font-size:clamp(28px,4vw,44px);
-      line-height:1;
-    }
-    .pause-panel p{
-      margin:0;
-      color:#66756d;
-      font-weight:800;
-      font-size:clamp(15px,2vw,18px);
-      line-height:1.45;
-    }
     .calendar-page{
       max-width:1320px;
       margin:0 auto;
@@ -1329,7 +1307,7 @@
       <article class="session-card">
         <header>
           <h2>Événements créés</h2>
-          <p>Ces événements restent stockés en local dans le navigateur pour le moment.</p>
+          <p>Ces événements sont conservés localement puis synchronisés avec le cloud quand la connexion est disponible.</p>
         </header>
         <div id="sessionList" class="session-list"></div>
       </article>
@@ -1764,8 +1742,10 @@
         return calendarTeamFilterIds.size === 1 ? [...calendarTeamFilterIds][0] : "";
       }
       function loadEvents(){
-        const presenceEvents = Array.isArray(readJson(PRESENCE_EVENTS_KEY, [])) ? readJson(PRESENCE_EVENTS_KEY, []) : [];
-        const methodo = Array.isArray(readJson(EVENT_KEY, [])) ? readJson(EVENT_KEY, []) : [];
+        const savedPresenceEvents = readJson(PRESENCE_EVENTS_KEY, []);
+        const savedMethodoEvents = readJson(EVENT_KEY, []);
+        const presenceEvents = Array.isArray(savedPresenceEvents) ? savedPresenceEvents : [];
+        const methodo = Array.isArray(savedMethodoEvents) ? savedMethodoEvents : [];
         const legacy = readJson(LEGACY_PRESENCE_KEY, null);
         const legacySessions = Array.isArray(legacy?.sessions) ? legacy.sessions : [];
         return [
@@ -1891,6 +1871,26 @@
             `;
           }).join("")}
         `;
+      }
+      function updateTeamFilterFromInput(input){
+        if(input.checked) calendarTeamFilterIds.add(input.value);
+        else calendarTeamFilterIds.delete(input.value);
+        render();
+      }
+      function clearTeamFilters(){
+        calendarTeamFilterIds = new Set();
+        render();
+      }
+      function bindTeamFilter(rootId){
+        const root = document.getElementById(rootId);
+        if(!root) return;
+        root.addEventListener("change", event => {
+          const input = event.target.closest("input[type='checkbox']");
+          if(input) updateTeamFilterFromInput(input);
+        });
+        root.addEventListener("click", event => {
+          if(event.target.closest("[data-clear-team-filters]")) clearTeamFilters();
+        });
       }
       function populateSettingsTeamSelect(){
         const select = document.getElementById("settingsDefaultTeam");
@@ -2648,6 +2648,31 @@
           });
         });
       }
+      function shiftMonth(target, amount){
+        if(target === "calendarPage"){
+          calendarPageMonth = new Date(calendarPageMonth.getFullYear(), calendarPageMonth.getMonth() + amount, 1);
+        }else{
+          currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + amount, 1);
+        }
+        render();
+      }
+      function resetMonth(target){
+        if(target === "calendarPage"){
+          calendarPageMonth = new Date();
+          selectedCalendarDate = isoDate(new Date());
+        }else{
+          currentMonth = new Date();
+        }
+        render();
+      }
+      function initCalendarControls(){
+        document.getElementById("prevMonth")?.addEventListener("click", () => shiftMonth("dashboard", -1));
+        document.getElementById("nextMonth")?.addEventListener("click", () => shiftMonth("dashboard", 1));
+        document.getElementById("todayMonth")?.addEventListener("click", () => resetMonth("dashboard"));
+        document.getElementById("calendarPagePrevMonth")?.addEventListener("click", () => shiftMonth("calendarPage", -1));
+        document.getElementById("calendarPageNextMonth")?.addEventListener("click", () => shiftMonth("calendarPage", 1));
+        document.getElementById("calendarPageTodayMonth")?.addEventListener("click", () => resetMonth("calendarPage"));
+      }
       document.getElementById("calendarGrid")?.addEventListener("click", event => {
         const day = event.target.closest("[data-create-date]");
         if(!day) return;
@@ -2676,58 +2701,7 @@
         selectedCalendarDate = day.dataset.selectDate;
         render();
       });
-      document.getElementById("calendarTeamFilters")?.addEventListener("change", event => {
-        const input = event.target.closest("input[type='checkbox']");
-        if(!input) return;
-        if(input.checked) calendarTeamFilterIds.add(input.value);
-        else calendarTeamFilterIds.delete(input.value);
-        render();
-      });
-      document.getElementById("calendarPageTeamFilters")?.addEventListener("change", event => {
-        const input = event.target.closest("input[type='checkbox']");
-        if(!input) return;
-        if(input.checked) calendarTeamFilterIds.add(input.value);
-        else calendarTeamFilterIds.delete(input.value);
-        render();
-      });
-      document.getElementById("calendarTeamFilters")?.addEventListener("click", event => {
-        const clear = event.target.closest("[data-clear-team-filters]");
-        if(!clear) return;
-        calendarTeamFilterIds = new Set();
-        render();
-      });
-      document.getElementById("calendarPageTeamFilters")?.addEventListener("click", event => {
-        const clear = event.target.closest("[data-clear-team-filters]");
-        if(!clear) return;
-        calendarTeamFilterIds = new Set();
-        render();
-      });
-      document.getElementById("reportsTeamFilters")?.addEventListener("change", event => {
-        const input = event.target.closest("input[type='checkbox']");
-        if(!input) return;
-        if(input.checked) calendarTeamFilterIds.add(input.value);
-        else calendarTeamFilterIds.delete(input.value);
-        render();
-      });
-      document.getElementById("reportsTeamFilters")?.addEventListener("click", event => {
-        const clear = event.target.closest("[data-clear-team-filters]");
-        if(!clear) return;
-        calendarTeamFilterIds = new Set();
-        render();
-      });
-      document.getElementById("preventionTeamFilters")?.addEventListener("change", event => {
-        const input = event.target.closest("input[type='checkbox']");
-        if(!input) return;
-        if(input.checked) calendarTeamFilterIds.add(input.value);
-        else calendarTeamFilterIds.delete(input.value);
-        render();
-      });
-      document.getElementById("preventionTeamFilters")?.addEventListener("click", event => {
-        const clear = event.target.closest("[data-clear-team-filters]");
-        if(!clear) return;
-        calendarTeamFilterIds = new Set();
-        render();
-      });
+      ["calendarTeamFilters","calendarPageTeamFilters","reportsTeamFilters","preventionTeamFilters"].forEach(bindTeamFilter);
       document.getElementById("calendarDayList")?.addEventListener("click", event => {
         const deleteButton = event.target.closest("[data-calendar-delete-event]");
         if(deleteButton){
@@ -2763,34 +2737,10 @@
           setSessionMessage(`Cloud indisponible : affichage local uniquement. ${error?.message || error}`, "error");
         }
       }
-      document.getElementById("prevMonth")?.addEventListener("click", () => {
-        currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
-        render();
-      });
-      document.getElementById("nextMonth")?.addEventListener("click", () => {
-        currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
-        render();
-      });
-      document.getElementById("todayMonth")?.addEventListener("click", () => {
-        currentMonth = new Date();
-        render();
-      });
-      document.getElementById("calendarPagePrevMonth")?.addEventListener("click", () => {
-        calendarPageMonth = new Date(calendarPageMonth.getFullYear(), calendarPageMonth.getMonth() - 1, 1);
-        render();
-      });
-      document.getElementById("calendarPageNextMonth")?.addEventListener("click", () => {
-        calendarPageMonth = new Date(calendarPageMonth.getFullYear(), calendarPageMonth.getMonth() + 1, 1);
-        render();
-      });
-      document.getElementById("calendarPageTodayMonth")?.addEventListener("click", () => {
-        calendarPageMonth = new Date();
-        selectedCalendarDate = isoDate(new Date());
-        render();
-      });
       initTabs();
       initSessions();
       initSettings();
+      initCalendarControls();
       render();
       initPresenceCloud();
     })();
