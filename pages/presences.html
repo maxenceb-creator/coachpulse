@@ -607,7 +607,49 @@
       text-overflow:ellipsis;
       white-space:nowrap;
     }
-    .attendance-status-select,
+    .attendance-status-buttons{
+      display:flex;
+      gap:6px;
+      flex-wrap:nowrap;
+      align-items:center;
+    }
+    .attendance-status-button{
+      width:38px;
+      min-width:38px;
+      height:38px;
+      border:1px solid #d5e3dc;
+      border-radius:12px;
+      background:#fff;
+      color:var(--dark);
+      font-size:15px;
+      font-weight:1000;
+      cursor:pointer;
+      line-height:1;
+      outline:none;
+    }
+    .attendance-status-button:hover,
+    .attendance-status-button:focus{
+      border-color:var(--green);
+      box-shadow:0 0 0 4px rgba(0,132,61,.12);
+    }
+    .attendance-status-button.active{
+      color:#fff;
+    }
+    .attendance-status-button.present.active{
+      background:var(--green);
+      border-color:var(--green);
+    }
+    .attendance-status-button.absent.active,
+    .attendance-status-button.sick.active,
+    .attendance-status-button.injured.active{
+      background:#b42318;
+      border-color:#b42318;
+    }
+    .attendance-status-button.late.active{
+      background:var(--gold);
+      border-color:#b7953c;
+      color:#123c2a;
+    }
     .attendance-minutes,
     .attendance-comment{
       width:100%;
@@ -625,28 +667,10 @@
       min-height:42px;
       resize:vertical;
     }
-    .attendance-status-select:focus,
     .attendance-minutes:focus,
     .attendance-comment:focus{
       border-color:var(--green);
       box-shadow:0 0 0 4px rgba(0,132,61,.12);
-    }
-    .attendance-status-select.present{
-      border-color:#bfe6d0;
-      background:#f0fbf5;
-      color:var(--dark);
-    }
-    .attendance-status-select.absent,
-    .attendance-status-select.sick,
-    .attendance-status-select.injured{
-      border-color:#fac8c8;
-      background:#fff7f7;
-      color:#9d1c1c;
-    }
-    .attendance-status-select.late{
-      border-color:#eadbb7;
-      background:#fff9e8;
-      color:#70561c;
     }
     .pause-panel{
       max-width:980px;
@@ -1192,11 +1216,11 @@
       }
       function attendanceStatuses(){
         return [
-          {id:"present", label:"Présente"},
-          {id:"absent", label:"Absente"},
-          {id:"late", label:"En retard"},
-          {id:"sick", label:"Malade"},
-          {id:"injured", label:"Blessée"}
+          {id:"present", label:"Présente", short:"P"},
+          {id:"absent", label:"Absente", short:"A"},
+          {id:"late", label:"En retard", short:"R"},
+          {id:"sick", label:"Malade", short:"M"},
+          {id:"injured", label:"Blessée", short:"B"}
         ];
       }
       function defaultAttendanceMinutes(status, event){
@@ -1283,8 +1307,8 @@
         });
         const rows = players.map(player => {
           const entry = attendanceEntry(event, player.playerId);
-          const options = attendanceStatuses().map(status => `
-            <option value="${esc(status.id)}" ${entry.status === status.id ? "selected" : ""}>${esc(status.label)}</option>
+          const statusButtons = attendanceStatuses().map(status => `
+            <button class="attendance-status-button ${esc(status.id)} ${entry.status === status.id ? "active" : ""}" type="button" data-attendance-status="${esc(status.id)}" data-attendance-event="${esc(event.id)}" data-player-id="${esc(player.playerId)}" aria-label="${esc(status.label)} pour ${esc(playerName(player))}" aria-pressed="${entry.status === status.id ? "true" : "false"}" title="${esc(status.label)}">${esc(status.short)}</button>
           `).join("");
           return `
             <div class="attendance-row" data-player-id="${esc(player.playerId)}">
@@ -1292,9 +1316,9 @@
                 <strong>${esc(playerName(player))}</strong>
                 <small>playerId ${esc(player.playerId)} · ${esc(player.team || event.team || "")}</small>
               </div>
-              <select class="attendance-status-select ${esc(entry.status)}" data-attendance-field="status" data-attendance-event="${esc(event.id)}" data-player-id="${esc(player.playerId)}" aria-label="Statut de ${esc(playerName(player))}">
-                ${options}
-              </select>
+              <div class="attendance-status-buttons" aria-label="Statut de ${esc(playerName(player))}">
+                ${statusButtons}
+              </div>
               <input class="attendance-minutes" data-attendance-field="minutes" data-attendance-event="${esc(event.id)}" data-player-id="${esc(player.playerId)}" type="number" min="0" step="1" value="${esc(entry.minutes)}" aria-label="Minutes de ${esc(playerName(player))}">
               <textarea class="attendance-comment" data-attendance-field="comment" data-attendance-event="${esc(event.id)}" data-player-id="${esc(player.playerId)}" rows="1" placeholder="Commentaire séance, blessure, ressenti...">${esc(entry.comment)}</textarea>
             </div>
@@ -1443,6 +1467,11 @@
           const name = field.dataset.attendanceField;
           const value = name === "minutes" ? Math.max(0, Number(field.value || 0)) : field.value;
           updateAttendanceEntry(field.dataset.attendanceEvent, field.dataset.playerId, {[name]:value});
+        });
+        document.getElementById("attendanceDetail")?.addEventListener("click", event => {
+          const button = event.target.closest("[data-attendance-status][data-attendance-event][data-player-id]");
+          if(!button) return;
+          updateAttendanceEntry(button.dataset.attendanceEvent, button.dataset.playerId, {status:button.dataset.attendanceStatus});
         });
         updateRecurrenceUi();
         renderSessionList();
