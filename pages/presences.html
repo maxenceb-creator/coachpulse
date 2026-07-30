@@ -605,6 +605,12 @@
             <label for="sessionDate">Jour</label>
             <input id="sessionDate" name="date" type="date" required>
           </div>
+          <div class="field">
+            <label for="sessionTeam">Équipe</label>
+            <select id="sessionTeam" name="teamId" required>
+              <option value="">Choisir une équipe...</option>
+            </select>
+          </div>
           <div class="form-row">
             <div class="field">
               <label for="sessionStart">Heure de début</label>
@@ -640,6 +646,7 @@
                   <option value="none">Aucune récurrence</option>
                   <option value="weekly">Chaque semaine</option>
                   <option value="biweekly">Toutes les 2 semaines</option>
+                  <option value="monthly">Tous les mois</option>
                 </select>
               </div>
               <div class="field">
@@ -683,12 +690,23 @@
       <p>Les réglages seront repris quand la base des événements sera validée.</p>
     </section>
   </main>
+  <script src="../shared/services/teams-service.js"></script>
   <script>
     (function(){
       const PRESENCE_EVENTS_KEY = "coachpulse:presenceEvents:v1";
       const EVENT_KEY = "methodo_events_v24";
       const LEGACY_PRESENCE_KEY = "presenceSeanceV3_6_Excel";
       const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+      const FALLBACK_TEAMS = [
+        {teamId:"team-u7-a", name:"U7 A", category:"U7"},
+        {teamId:"team-u9-a", name:"U9 A", category:"U9"},
+        {teamId:"team-u11-a", name:"U11 A", category:"U11"},
+        {teamId:"team-u13-a", name:"U13 A", category:"U13"},
+        {teamId:"team-u13-b", name:"U13 B", category:"U13"},
+        {teamId:"team-u16-a", name:"U16 A", category:"U16"},
+        {teamId:"team-u19", name:"U19", category:"U19"},
+        {teamId:"team-r1", name:"R1", category:"SENIORS"}
+      ];
       let currentMonth = new Date();
 
       function esc(value){
@@ -723,8 +741,36 @@
         next.setDate(next.getDate() + days);
         return next;
       }
+      function addMonths(date, months){
+        const originalDay = date.getDate();
+        const next = new Date(date.getFullYear(), date.getMonth() + months, 1);
+        const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+        next.setDate(Math.min(originalDay, lastDay));
+        return next;
+      }
       function sameDay(a,b){
         return a && b && isoDate(a) === isoDate(b);
+      }
+      function teamsService(){
+        try{
+          return window.CoachPulseTeamsService || window.parent?.CoachPulseTeamsService || null;
+        }catch(_error){
+          return window.CoachPulseTeamsService || null;
+        }
+      }
+      function officialTeams(){
+        const service = teamsService();
+        if(service?.officialTeamRows){
+          return service.officialTeamRows().map(team => ({
+            teamId:team.teamId || team.id || "",
+            name:team.name || "",
+            category:team.category || team.categorie || ""
+          })).filter(team => team.teamId && team.name);
+        }
+        return FALLBACK_TEAMS;
+      }
+      function teamById(teamId){
+        return officialTeams().find(team => String(team.teamId) === String(teamId)) || null;
       }
       function eventTitle(event){
         return event.title || event.theme || event.label || event.type || event.text || "Événement";
@@ -734,9 +780,10 @@
           event.time || event.startTime || event.start || "",
           event.endTime ? `fin ${event.endTime}` : "",
           event.duration ? `${event.duration} min` : "",
+          event.team || "",
           event.team || event.category || event.categorie || "",
           event.place || event.location || event.lieu || ""
-        ].filter(Boolean).join(" · ");
+        ].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(" · ");
       }
       function normalizeEvent(event, source){
         const date = parseDate(event?.date || event?.startDate || event?.day || event?.start);
@@ -867,19 +914,21 @@
         if(recurrence === "none") return [isoDate(firstDate)];
         const endDate = parseDate(endValue);
         if(!endDate || endDate < firstDate) return [];
-        const step = recurrence === "biweekly" ? 14 : 7;
         const dates = [];
         let cursor = firstDate;
         while(cursor <= endDate && dates.length < 80){
           dates.push(isoDate(cursor));
-          cursor = addDays(cursor, step);
+          cursor = recurrence === "monthly"
+            ? addMonths(cursor, 1)
+            : addDays(cursor, recurrence === "biweekly" ? 14 : 7);
         }
         return dates;
       }
       function recurrenceLabel(recurrence){
         return ({
           weekly:"Chaque semaine",
-          biweekly:"Toutes les 2 semaines"
+          biweekly:"Toutes les 2 semaines",
+          monthly:"Tous les mois"
         })[recurrence] || "Aucune récurrence";
       }
       function updateRecurrenceUi(){
@@ -922,6 +971,7 @@
               <strong>${esc(typeLabel(event.type))}</strong>
               <div class="session-item-meta">
                 ${esc(event.date)} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min
+                ${event.team ? " · " + esc(event.team) : ""}
               </div>
             </div>
             <span class="session-type">${esc(typeLabel(event.type))}</span>
@@ -935,15 +985,27 @@
         const input = document.getElementById("sessionDuration");
         if(input && duration) input.value = duration;
       }
+      function populateTeamSelect(){
+        const select = document.getElementById("sessionTeam");
+        if(!select) return;
+        const current = select.value;
+        select.innerHTML = '<option value="">Choisir une équipe...</option>' + officialTeams().map(team =>
+          `<option value="${esc(team.teamId)}">${esc(team.name)}${team.category ? " · " + esc(team.category) : ""}</option>`
+        ).join("");
+        if(current) select.value = current;
+      }
       function initSessions(){
         const dateInput = document.getElementById("sessionDate");
         if(dateInput && !dateInput.value) dateInput.value = isoDate(new Date());
+        populateTeamSelect();
         document.getElementById("sessionStart")?.addEventListener("change", updateDurationFromTimes);
         document.getElementById("sessionEnd")?.addEventListener("change", updateDurationFromTimes);
         document.getElementById("sessionForm")?.addEventListener("submit", event => {
           event.preventDefault();
           const form = event.currentTarget;
           const date = form.date.value;
+          const teamId = form.teamId.value;
+          const team = teamById(teamId);
           const startTime = form.startTime.value;
           const endTime = form.endTime.value;
           const duration = Number(form.duration.value || minutesBetween(startTime, endTime));
@@ -953,6 +1015,10 @@
           const dates = buildRecurrenceDates(date, recurrence, recurrenceEnd);
           if(!date || !startTime || !endTime || !duration || duration <= 0){
             setSessionMessage("Complète le jour, les horaires et une durée valide.", "error");
+            return;
+          }
+          if(!team){
+            setSessionMessage("Choisis une équipe reliée à un teamId.", "error");
             return;
           }
           if(!dates.length){
@@ -968,6 +1034,9 @@
             duration,
             type,
             title:typeLabel(type),
+            teamId:team.teamId,
+            team:team.name,
+            category:team.category || "",
             recurrence,
             recurrenceId,
             recurrenceEnd:recurrence === "none" ? "" : recurrenceEnd,
