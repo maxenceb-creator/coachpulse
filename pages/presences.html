@@ -315,7 +315,9 @@
       border:1px solid #d7eadc;
       border-left:4px solid var(--green);
       border-radius:10px;
-      background:#f0fbf5;
+      background:var(--event-bg, #f0fbf5);
+      border-color:var(--event-border, #d7eadc);
+      border-left-color:var(--event-color, var(--green));
       color:var(--dark);
       font-size:11px;
       font-weight:950;
@@ -325,8 +327,16 @@
       white-space:nowrap;
     }
     .event-chip.methodologie{
-      border-left-color:var(--gold);
-      background:#fff9e8;
+      border-left-color:var(--event-color, var(--gold));
+      background:var(--event-bg, #fff9e8);
+    }
+    .event-chip small{
+      display:block;
+      margin-top:2px;
+      color:#66756d;
+      font-size:9px;
+      font-weight:1000;
+      line-height:1.05;
     }
     .event-more{
       margin-top:5px;
@@ -346,10 +356,12 @@
       border-left:5px solid var(--green);
       border-radius:14px;
       padding:11px 12px;
-      background:#fff;
+      background:var(--event-bg, #fff);
+      border-color:var(--event-border, var(--line));
+      border-left-color:var(--event-color, var(--green));
     }
     .agenda-item.methodologie{
-      border-left-color:var(--gold);
+      border-left-color:var(--event-color, var(--gold));
     }
     .agenda-item strong{
       display:block;
@@ -517,7 +529,9 @@
       border-left:5px solid var(--green);
       border-radius:14px;
       padding:12px;
-      background:#fff;
+      background:var(--event-bg, #fff);
+      border-color:var(--event-border, var(--line));
+      border-left-color:var(--event-color, var(--green));
     }
     .session-item strong{
       display:block;
@@ -557,6 +571,16 @@
       border-radius:12px;
       background:#fff;
       color:var(--dark);
+      font-weight:1000;
+      cursor:pointer;
+      padding:8px 12px;
+    }
+    .event-delete-button{
+      min-height:40px;
+      border:1px solid #ffd0d0;
+      border-radius:12px;
+      background:#fff5f5;
+      color:#b42318;
       font-weight:1000;
       cursor:pointer;
       padding:8px 12px;
@@ -989,6 +1013,7 @@
         {teamId:"team-u19", name:"U19", category:"U19"},
         {teamId:"team-r1", name:"R1", category:"SENIORS"}
       ];
+      const TEAM_COLORS = ["#1d995b","#0f766e","#2563eb","#7c3aed","#c2410c","#be123c","#b45309","#047857"];
       let currentMonth = new Date();
       let selectedAttendanceEventId = "";
       let calendarTeamFilterIds = new Set();
@@ -1055,6 +1080,25 @@
       }
       function teamById(teamId){
         return officialTeams().find(team => String(team.teamId) === String(teamId)) || null;
+      }
+      function teamColorIndex(teamId){
+        const teams = officialTeams();
+        const index = teams.findIndex(team => String(team.teamId) === String(teamId));
+        if(index >= 0) return index % TEAM_COLORS.length;
+        return Math.abs(String(teamId || "sans-equipe").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0)) % TEAM_COLORS.length;
+      }
+      function hexToRgb(hex){
+        const clean = String(hex || "").replace("#", "");
+        const value = parseInt(clean.length === 3 ? clean.split("").map(char => char + char).join("") : clean, 16);
+        return Number.isFinite(value) ? `${(value >> 16) & 255},${(value >> 8) & 255},${value & 255}` : "29,153,91";
+      }
+      function eventStyle(event){
+        const color = TEAM_COLORS[teamColorIndex(event?.teamId)];
+        const rgb = hexToRgb(color);
+        return `--event-color:${color};--event-border:rgba(${rgb},.28);--event-bg:rgba(${rgb},.08)`;
+      }
+      function eventTeamLabel(event){
+        return teamById(event?.teamId)?.name || event?.team || event?.equipe || "";
       }
       function eventTeamId(event){
         const direct = event?.teamId || event?.team_id || event?.teamSnapshot?.teamId || event?.sessionSnapshot?.teamId || "";
@@ -1195,8 +1239,9 @@
           date.setDate(start.getDate() + i);
           const dayEvents = events.filter(event => sameDay(event.date, date));
           const chips = dayEvents.slice(0,3).map(event => `
-            <span class="event-chip ${event.source}" title="${esc(event.title)}">
+            <span class="event-chip ${event.source}" style="${esc(eventStyle(event))}" title="${esc(event.title)} · ${esc(eventTeamLabel(event))}">
               ${esc(event.title)}
+              ${eventTeamLabel(event) ? `<small>${esc(eventTeamLabel(event))}</small>` : ""}
             </span>
           `).join("");
           const more = dayEvents.length > 3 ? `<div class="event-more">+${dayEvents.length - 3} autre(s)</div>` : "";
@@ -1240,7 +1285,7 @@
           return;
         }
         list.innerHTML = upcoming.map(event => `
-          <article class="agenda-item ${event.source}">
+          <article class="agenda-item ${event.source}" style="${esc(eventStyle(event))}">
             <strong>${esc(event.title)}</strong>
             <div class="agenda-meta">
               ${String(event.date.getDate()).padStart(2,"0")}/${String(event.date.getMonth()+1).padStart(2,"0")}/${event.date.getFullYear()}
@@ -1345,6 +1390,18 @@
           comment:""
         };
       }
+      function deletePresenceEvent(eventId){
+        const events = loadPresenceEvents();
+        const event = events.find(item => item.id === eventId);
+        if(!event) return;
+        const label = `${typeLabel(event.type)} du ${event.date}${event.team ? " · " + event.team : ""}`;
+        if(!confirm(`Supprimer définitivement cet événement ?\n\n${label}`)) return;
+        savePresenceEvents(events.filter(item => item.id !== eventId));
+        if(selectedAttendanceEventId === eventId) selectedAttendanceEventId = "";
+        render();
+        renderSessionList();
+        setSessionMessage("Événement supprimé.", "success");
+      }
       function emptyAttendanceForEvent(teamId, dateValue, duration){
         return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => [player.playerId, {
           status:"present",
@@ -1365,7 +1422,7 @@
           return;
         }
         list.innerHTML = events.map(event => `
-          <article class="session-item" data-event-id="${esc(event.id)}">
+          <article class="session-item" data-event-id="${esc(event.id)}" style="${esc(eventStyle(event))}">
             <div>
               <strong>${esc(typeLabel(event.type))}</strong>
               <div class="session-item-meta">
@@ -1376,6 +1433,7 @@
             <div class="event-actions">
               <span class="session-type">${esc(typeLabel(event.type))}</span>
               <button class="event-open-button ${event.id === selectedAttendanceEventId ? "active" : ""}" type="button" data-open-attendance="${esc(event.id)}">Feuille de présence</button>
+              <button class="event-delete-button" type="button" data-delete-event="${esc(event.id)}">Supprimer</button>
             </div>
           </article>
         `).join("");
@@ -1557,6 +1615,11 @@
         document.getElementById("sessionRecurrence")?.addEventListener("change", updateRecurrenceUi);
         document.getElementById("sessionRecurrenceEnd")?.addEventListener("change", updateRecurrenceUi);
         document.getElementById("sessionList")?.addEventListener("click", event => {
+          const deleteButton = event.target.closest("[data-delete-event]");
+          if(deleteButton){
+            deletePresenceEvent(deleteButton.dataset.deleteEvent || "");
+            return;
+          }
           const button = event.target.closest("[data-open-attendance]");
           if(!button) return;
           selectedAttendanceEventId = button.dataset.openAttendance || "";
