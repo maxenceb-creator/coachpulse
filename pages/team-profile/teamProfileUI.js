@@ -55,7 +55,10 @@
       ['Taux victoire', `${kpis.winRate}%`], ['Sans défaite', `${kpis.unbeatenRate}%`], ['Pts / match', kpis.pointsPerMatch],
       ['Buts pour', kpis.goalsFor], ['Buts contre', kpis.goalsAgainst], ['Diff.', kpis.goalDiff],
       ['Clean sheets', kpis.cleanSheets], ['Série', kpis.currentSeries], ['Séances', kpis.sessions || 0],
-      ['Présences', kpis.attendance || 0], ['Minutes présence', kpis.attendanceMinutes || 0]
+      ['Présence moy.', `${kpis.presenceAvgRate || 0}%`], ['Min moy./joueuse', kpis.attendanceAvgMinutesPerPlayer || 0],
+      ['Prés. moy./événement', kpis.presentAvgPerEvent || 0], ['Abs. moy./événement', kpis.absentAvgPerEvent || 0],
+      ['Retards moy.', kpis.lateAvgPerEvent || 0], ['Indispo moy.', kpis.unavailableAvgPerEvent || 0],
+      ['Blessées moy.', kpis.injuredAvgPerEvent || 0]
     ];
     return `<section class="team-kpis">${items.map(([label,value]) => `<article><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}</section>`;
   }
