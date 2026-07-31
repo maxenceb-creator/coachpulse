@@ -774,22 +774,92 @@
       box-shadow:0 0 0 4px rgba(0,132,61,.12);
     }
     .attendance-status-button.active{
-      color:#fff;
+      background:var(--code-bg, var(--green));
+      border-color:var(--code-color, var(--green));
+      color:var(--code-color, #fff);
     }
     .attendance-status-button.present.active{
-      background:var(--green);
-      border-color:var(--green);
+      background:var(--code-bg, var(--green));
+      border-color:var(--code-color, var(--green));
+      color:var(--code-color, #fff);
     }
     .attendance-status-button.absent.active,
     .attendance-status-button.sick.active,
     .attendance-status-button.injured.active{
-      background:#b42318;
-      border-color:#b42318;
+      background:var(--code-bg, #ffe1e1);
+      border-color:var(--code-color, #b42318);
+      color:var(--code-color, #b42318);
     }
     .attendance-status-button.late.active{
-      background:var(--gold);
-      border-color:#b7953c;
-      color:#123c2a;
+      background:var(--code-bg, var(--gold));
+      border-color:var(--code-color, #b7953c);
+      color:var(--code-color, #123c2a);
+    }
+    .attendance-code-grid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(220px,1fr));
+      gap:12px;
+      padding:16px 18px 0;
+    }
+    .attendance-code-card{
+      display:grid;
+      grid-template-columns:auto minmax(0,1fr) auto;
+      gap:12px;
+      align-items:center;
+      min-height:64px;
+      border:1px solid #d9e8df;
+      border-radius:16px;
+      background:#fff;
+      padding:12px 14px;
+    }
+    .attendance-code-badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:42px;
+      height:42px;
+      border-radius:999px;
+      background:var(--code-bg, #eef8f2);
+      color:var(--code-color, var(--dark));
+      font-weight:1000;
+      padding:0 10px;
+      white-space:nowrap;
+    }
+    .attendance-code-card strong{
+      color:var(--dark);
+      font-size:16px;
+    }
+    .attendance-code-actions{
+      display:flex;
+      gap:7px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .attendance-code-actions button{
+      min-height:36px;
+      border:1px solid #d6e7dd;
+      border-radius:10px;
+      background:#fff;
+      color:var(--dark);
+      font-size:12px;
+      font-weight:1000;
+      cursor:pointer;
+      padding:7px 10px;
+    }
+    .attendance-code-actions button.danger{
+      border-color:#ffd0d0;
+      background:#fff5f5;
+      color:#b42318;
+    }
+    .attendance-code-form{
+      display:grid;
+      gap:12px;
+      padding:16px 18px 18px;
+      border-top:1px solid var(--line);
+      margin-top:16px;
+    }
+    .attendance-code-form .form-row{
+      grid-template-columns:minmax(100px,.35fr) minmax(180px,1fr) minmax(120px,.45fr);
     }
     .attendance-minutes,
     .attendance-comment{
@@ -1202,6 +1272,7 @@
       .reports-grid,
       .report-sections,
       .prevention-grid,
+      .attendance-code-grid,
       .settings-grid{
         grid-template-columns:1fr;
       }
@@ -1489,60 +1560,45 @@
         <div class="kpi-card"><strong id="settingsTeamsCount">0</strong><span>Équipes</span></div>
         <div class="kpi-card"><strong id="settingsEventsCount">0</strong><span>Événements</span></div>
         <div class="kpi-card"><strong id="settingsCloudState">Local</strong><span>Cloud</span></div>
-        <div class="kpi-card"><strong id="settingsDefaultType">-</strong><span>Type défaut</span></div>
+        <div class="kpi-card"><strong id="settingsCodesCount">0</strong><span>Codes</span></div>
       </div>
       <div class="settings-grid">
         <article class="settings-card">
           <header>
-            <h2>Création rapide</h2>
-            <p>Ces valeurs préremplissent le formulaire de création dans l'onglet Séances.</p>
+            <h2>Codes utilisés</h2>
+            <p>Codes affichés dans les feuilles de présence. Ils restent reliés aux statuts enregistrés par joueuse.</p>
           </header>
-          <form id="presenceSettingsForm" class="session-form">
-            <div class="field">
-              <label for="settingsDefaultTeam">Équipe par défaut</label>
-              <select id="settingsDefaultTeam" name="defaultTeamId">
-                <option value="">Aucune équipe par défaut</option>
-              </select>
-            </div>
+          <div id="attendanceCodeList" class="attendance-code-grid"></div>
+          <form id="attendanceCodeForm" class="attendance-code-form">
+            <input id="attendanceCodeId" name="codeId" type="hidden">
             <div class="form-row">
               <div class="field">
-                <label for="settingsDefaultStart">Début par défaut</label>
-                <input id="settingsDefaultStart" name="defaultStartTime" type="time">
+                <label for="attendanceCodeShort">Code</label>
+                <input id="attendanceCodeShort" name="short" type="text" maxlength="4" placeholder="P">
               </div>
               <div class="field">
-                <label for="settingsDefaultEnd">Fin par défaut</label>
-                <input id="settingsDefaultEnd" name="defaultEndTime" type="time">
+                <label for="attendanceCodeLabel">Libellé</label>
+                <input id="attendanceCodeLabel" name="label" type="text" placeholder="Présente">
               </div>
-            </div>
-            <div class="form-row">
               <div class="field">
-                <label for="settingsDefaultTypeSelect">Type par défaut</label>
-                <select id="settingsDefaultTypeSelect" name="defaultType">
-                  <option value="entrainement">Entraînement</option>
-                  <option value="match">Match</option>
-                  <option value="tournoi">Tournoi</option>
-                  <option value="futsal">Futsal</option>
-                  <option value="test">Test</option>
+                <label for="attendanceCodeTone">Couleur</label>
+                <select id="attendanceCodeTone" name="tone">
+                  <option value="green">Vert</option>
+                  <option value="gold">Or</option>
+                  <option value="red">Rouge</option>
+                  <option value="orange">Orange</option>
+                  <option value="gray">Gris</option>
+                  <option value="navy">Bleu nuit</option>
+                  <option value="purple">Violet</option>
+                  <option value="blue">Bleu</option>
                 </select>
               </div>
-              <div class="field">
-                <label for="settingsDefaultRecurrence">Récurrence par défaut</label>
-                <select id="settingsDefaultRecurrence" name="defaultRecurrence">
-                  <option value="none">Aucune récurrence</option>
-                  <option value="weekly">Chaque semaine</option>
-                  <option value="biweekly">Toutes les 2 semaines</option>
-                  <option value="monthly">Tous les mois</option>
-                </select>
-              </div>
-            </div>
-            <div class="field">
-              <label for="settingsPreventionKeywords">Mots à surveiller</label>
-              <input id="settingsPreventionKeywords" name="preventionKeywords" type="text" placeholder="douleur, fatigue, blessure, reprise">
             </div>
             <div class="form-actions">
               <div id="settingsMessage" class="settings-message" role="status"></div>
-              <button id="resetPresenceSettings" type="button">Réinitialiser</button>
-              <button class="primary" type="submit">Enregistrer</button>
+              <button id="cancelAttendanceCodeEdit" type="button" hidden>Annuler</button>
+              <button id="resetAttendanceCodes" type="button">Réinitialiser</button>
+              <button id="attendanceCodeSubmit" class="primary" type="submit">Ajouter le code</button>
             </div>
           </form>
         </article>
@@ -1578,6 +1634,26 @@
         {teamId:"team-r1", name:"R1", category:"SENIORS"}
       ];
       const TEAM_COLORS = ["#1d995b","#0f766e","#2563eb","#7c3aed","#c2410c","#be123c","#b45309","#047857"];
+      const DEFAULT_ATTENDANCE_CODES = [
+        {id:"present", label:"Présente", short:"P", tone:"green"},
+        {id:"late", label:"Retard", short:"R", tone:"gold"},
+        {id:"absent", label:"Absence non justifiée", short:"ANJ", tone:"red"},
+        {id:"excused", label:"Absence justifiée", short:"AJ", tone:"orange"},
+        {id:"sick", label:"Malade", short:"M", tone:"gray"},
+        {id:"injured", label:"Blessée", short:"B", tone:"navy"},
+        {id:"pole", label:"Pôle Espoir", short:"PO", tone:"purple"},
+        {id:"district", label:"District", short:"D", tone:"blue"}
+      ];
+      const ATTENDANCE_CODE_TONES = {
+        green:{bg:"#dcfce7", color:"#118048"},
+        gold:{bg:"#f7e4aa", color:"#8a6500"},
+        red:{bg:"#ffe1e1", color:"#dc2626"},
+        orange:{bg:"#ffedd5", color:"#ea580c"},
+        gray:{bg:"#e5e7eb", color:"#374151"},
+        navy:{bg:"#111827", color:"#ffffff"},
+        purple:{bg:"#ede9fe", color:"#6d28d9"},
+        blue:{bg:"#dbeafe", color:"#2563eb"}
+      };
       let calendarPageMonth = new Date();
       let selectedCalendarDate = isoDate(new Date());
       let selectedAttendanceEventId = "";
@@ -1593,7 +1669,8 @@
         defaultStartTime:"18:00",
         defaultEndTime:"19:30",
         defaultRecurrence:"none",
-        preventionKeywords:"douleur, fatigue, blessure, reprise, gêne, gene, alerte, soin, kiné"
+        preventionKeywords:"douleur, fatigue, blessure, reprise, gêne, gene, alerte, soin, kiné",
+        attendanceCodes:DEFAULT_ATTENDANCE_CODES
       };
 
       function esc(value){
@@ -1610,10 +1687,48 @@
         }
       }
       function presenceSettings(){
-        return {...DEFAULT_PRESENCE_SETTINGS, ...readJson(PRESENCE_SETTINGS_KEY, {})};
+        const saved = readJson(PRESENCE_SETTINGS_KEY, {});
+        return {
+          ...DEFAULT_PRESENCE_SETTINGS,
+          ...saved,
+          attendanceCodes:normalizeAttendanceCodes(saved.attendanceCodes || DEFAULT_ATTENDANCE_CODES)
+        };
       }
       function savePresenceSettings(settings){
-        localStorage.setItem(PRESENCE_SETTINGS_KEY, JSON.stringify({...DEFAULT_PRESENCE_SETTINGS, ...settings}));
+        const next = {
+          ...DEFAULT_PRESENCE_SETTINGS,
+          ...settings,
+          attendanceCodes:normalizeAttendanceCodes(settings.attendanceCodes || DEFAULT_ATTENDANCE_CODES)
+        };
+        localStorage.setItem(PRESENCE_SETTINGS_KEY, JSON.stringify(next));
+      }
+      function slugCode(value, fallback="code"){
+        return String(value || fallback)
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "") || fallback;
+      }
+      function normalizeAttendanceCodes(codes){
+        const rows = Array.isArray(codes) ? codes : DEFAULT_ATTENDANCE_CODES;
+        const seen = new Set();
+        return rows.map((code, index) => {
+          const baseId = slugCode(code.id || code.label || code.short, `code-${index + 1}`);
+          let id = baseId;
+          let suffix = 2;
+          while(seen.has(id)){
+            id = `${baseId}-${suffix}`;
+            suffix += 1;
+          }
+          seen.add(id);
+          return {
+            id,
+            label:String(code.label || code.short || "Code").trim(),
+            short:String(code.short || code.label || "?").trim().slice(0,4).toUpperCase(),
+            tone:ATTENDANCE_CODE_TONES[code.tone] ? code.tone : "green"
+          };
+        }).filter(code => code.label && code.short);
       }
       function parseDate(value){
         if(!value) return null;
@@ -1982,25 +2097,94 @@
         if(current) select.value = current;
       }
       function fillSettingsForm(){
-        const form = document.getElementById("presenceSettingsForm");
+        resetAttendanceCodeForm();
+      }
+      function attendanceCodeStyle(code){
+        const tone = ATTENDANCE_CODE_TONES[code.tone] || ATTENDANCE_CODE_TONES.green;
+        return `--code-bg:${tone.bg};--code-color:${tone.color}`;
+      }
+      function renderAttendanceCodeList(){
+        const list = document.getElementById("attendanceCodeList");
+        if(!list) return;
+        const codes = attendanceStatuses();
+        list.innerHTML = codes.length ? codes.map(code => `
+          <article class="attendance-code-card" data-code-id="${esc(code.id)}">
+            <span class="attendance-code-badge" style="${esc(attendanceCodeStyle(code))}">${esc(code.short)}</span>
+            <strong>${esc(code.label)}</strong>
+            <div class="attendance-code-actions">
+              <button type="button" data-edit-attendance-code="${esc(code.id)}">Modifier</button>
+              <button class="danger" type="button" data-delete-attendance-code="${esc(code.id)}">Supprimer</button>
+            </div>
+          </article>
+        `).join("") : '<div class="empty-state">Aucun code configuré.</div>';
+      }
+      function resetAttendanceCodeForm(){
+        const form = document.getElementById("attendanceCodeForm");
         if(!form) return;
+        form.reset();
+        form.codeId.value = "";
+        form.tone.value = "green";
+        const submit = document.getElementById("attendanceCodeSubmit");
+        const cancel = document.getElementById("cancelAttendanceCodeEdit");
+        if(submit) submit.textContent = "Ajouter le code";
+        if(cancel) cancel.hidden = true;
+      }
+      function editAttendanceCode(codeId){
+        const code = attendanceStatuses().find(item => item.id === codeId);
+        const form = document.getElementById("attendanceCodeForm");
+        if(!code || !form) return;
+        form.codeId.value = code.id;
+        form.short.value = code.short;
+        form.label.value = code.label;
+        form.tone.value = code.tone;
+        const submit = document.getElementById("attendanceCodeSubmit");
+        const cancel = document.getElementById("cancelAttendanceCodeEdit");
+        if(submit) submit.textContent = "Enregistrer";
+        if(cancel) cancel.hidden = false;
+        form.scrollIntoView({behavior:"smooth", block:"nearest"});
+      }
+      function saveAttendanceCodeFromForm(form){
         const settings = presenceSettings();
-        populateSettingsTeamSelect();
-        form.defaultTeamId.value = settings.defaultTeamId || "";
-        form.defaultStartTime.value = settings.defaultStartTime || "";
-        form.defaultEndTime.value = settings.defaultEndTime || "";
-        form.defaultType.value = settings.defaultType || "entrainement";
-        form.defaultRecurrence.value = settings.defaultRecurrence || "none";
-        form.preventionKeywords.value = settings.preventionKeywords || "";
+        const short = String(form.short.value || "").trim().toUpperCase();
+        const label = String(form.label.value || "").trim();
+        if(!short || !label){
+          setSettingsMessage("Renseigne au minimum le code et le libellé.", "error");
+          return;
+        }
+        const id = form.codeId.value || slugCode(label || short);
+        const nextCode = {id, short, label, tone:form.tone.value || "green"};
+        const existingCodes = settings.attendanceCodes || [];
+        const exists = existingCodes.some(code => code.id === id);
+        const attendanceCodes = exists
+          ? existingCodes.map(code => code.id === id ? nextCode : code)
+          : [...existingCodes, nextCode];
+        savePresenceSettings({...settings, attendanceCodes});
+        resetAttendanceCodeForm();
+        render();
+        renderSessionList();
+        setSettingsMessage(exists ? "Code modifié." : "Code ajouté.", "success");
+      }
+      function deleteAttendanceCode(codeId){
+        const settings = presenceSettings();
+        const codes = settings.attendanceCodes || [];
+        if(codes.length <= 1){
+          setSettingsMessage("Il faut conserver au moins un code.", "error");
+          return;
+        }
+        savePresenceSettings({...settings, attendanceCodes:codes.filter(code => code.id !== codeId)});
+        resetAttendanceCodeForm();
+        render();
+        renderSessionList();
+        setSettingsMessage("Code supprimé.", "success");
       }
       function renderSettings(){
         const teams = officialTeams();
         const settings = presenceSettings();
-        populateSettingsTeamSelect();
         setText("settingsTeamsCount", teams.length);
         setText("settingsEventsCount", loadPresenceEvents().length);
         setText("settingsCloudState", cloudReady ? "OK" : "Local");
-        setText("settingsDefaultType", typeLabel(settings.defaultType));
+        setText("settingsCodesCount", settings.attendanceCodes.length);
+        renderAttendanceCodeList();
         const list = document.getElementById("settingsTeamList");
         if(!list) return;
         list.innerHTML = teams.length ? teams.map(team => `
@@ -2128,16 +2312,20 @@
         node.style.color = tone === "success" ? "var(--green)" : tone === "error" ? "#b42318" : "#66756d";
       }
       function attendanceStatuses(){
-        return [
-          {id:"present", label:"Présente", short:"P"},
-          {id:"absent", label:"Absente", short:"A"},
-          {id:"late", label:"En retard", short:"R"},
-          {id:"sick", label:"Malade", short:"M"},
-          {id:"injured", label:"Blessée", short:"B"}
-        ];
+        return presenceSettings().attendanceCodes;
+      }
+      function attendanceCodeTone(statusId){
+        const tone = attendanceStatuses().find(status => status.id === statusId)?.tone || "green";
+        return ATTENDANCE_CODE_TONES[tone] || ATTENDANCE_CODE_TONES.green;
+      }
+      function isPresentStatus(status){
+        return ["present","late"].includes(status);
+      }
+      function isAbsentStatus(status){
+        return !isPresentStatus(status);
       }
       function defaultAttendanceMinutes(status, event){
-        return status === "present" || status === "late" ? Number(event.duration || 0) : 0;
+        return isPresentStatus(status) ? Number(event.duration || 0) : 0;
       }
       function attendanceEntry(event, playerId){
         const raw = event.attendance?.[playerId];
@@ -2252,8 +2440,8 @@
         return presenceStatsFromEntries(attendanceEntries(event));
       }
       function presenceStatsFromEntries(entries){
-        const present = entries.filter(entry => entry.status === "present" || entry.status === "late").length;
-        const absent = entries.filter(entry => entry.status === "absent").length;
+        const present = entries.filter(entry => isPresentStatus(entry.status)).length;
+        const absent = entries.filter(entry => isAbsentStatus(entry.status)).length;
         const late = entries.filter(entry => entry.status === "late").length;
         const unavailable = entries.filter(entry => entry.status === "sick" || entry.status === "injured").length;
         const minutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
@@ -2316,8 +2504,8 @@
             row.total += 1;
             row.minutes += Number(entry.minutes || 0);
             if(entry.playerId) row.playerIds.add(entry.playerId);
-            if(entry.status === "present" || entry.status === "late") row.present += 1;
-            if(entry.status === "absent") row.absent += 1;
+            if(isPresentStatus(entry.status)) row.present += 1;
+            if(isAbsentStatus(entry.status)) row.absent += 1;
           });
           teamMap.set(key, row);
         });
@@ -2356,8 +2544,8 @@
           const row = playerMap.get(key) || {playerId:key, name:player ? playerName(player) : key, team:player?.team || entry.event.team || "", present:0, absent:0, total:0, minutes:0};
           row.total += 1;
           row.minutes += Number(entry.minutes || 0);
-          if(entry.status === "present" || entry.status === "late") row.present += 1;
-          if(entry.status === "absent") row.absent += 1;
+          if(isPresentStatus(entry.status)) row.present += 1;
+          if(isAbsentStatus(entry.status)) row.absent += 1;
           playerMap.set(key, row);
         });
         const playerRows = document.getElementById("reportsPlayerRows");
@@ -2410,15 +2598,15 @@
         const presenceEvents = events.filter(event => event.source === "presences" && event.id);
         renderPlayerFilter("preventionTeamFilters", preventionPlayerFilterIds, presenceEvents);
         const entries = filterEntriesByPlayers(preventionEntries(events), preventionPlayerFilterIds);
-        const present = entries.filter(entry => entry.status === "present" || entry.status === "late").length;
+        const present = entries.filter(entry => isPresentStatus(entry.status)).length;
         const totalMinutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
         const grouped = new Map();
         entries.forEach(entry => {
           const key = entry.playerId;
           const row = grouped.get(key) || {playerId:key, name:entry.playerName, team:entry.team, minutes:0, present:0, absent:0, late:0, sick:0, injured:0, comments:[]};
           row.minutes += Number(entry.minutes || 0);
-          row.present += entry.status === "present" ? 1 : 0;
-          row.absent += entry.status === "absent" ? 1 : 0;
+          row.present += isPresentStatus(entry.status) ? 1 : 0;
+          row.absent += isAbsentStatus(entry.status) ? 1 : 0;
           row.late += entry.status === "late" ? 1 : 0;
           row.sick += entry.status === "sick" ? 1 : 0;
           row.injured += entry.status === "injured" ? 1 : 0;
@@ -2543,7 +2731,7 @@
           const previous = previousEvent?.attendance?.[player.playerId] ? attendanceEntry(previousEvent, player.playerId) : null;
           return [player.playerId, previous ? {
             ...previous,
-            minutes:previous.status === "present" || previous.status === "late"
+            minutes:isPresentStatus(previous.status)
               ? Number(previous.minutes || duration || 0)
               : Number(previous.minutes || 0)
           } : {
@@ -2689,11 +2877,20 @@
           const entry = attendanceEntry(event, player.playerId);
           counts[entry.status] = (counts[entry.status] || 0) + 1;
         });
+        const statusKpis = attendanceStatuses().map(status => `
+          <div class="attendance-kpi">
+            <strong>${counts[status.id] || 0}</strong>
+            <span>${esc(status.label)}</span>
+          </div>
+        `).join("");
         const rows = players.map(player => {
           const entry = attendanceEntry(event, player.playerId);
-          const statusButtons = attendanceStatuses().map(status => `
-            <button class="attendance-status-button ${esc(status.id)} ${entry.status === status.id ? "active" : ""}" type="button" data-attendance-status="${esc(status.id)}" data-attendance-event="${esc(event.id)}" data-player-id="${esc(player.playerId)}" aria-label="${esc(status.label)} pour ${esc(playerName(player))}" aria-pressed="${entry.status === status.id ? "true" : "false"}" title="${esc(status.label)}">${esc(status.short)}</button>
-          `).join("");
+          const statusButtons = attendanceStatuses().map(status => {
+            const tone = attendanceCodeTone(status.id);
+            return `
+              <button class="attendance-status-button ${esc(status.id)} ${entry.status === status.id ? "active" : ""}" style="--code-bg:${esc(tone.bg)};--code-color:${esc(tone.color)}" type="button" data-attendance-status="${esc(status.id)}" data-attendance-event="${esc(event.id)}" data-player-id="${esc(player.playerId)}" aria-label="${esc(status.label)} pour ${esc(playerName(player))}" aria-pressed="${entry.status === status.id ? "true" : "false"}" title="${esc(status.label)}">${esc(status.short)}</button>
+            `;
+          }).join("");
           return `
             <div class="attendance-row" data-player-id="${esc(player.playerId)}">
               <div class="attendance-player">
@@ -2719,11 +2916,7 @@
           </header>
           <div class="attendance-kpis" aria-label="Résumé des statuts de présence">
             <div class="attendance-kpi"><strong>${players.length}</strong><span>Joueuses</span></div>
-            <div class="attendance-kpi"><strong>${counts.present || 0}</strong><span>Présentes</span></div>
-            <div class="attendance-kpi"><strong>${counts.absent || 0}</strong><span>Absentes</span></div>
-            <div class="attendance-kpi"><strong>${counts.late || 0}</strong><span>En retard</span></div>
-            <div class="attendance-kpi"><strong>${counts.sick || 0}</strong><span>Malades</span></div>
-            <div class="attendance-kpi"><strong>${counts.injured || 0}</strong><span>Blessées</span></div>
+            ${statusKpis}
           </div>
           <div class="attendance-sheet">
             <div class="attendance-row attendance-row-header">
@@ -2800,27 +2993,32 @@
       }
       function initSettings(){
         fillSettingsForm();
-        document.getElementById("presenceSettingsForm")?.addEventListener("submit", event => {
+        document.getElementById("attendanceCodeForm")?.addEventListener("submit", event => {
           event.preventDefault();
-          const form = event.currentTarget;
-          savePresenceSettings({
-            defaultTeamId:form.defaultTeamId.value || "",
-            defaultStartTime:form.defaultStartTime.value || "",
-            defaultEndTime:form.defaultEndTime.value || "",
-            defaultType:form.defaultType.value || "entrainement",
-            defaultRecurrence:form.defaultRecurrence.value || "none",
-            preventionKeywords:form.preventionKeywords.value || DEFAULT_PRESENCE_SETTINGS.preventionKeywords
-          });
-          applySessionDefaults(false);
-          render();
-          setSettingsMessage("Paramètres enregistrés.", "success");
+          saveAttendanceCodeFromForm(event.currentTarget);
         });
-        document.getElementById("resetPresenceSettings")?.addEventListener("click", () => {
-          savePresenceSettings(DEFAULT_PRESENCE_SETTINGS);
-          fillSettingsForm();
-          applySessionDefaults(true);
+        document.getElementById("attendanceCodeList")?.addEventListener("click", event => {
+          const editButton = event.target.closest("[data-edit-attendance-code]");
+          if(editButton){
+            editAttendanceCode(editButton.dataset.editAttendanceCode || "");
+            return;
+          }
+          const deleteButton = event.target.closest("[data-delete-attendance-code]");
+          if(deleteButton){
+            deleteAttendanceCode(deleteButton.dataset.deleteAttendanceCode || "");
+          }
+        });
+        document.getElementById("cancelAttendanceCodeEdit")?.addEventListener("click", () => {
+          resetAttendanceCodeForm();
+          setSettingsMessage("");
+        });
+        document.getElementById("resetAttendanceCodes")?.addEventListener("click", () => {
+          const settings = presenceSettings();
+          savePresenceSettings({...settings, attendanceCodes:DEFAULT_ATTENDANCE_CODES});
+          resetAttendanceCodeForm();
           render();
-          setSettingsMessage("Paramètres réinitialisés.", "success");
+          renderSessionList();
+          setSettingsMessage("Codes réinitialisés.", "success");
         });
       }
       function initSessions(){
