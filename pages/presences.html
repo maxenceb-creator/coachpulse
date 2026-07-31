@@ -126,6 +126,10 @@
       grid-template-columns:repeat(4,minmax(120px,1fr));
       gap:10px;
     }
+    .page-kpis{
+      grid-column:1/-1;
+      margin-bottom:16px;
+    }
     .kpi-card{
       padding:14px 16px;
       border-left:5px solid var(--green);
@@ -1279,18 +1283,12 @@
       </article>
     </section>
 
-    <section id="panel-calendar" class="presence-panel calendar-page active" aria-labelledby="calendarPageTitle">
-      <div class="dashboard-hero">
-        <div>
-          <h1 id="calendarPageTitle">Calendrier Présences</h1>
-          <p>Planning complet des événements par équipe. Clique sur une journée pour créer un événement ou consulter son détail.</p>
-        </div>
-        <div class="kpi-grid" aria-label="Résumé du calendrier détaillé">
-          <div class="kpi-card"><strong id="calendarPageTotal">0</strong><span>Événements</span></div>
-          <div class="kpi-card"><strong id="calendarPageMonth">0</strong><span>Ce mois</span></div>
-          <div class="kpi-card"><strong id="calendarPageSelectedCount">0</strong><span>Jour choisi</span></div>
-          <div class="kpi-card"><strong id="calendarPageNext">-</strong><span>Prochain</span></div>
-        </div>
+    <section id="panel-calendar" class="presence-panel calendar-page active" aria-label="Calendrier Présences">
+      <div class="kpi-grid page-kpis" aria-label="Résumé du calendrier détaillé">
+        <div class="kpi-card"><strong id="calendarPageTotal">0</strong><span>Événements</span></div>
+        <div class="kpi-card"><strong id="calendarPageMonth">0</strong><span>Ce mois</span></div>
+        <div class="kpi-card"><strong id="calendarPageSelectedCount">0</strong><span>Jour choisi</span></div>
+        <div class="kpi-card"><strong id="calendarPageNext">-</strong><span>Prochain</span></div>
       </div>
       <div class="calendar-page-shell">
         <article class="calendar-card" aria-label="Calendrier détaillé des événements programmés">
@@ -1317,18 +1315,12 @@
         </aside>
       </div>
     </section>
-    <section id="panel-reports" class="presence-panel reports-page" aria-labelledby="reportsTitle">
-      <div class="dashboard-hero">
-        <div>
-          <h1 id="reportsTitle">Bilans Présences</h1>
-          <p>Synthèse collective des événements, moyennes de présence et minutes moyennes par joueuse.</p>
-        </div>
-        <div class="kpi-grid" aria-label="Résumé des bilans de présence">
-          <div class="kpi-card"><strong id="reportsPresenceRate">0%</strong><span>Présence moy.</span></div>
-          <div class="kpi-card"><strong id="reportsSessions">0</strong><span>Séances</span></div>
-          <div class="kpi-card"><strong id="reportsPlayers">0</strong><span>Joueuses suivies</span></div>
-          <div class="kpi-card"><strong id="reportsMinutes">0</strong><span>Min moy./joueuse</span></div>
-        </div>
+    <section id="panel-reports" class="presence-panel reports-page" aria-label="Bilans Présences">
+      <div class="kpi-grid page-kpis" aria-label="Résumé des bilans de présence">
+        <div class="kpi-card"><strong id="reportsPresenceRate">0%</strong><span>Présence moy.</span></div>
+        <div class="kpi-card"><strong id="reportsSessions">0</strong><span>Séances</span></div>
+        <div class="kpi-card"><strong id="reportsPlayers">0</strong><span>Joueuses suivies</span></div>
+        <div class="kpi-card"><strong id="reportsMinutes">0</strong><span>Min moy./joueuse</span></div>
       </div>
       <div id="reportsTeamFilters" class="calendar-team-filter" aria-label="Filtrer les bilans par équipe"></div>
       <div class="reports-grid">
@@ -1375,18 +1367,12 @@
         </div>
       </article>
     </section>
-    <section id="panel-prevention" class="presence-panel prevention-page" aria-labelledby="preventionTitle">
-      <div class="dashboard-hero">
-        <div>
-          <h1 id="preventionTitle">Prévention & charge</h1>
-          <p>Repérage simple des joueuses à surveiller à partir des présences, minutes, statuts malade/blessée et commentaires de séance.</p>
-        </div>
-        <div class="kpi-grid" aria-label="Résumé prévention">
-          <div class="kpi-card"><strong id="preventionTotalLoad">0</strong><span>Minutes suivies</span></div>
-          <div class="kpi-card"><strong id="preventionAvgLoad">0</strong><span>Moyenne joueuse</span></div>
-          <div class="kpi-card"><strong id="preventionAlerts">0</strong><span>Alertes</span></div>
-          <div class="kpi-card"><strong id="preventionAvailability">0%</strong><span>Disponibilité</span></div>
-        </div>
+    <section id="panel-prevention" class="presence-panel prevention-page" aria-label="Prévention Présences">
+      <div class="kpi-grid page-kpis" aria-label="Résumé prévention">
+        <div class="kpi-card"><strong id="preventionTotalLoad">0</strong><span>Minutes suivies</span></div>
+        <div class="kpi-card"><strong id="preventionAvgLoad">0</strong><span>Moyenne joueuse</span></div>
+        <div class="kpi-card"><strong id="preventionAlerts">0</strong><span>Alertes</span></div>
+        <div class="kpi-card"><strong id="preventionAvailability">0%</strong><span>Disponibilité</span></div>
       </div>
       <div id="preventionTeamFilters" class="calendar-team-filter" aria-label="Filtrer la prévention par équipe"></div>
       <div class="prevention-grid">
@@ -1413,18 +1399,12 @@
         </article>
       </div>
     </section>
-    <section id="panel-settings" class="presence-panel settings-page" aria-labelledby="settingsTitle">
-      <div class="dashboard-hero">
-        <div>
-          <h1 id="settingsTitle">Paramètres Présences</h1>
-          <p>Réglages locaux du module pour créer les événements plus vite, en gardant les équipes reliées aux `teamId` officiels.</p>
-        </div>
-        <div class="kpi-grid" aria-label="Résumé des réglages Présences">
-          <div class="kpi-card"><strong id="settingsTeamsCount">0</strong><span>Équipes</span></div>
-          <div class="kpi-card"><strong id="settingsEventsCount">0</strong><span>Événements</span></div>
-          <div class="kpi-card"><strong id="settingsCloudState">Local</strong><span>Cloud</span></div>
-          <div class="kpi-card"><strong id="settingsDefaultType">-</strong><span>Type défaut</span></div>
-        </div>
+    <section id="panel-settings" class="presence-panel settings-page" aria-label="Paramètres Présences">
+      <div class="kpi-grid page-kpis" aria-label="Résumé des réglages Présences">
+        <div class="kpi-card"><strong id="settingsTeamsCount">0</strong><span>Équipes</span></div>
+        <div class="kpi-card"><strong id="settingsEventsCount">0</strong><span>Événements</span></div>
+        <div class="kpi-card"><strong id="settingsCloudState">Local</strong><span>Cloud</span></div>
+        <div class="kpi-card"><strong id="settingsDefaultType">-</strong><span>Type défaut</span></div>
       </div>
       <div class="settings-grid">
         <article class="settings-card">
