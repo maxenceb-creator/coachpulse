@@ -18,6 +18,7 @@ const entries = [
   'connectors',
   'modules',
   'shared/services',
+  'shared/utils',
   'data'
 ];
 
