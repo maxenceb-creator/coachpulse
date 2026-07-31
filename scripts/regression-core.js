@@ -3,6 +3,7 @@ const assert = require('assert/strict');
 const players = require('../shared/services/players-service.js');
 const teams = require('../shared/services/teams-service.js');
 const permissions = require('../shared/services/permissions-service.js');
+const modules = require('../shared/utils/module-registry.js');
 
 function testPlayerIdsAndSeasons(){
   const raw = {
@@ -59,9 +60,23 @@ function testPermissions(){
   assert.equal(permissions.canPerformAction(admin, {id:'database'}, 'delete'), true);
 }
 
+function testModuleRegistry(){
+  const catalog = modules.moduleRegistry();
+  const ids = catalog.map(module => module.id);
+  assert(ids.includes('database'));
+  assert(ids.includes('playerProfile'));
+  assert(ids.includes('teamProfile'));
+  assert(ids.includes('tests-athletiques'));
+
+  const databaseTool = modules.moduleToTool(modules.getModule('database'));
+  assert.equal(databaseTool.admin, true);
+  assert.equal(databaseTool.src, 'pages/admin-database.html');
+}
+
 testPlayerIdsAndSeasons();
 testTeamIdsStayShared();
 testPlayerFilteringAndDedupe();
 testPermissions();
+testModuleRegistry();
 
 console.log('Core regression guards OK');
