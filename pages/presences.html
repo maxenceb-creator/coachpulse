@@ -1321,32 +1321,32 @@
       <div class="dashboard-hero">
         <div>
           <h1 id="reportsTitle">Bilans Présences</h1>
-          <p>Synthèse collective des événements, présences, absences, retards, maladies, blessures et minutes réalisées.</p>
+          <p>Synthèse collective des événements, moyennes de présence et minutes moyennes par joueuse.</p>
         </div>
         <div class="kpi-grid" aria-label="Résumé des bilans de présence">
-          <div class="kpi-card"><strong id="reportsPresenceRate">0%</strong><span>Taux présence</span></div>
+          <div class="kpi-card"><strong id="reportsPresenceRate">0%</strong><span>Présence moy.</span></div>
           <div class="kpi-card"><strong id="reportsSessions">0</strong><span>Séances</span></div>
           <div class="kpi-card"><strong id="reportsPlayers">0</strong><span>Joueuses suivies</span></div>
-          <div class="kpi-card"><strong id="reportsMinutes">0</strong><span>Minutes</span></div>
+          <div class="kpi-card"><strong id="reportsMinutes">0</strong><span>Min moy./joueuse</span></div>
         </div>
       </div>
       <div id="reportsTeamFilters" class="calendar-team-filter" aria-label="Filtrer les bilans par équipe"></div>
       <div class="reports-grid">
-        <div class="report-card"><strong id="reportsPresent">0</strong><span>Présences</span></div>
-        <div class="report-card"><strong id="reportsAbsent">0</strong><span>Absences</span></div>
-        <div class="report-card"><strong id="reportsLate">0</strong><span>Retards</span></div>
-        <div class="report-card"><strong id="reportsUnavailable">0</strong><span>Malade/blessée</span></div>
+        <div class="report-card"><strong id="reportsPresent">0</strong><span>Prés. moy./événement</span></div>
+        <div class="report-card"><strong id="reportsAbsent">0</strong><span>Abs. moy./événement</span></div>
+        <div class="report-card"><strong id="reportsLate">0</strong><span>Retards moy.</span></div>
+        <div class="report-card"><strong id="reportsUnavailable">0</strong><span>Indispo moy.</span></div>
       </div>
       <div class="report-sections">
         <article class="report-table-card">
           <header>
             <h2>Bilan par équipe</h2>
-            <p>Lecture basée sur les événements reliés au `teamId`.</p>
+            <p>Moyennes calculées sur les événements reliés au `teamId`.</p>
           </header>
           <div class="report-table-wrap">
             <table class="report-table">
               <thead>
-                <tr><th>Équipe</th><th>Événements</th><th>Présentes</th><th>Absentes</th><th>Minutes</th><th>Taux</th></tr>
+                <tr><th>Équipe</th><th>Événements</th><th>Prés. moy.</th><th>Abs. moy.</th><th>Min moy./joueuse</th><th>Taux moy.</th></tr>
               </thead>
               <tbody id="reportsTeamRows"></tbody>
             </table>
@@ -2064,6 +2064,29 @@
       function percent(value, total){
         return total ? `${Math.round((value / total) * 100)}%` : "0%";
       }
+      function average(values=[]){
+        const numbers = values.map(value => Number(value || 0)).filter(value => Number.isFinite(value));
+        return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : 0;
+      }
+      function eventPresenceStats(event){
+        const entries = attendanceEntries(event);
+        const present = entries.filter(entry => entry.status === "present" || entry.status === "late").length;
+        const absent = entries.filter(entry => entry.status === "absent").length;
+        const late = entries.filter(entry => entry.status === "late").length;
+        const unavailable = entries.filter(entry => entry.status === "sick" || entry.status === "injured").length;
+        const minutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+        const playerIds = new Set(entries.map(entry => entry.playerId).filter(Boolean));
+        return {
+          present,
+          absent,
+          late,
+          unavailable,
+          total:entries.length,
+          minutes,
+          playerCount:playerIds.size,
+          rate:entries.length ? present / entries.length : 0
+        };
+      }
       function reportTypeLabel(type){
         return typeLabel(type);
       }
@@ -2071,29 +2094,31 @@
         renderCalendarTeamFilters("reportsTeamFilters");
         const presenceEvents = events.filter(event => event.source === "presences" && event.id);
         const entries = presenceEvents.flatMap(event => attendanceEntries(event).map(entry => ({...entry, event})));
-        const presentEntries = entries.filter(entry => entry.status === "present" || entry.status === "late");
-        const absentEntries = entries.filter(entry => entry.status === "absent");
-        const lateEntries = entries.filter(entry => entry.status === "late");
-        const unavailableEntries = entries.filter(entry => entry.status === "sick" || entry.status === "injured");
         const playerIds = new Set(entries.map(entry => entry.playerId).filter(Boolean));
-        const minutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
-        setText("reportsPresenceRate", percent(presentEntries.length, entries.length));
+        const totalMinutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+        const eventStats = presenceEvents.map(eventPresenceStats);
+        const averagePresenceRate = average(eventStats.map(stat => stat.rate));
+        const averageMinutesPerPlayer = playerIds.size ? Math.round(totalMinutes / playerIds.size) : 0;
+        setText("reportsPresenceRate", `${Math.round(averagePresenceRate * 100)}%`);
         setText("reportsSessions", presenceEvents.length);
         setText("reportsPlayers", playerIds.size);
-        setText("reportsMinutes", minutes);
-        setText("reportsPresent", presentEntries.length);
-        setText("reportsAbsent", absentEntries.length);
-        setText("reportsLate", lateEntries.length);
-        setText("reportsUnavailable", unavailableEntries.length);
+        setText("reportsMinutes", averageMinutesPerPlayer);
+        setText("reportsPresent", Math.round(average(eventStats.map(stat => stat.present))));
+        setText("reportsAbsent", Math.round(average(eventStats.map(stat => stat.absent))));
+        setText("reportsLate", Math.round(average(eventStats.map(stat => stat.late))));
+        setText("reportsUnavailable", Math.round(average(eventStats.map(stat => stat.unavailable))));
 
         const teamMap = new Map();
         presenceEvents.forEach(event => {
           const key = event.teamId || "sans-equipe";
-          const row = teamMap.get(key) || {teamId:key, name:eventTeamLabel(event) || "Sans équipe", events:0, present:0, absent:0, total:0, minutes:0};
+          const row = teamMap.get(key) || {teamId:key, name:eventTeamLabel(event) || "Sans équipe", events:0, present:0, absent:0, total:0, minutes:0, rates:[], playerIds:new Set()};
           row.events += 1;
+          const stats = eventPresenceStats(event);
+          row.rates.push(stats.rate);
           attendanceEntries(event).forEach(entry => {
             row.total += 1;
             row.minutes += Number(entry.minutes || 0);
+            if(entry.playerId) row.playerIds.add(entry.playerId);
             if(entry.status === "present" || entry.status === "late") row.present += 1;
             if(entry.status === "absent") row.absent += 1;
           });
@@ -2106,10 +2131,10 @@
             <tr>
               <td>${esc(row.name)}</td>
               <td>${row.events}</td>
-              <td>${row.present}</td>
-              <td>${row.absent}</td>
-              <td>${row.minutes}</td>
-              <td>${percent(row.present, row.total)}</td>
+              <td>${Math.round(row.present / Math.max(1, row.events))}</td>
+              <td>${Math.round(row.absent / Math.max(1, row.events))}</td>
+              <td>${row.playerIds.size ? Math.round(row.minutes / row.playerIds.size) : 0}</td>
+              <td>${Math.round(average(row.rates) * 100)}%</td>
             </tr>
           `).join("") : emptyReportsRow();
         }
