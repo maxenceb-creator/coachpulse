@@ -1,0 +1,9 @@
+.cp698-tooltip{position:fixed;z-index:99999;display:none;max-width:320px;background:rgba(7,17,31,.96);color:#fff;border:1px solid rgba(200,164,77,.78);border-radius:16px;padding:11px 13px;box-shadow:0 16px 34px rgba(0,0,0,.30);font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;font-size:12px;line-height:1.25;pointer-events:none;backdrop-filter:blur(8px)}
+.cp698-tooltip.show{display:block}
+.cp698-tooltip b{display:block;color:#F3DC8C;font-size:13px;margin-bottom:6px}
+.cp698-tooltip .row{display:flex;justify-content:space-between;gap:14px;border-top:1px solid rgba(255,255,255,.12);padding-top:5px;margin-top:5px}
+.cp698-tooltip .total{color:#bbf7d0;font-weight:1000;margin-bottom:3px}
+.cp698-tooltip .muted{color:#cbd5e1;font-size:11px;margin-top:5px}
+.cp694-cell{cursor:help!important}
+.cp694-cell:hover{outline:3px solid rgba(243,220,140,.75);z-index:6!important}
+.cp694-cell.cp698-open{outline:3px solid #F3DC8C;z-index:7!important}
