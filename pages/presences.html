@@ -1584,6 +1584,8 @@
       let editingEventId = "";
       let calendarTeamFilterIds = new Set();
       let calendarPeriodFilter = {start:"", end:""};
+      let reportPlayerFilterIds = new Set();
+      let preventionPlayerFilterIds = new Set();
       let cloudReady = false;
       const DEFAULT_PRESENCE_SETTINGS = {
         defaultTeamId:"",
@@ -1892,7 +1894,7 @@
       function renderCalendarTeamFilters(rootId="calendarTeamFilters"){
         const root = document.getElementById(rootId);
         if(!root) return;
-        const wasOpen = !!root.querySelector(".team-filter-dropdown")?.open;
+        const wasOpen = !!root.querySelector(".team-filter-dropdown:not(.player-filter-dropdown)")?.open;
         const teams = officialTeams();
         const selectedTeams = teams.filter(team => calendarTeamFilterIds.has(team.teamId));
         const teamSummary = selectedTeams.length
@@ -1959,11 +1961,14 @@
         root.addEventListener("change", event => {
           const teamInput = event.target.closest("input[data-team-filter]");
           if(teamInput) updateTeamFilterFromInput(teamInput);
+          const playerInput = event.target.closest("input[data-player-filter]");
+          if(playerInput) updatePlayerFilterFromInput(playerInput, rootId);
           const periodInput = event.target.closest("input[data-period-start],input[data-period-end]");
           if(periodInput) updatePeriodFilterFromInput(periodInput);
         });
         root.addEventListener("click", event => {
           if(event.target.closest("[data-clear-team-filters]")) clearTeamFilters();
+          if(event.target.closest("[data-clear-player-filters]")) clearPlayerFilters(rootId);
           if(event.target.closest("[data-clear-period-filters]")) clearPeriodFilters();
         });
       }
@@ -2166,6 +2171,73 @@
         const player = (Array.isArray(rows) ? rows : []).find(row => String(row.playerId || row.id || "") === String(playerId || ""));
         return player ? playerForEventSeason(player, dateValue) : null;
       }
+      function playersFromPresenceEvents(events){
+        const players = new Map();
+        events.forEach(event => {
+          attendanceEntries(event).forEach(entry => {
+            if(!entry.playerId || players.has(entry.playerId)) return;
+            const player = playerById(entry.playerId, event.date);
+            players.set(entry.playerId, {
+              playerId:entry.playerId,
+              name:player ? playerName(player) : entry.playerId,
+              team:player?.team || eventTeamLabel(event) || ""
+            });
+          });
+        });
+        return [...players.values()].sort((a,b) => a.name.localeCompare(b.name, "fr"));
+      }
+      function renderPlayerFilter(rootId, selectedIds, events){
+        const root = document.getElementById(rootId);
+        if(!root) return;
+        const wasOpen = !!root.querySelector(".player-filter-dropdown")?.open;
+        const players = playersFromPresenceEvents(events);
+        selectedIds.forEach(playerId => {
+          if(!players.some(player => player.playerId === playerId)) selectedIds.delete(playerId);
+        });
+        const selectedPlayers = players.filter(player => selectedIds.has(player.playerId));
+        const playerSummary = selectedPlayers.length
+          ? selectedPlayers.map(player => player.name).join(", ")
+          : "Toutes les joueuses";
+        root.insertAdjacentHTML("beforeend", `
+          <label class="presence-filter-field">
+            <span>Joueuses</span>
+            <details class="team-filter-dropdown player-filter-dropdown" ${wasOpen ? "open" : ""}>
+              <summary><span>${esc(playerSummary)}</span></summary>
+              <div class="team-filter-menu">
+                <button class="team-filter-clear" type="button" data-clear-player-filters>
+                  ${selectedIds.size ? "Afficher toutes les joueuses" : "Toutes les joueuses affichées"}
+                </button>
+                ${players.length ? players.map(player => {
+                  const checked = selectedIds.has(player.playerId);
+                  return `
+                    <label class="team-filter-chip ${checked ? "active" : ""}">
+                      <input type="checkbox" value="${esc(player.playerId)}" data-player-filter ${checked ? "checked" : ""}>
+                      ${esc(player.name)}${player.team ? ` · ${esc(player.team)}` : ""}
+                    </label>
+                  `;
+                }).join("") : '<div class="empty-state">Aucune joueuse sur ce filtre.</div>'}
+              </div>
+            </details>
+          </label>
+        `);
+      }
+      function playerFilterSetForRoot(rootId){
+        return rootId === "preventionTeamFilters" ? preventionPlayerFilterIds : reportPlayerFilterIds;
+      }
+      function updatePlayerFilterFromInput(input, rootId){
+        const selectedIds = playerFilterSetForRoot(rootId);
+        if(input.checked) selectedIds.add(input.value);
+        else selectedIds.delete(input.value);
+        render();
+      }
+      function clearPlayerFilters(rootId){
+        playerFilterSetForRoot(rootId).clear();
+        render();
+      }
+      function filterEntriesByPlayers(entries, selectedIds){
+        if(!selectedIds.size) return entries;
+        return entries.filter(entry => selectedIds.has(entry.playerId));
+      }
       function emptyReportsRow(){
         return '<tr><td colspan="6">Aucune donnée de présence sur ce filtre.</td></tr>';
       }
@@ -2177,7 +2249,9 @@
         return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : 0;
       }
       function eventPresenceStats(event){
-        const entries = attendanceEntries(event);
+        return presenceStatsFromEntries(attendanceEntries(event));
+      }
+      function presenceStatsFromEntries(entries){
         const present = entries.filter(entry => entry.status === "present" || entry.status === "late").length;
         const absent = entries.filter(entry => entry.status === "absent").length;
         const late = entries.filter(entry => entry.status === "late").length;
@@ -2201,14 +2275,28 @@
       function renderReports(events){
         renderCalendarTeamFilters("reportsTeamFilters");
         const presenceEvents = events.filter(event => event.source === "presences" && event.id);
-        const entries = presenceEvents.flatMap(event => attendanceEntries(event).map(entry => ({...entry, event})));
+        renderPlayerFilter("reportsTeamFilters", reportPlayerFilterIds, presenceEvents);
+        const entries = filterEntriesByPlayers(
+          presenceEvents.flatMap(event => attendanceEntries(event).map(entry => ({...entry, event}))),
+          reportPlayerFilterIds
+        );
+        const filteredEventIds = new Set(entries.map(entry => entry.event.id));
+        const reportEvents = reportPlayerFilterIds.size
+          ? presenceEvents.filter(event => filteredEventIds.has(event.id))
+          : presenceEvents;
         const playerIds = new Set(entries.map(entry => entry.playerId).filter(Boolean));
         const totalMinutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
-        const eventStats = presenceEvents.map(eventPresenceStats);
+        const entriesByEvent = new Map();
+        entries.forEach(entry => {
+          const eventEntries = entriesByEvent.get(entry.event.id) || [];
+          eventEntries.push(entry);
+          entriesByEvent.set(entry.event.id, eventEntries);
+        });
+        const eventStats = reportEvents.map(event => presenceStatsFromEntries(entriesByEvent.get(event.id) || []));
         const averagePresenceRate = average(eventStats.map(stat => stat.rate));
         const averageMinutesPerPlayer = playerIds.size ? Math.round(totalMinutes / playerIds.size) : 0;
         setText("reportsPresenceRate", `${Math.round(averagePresenceRate * 100)}%`);
-        setText("reportsSessions", presenceEvents.length);
+        setText("reportsSessions", reportEvents.length);
         setText("reportsPlayers", playerIds.size);
         setText("reportsMinutes", averageMinutesPerPlayer);
         setText("reportsPresent", Math.round(average(eventStats.map(stat => stat.present))));
@@ -2217,13 +2305,14 @@
         setText("reportsUnavailable", Math.round(average(eventStats.map(stat => stat.unavailable))));
 
         const teamMap = new Map();
-        presenceEvents.forEach(event => {
+        reportEvents.forEach(event => {
           const key = event.teamId || "sans-equipe";
           const row = teamMap.get(key) || {teamId:key, name:eventTeamLabel(event) || "Sans équipe", events:0, present:0, absent:0, total:0, minutes:0, rates:[], playerIds:new Set()};
+          const eventEntries = entriesByEvent.get(event.id) || [];
           row.events += 1;
-          const stats = eventPresenceStats(event);
+          const stats = presenceStatsFromEntries(eventEntries);
           row.rates.push(stats.rate);
-          attendanceEntries(event).forEach(entry => {
+          eventEntries.forEach(entry => {
             row.total += 1;
             row.minutes += Number(entry.minutes || 0);
             if(entry.playerId) row.playerIds.add(entry.playerId);
@@ -2247,10 +2336,10 @@
           `).join("") : emptyReportsRow();
         }
 
-        const maxType = Math.max(1, ...presenceEvents.reduce((map, event) => map.set(event.type, (map.get(event.type) || 0) + 1), new Map()).values());
+        const maxType = Math.max(1, ...reportEvents.reduce((map, event) => map.set(event.type, (map.get(event.type) || 0) + 1), new Map()).values());
         const typeRows = document.getElementById("reportsTypeRows");
         if(typeRows){
-          const typeMap = presenceEvents.reduce((map, event) => map.set(event.type, (map.get(event.type) || 0) + 1), new Map());
+          const typeMap = reportEvents.reduce((map, event) => map.set(event.type, (map.get(event.type) || 0) + 1), new Map());
           const rows = [...typeMap.entries()].sort((a,b) => b[1] - a[1]);
           typeRows.innerHTML = rows.length ? rows.map(([type, count]) => `
             <div class="report-pill-row">
@@ -2318,7 +2407,9 @@
       }
       function renderPrevention(events){
         renderCalendarTeamFilters("preventionTeamFilters");
-        const entries = preventionEntries(events);
+        const presenceEvents = events.filter(event => event.source === "presences" && event.id);
+        renderPlayerFilter("preventionTeamFilters", preventionPlayerFilterIds, presenceEvents);
+        const entries = filterEntriesByPlayers(preventionEntries(events), preventionPlayerFilterIds);
         const present = entries.filter(entry => entry.status === "present" || entry.status === "late").length;
         const totalMinutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
         const grouped = new Map();
