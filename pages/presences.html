@@ -2624,11 +2624,9 @@
               await Promise.all(savedItems.map(item => pushPresenceEventToCloud(item)));
             }
           }catch(error){
-            savePresenceEvents(previousEvents);
-            if(!previousEvent) selectedAttendanceEventId = "";
             render();
             renderSessionList();
-            setSessionMessage(`Sauvegarde impossible : ${error?.message || error}.`, "error");
+            setSessionMessage(`Événement conservé en local, mais cloud non synchronisé : ${error?.message || error}.`, "error");
             return;
           }
           resetSessionForm();
