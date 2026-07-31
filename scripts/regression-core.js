@@ -1,9 +1,26 @@
 const assert = require('assert/strict');
+const fs = require('fs');
+const vm = require('vm');
 
 const players = require('../shared/services/players-service.js');
 const teams = require('../shared/services/teams-service.js');
 const permissions = require('../shared/services/permissions-service.js');
 const modules = require('../shared/utils/module-registry.js');
+
+function loadBrowserScript(filePath, windowOverrides={}){
+  const window = {
+    parent:{},
+    addEventListener(){},
+    document:{readyState:'complete', addEventListener(){}},
+    localStorage:{getItem(){ return null; }, setItem(){}, removeItem(){}},
+    ...windowOverrides
+  };
+  window.window = window;
+  window.globalThis = window;
+  const context = vm.createContext({window, globalThis:window, console, setTimeout, clearTimeout});
+  vm.runInContext(fs.readFileSync(filePath, 'utf8'), context, {filename:filePath});
+  return window;
+}
 
 function testPlayerIdsAndSeasons(){
   const raw = {
@@ -26,6 +43,30 @@ function testPlayerIdsAndSeasons(){
   assert.equal(season2627.subCategory, 'U11');
   assert.equal(season2627.categorie, 'U11');
   assert.equal(season2627.team, 'U11 A');
+}
+
+function testPlayerIdStaysStableOnEdit(){
+  const previous = players.normalizePlayer({
+    nom:'Lopes',
+    prenom:'Coelho Myriam',
+    birth:'2005-06-24',
+    team:'U19',
+    season:'2025-2026'
+  });
+  const edited = players.normalizePlayer({
+    documentId:previous.playerId,
+    playerId:previous.playerId,
+    nom:'Coelho',
+    prenom:'Myriam Lopes',
+    birth:'2005-06-24',
+    team:'U19',
+    season:'2025-2026'
+  });
+
+  assert.equal(edited.playerId, previous.playerId);
+  assert.equal(edited.id, previous.playerId);
+  assert.equal(edited.nom, 'COELHO');
+  assert.equal(edited.prenom, 'MYRIAM LOPES');
 }
 
 function testTeamIdsStayShared(){
@@ -60,6 +101,27 @@ function testPermissions(){
   assert.equal(permissions.canPerformAction(admin, {id:'database'}, 'delete'), true);
 }
 
+function testPermissionsRespectTeamHistoryAndModuleScope(){
+  const u13Id = teams.canonicalTeamId('U13 A');
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const scopedCoach = permissions.defaultProfile({uid:'coach-u13', email:'coach@club.test'}, 'ENTRAINEUR', 'SAISIE');
+  scopedCoach.authorizedTeamIds = [u13Id];
+  scopedCoach.allowedModules = ['playerProfile'];
+  scopedCoach.modulePermissions = {
+    playerProfile:{read:true, write:false},
+    database:{read:false, write:false}
+  };
+
+  assert.equal(permissions.canAccessPlayer(scopedCoach, {
+    playerId:'player-history',
+    teamId:u16Id,
+    seasonHistory:{'2025-2026':{teamId:u13Id}}
+  }), true);
+  assert.equal(permissions.canViewModule(scopedCoach, {id:'playerProfile', active:true}), true);
+  assert.equal(permissions.canEditModule(scopedCoach, {id:'playerProfile', active:true}), false);
+  assert.equal(permissions.canViewModule(scopedCoach, {id:'database', active:true}), false);
+}
+
 function testModuleRegistry(){
   const catalog = modules.moduleRegistry();
   const ids = catalog.map(module => module.id);
@@ -73,10 +135,75 @@ function testModuleRegistry(){
   assert.equal(databaseTool.src, 'pages/admin-database.html');
 }
 
+function testPlayerProfileDataFallsBackToSelectedPlayerOnly(){
+  const window = loadBrowserScript('pages/player-profile/playerProfileData.js', {
+    parent:{
+      CoachPulseCentralData:{
+        currentSeason(){ return '2026-2027'; },
+        async listPlayers(){
+          return [
+            {playerId:'player-a', prenom:'Ava', nom:'Dupont', team:'U13 A'},
+            {playerId:'player-b', prenom:'Lina', nom:'Martin', team:'U16 A'}
+          ];
+        }
+      }
+    },
+    CoachPulsePresenceEventsService:{
+      collectionsForPlayer(playerIds){
+        return {sessions:[{sessionId:'s1'}], attendance:[{attendanceId:'a1', playerId:playerIds[0], sessionId:'s1'}]};
+      }
+    }
+  });
+
+  return window.PlayerProfileData.loadProfileData({playerId:'player-a', prenom:'Ava', nom:'Dupont'}).then(payload => {
+    assert.equal(payload.module, 'playerProfile');
+    assert.deepEqual(payload.collections.players.map(player => player.playerId), ['player-a']);
+    assert.equal(payload.collections.attendance.length, 1);
+  });
+}
+
+function testPlayerProfileRenderStartsEmptyAndUsesPlayerIds(){
+  const window = loadBrowserScript('pages/player-profile/playerProfileRender.js', {
+    PlayerProfileData:{
+      currentSeason(){ return '2026-2027'; },
+      playerForSeason(player){ return player; },
+      teamLabel(player){ return player.team || ''; },
+      displayName(player){ return `${player.prenom || ''} ${player.nom || ''}`.trim().toUpperCase(); }
+    },
+    PlayerProfileFilters:{
+      periodFromState(){ return {label:'Saison 2026-2027'}; },
+      dateOf(row){ return row.date || ''; }
+    }
+  });
+  const controls = window.PlayerProfileRender.renderControls({
+    players:[
+      {playerId:'player-a', prenom:'Ava', nom:'Dupont', team:'U13 A'},
+      {playerId:'player-b', prenom:'Lina', nom:'Martin', team:'U16 A'}
+    ],
+    selectedPlayerId:'',
+    seasons:['2026-2027'],
+    filters:{team:'', periodMode:'season', season:'2026-2027', startDate:'', endDate:''}
+  });
+  const emptyIdentity = window.PlayerProfileRender.renderIdentity({}, {label:'Saison 2026-2027'}, {medicalProfile:{}, kpis:{}});
+
+  assert(controls.includes('value="player-a"'));
+  assert(controls.includes('value="player-b"'));
+  assert(controls.includes('Sélectionner une joueuse'));
+  assert(emptyIdentity.includes('Aucune joueuse sélectionnée'));
+  assert(emptyIdentity.includes('Sélectionne une joueuse pour charger sa fiche complète.'));
+}
+
 testPlayerIdsAndSeasons();
+testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
 testPlayerFilteringAndDedupe();
 testPermissions();
+testPermissionsRespectTeamHistoryAndModuleScope();
 testModuleRegistry();
+testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
-console.log('Core regression guards OK');
+Promise.resolve()
+  .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)
+  .then(() => {
+    console.log('Core regression guards OK');
+  });
