@@ -1723,6 +1723,15 @@
       function savePresenceEvents(events){
         localStorage.setItem(PRESENCE_EVENTS_KEY, JSON.stringify(events));
       }
+      function eventSyncStamp(event={}){
+        return Date.parse(event.updatedAt || event.createdAt || "") || 0;
+      }
+      function markPresenceEventsSynced(eventIds=[]){
+        const ids = new Set(eventIds.filter(Boolean));
+        if(!ids.size) return;
+        const syncedAt = new Date().toISOString();
+        savePresenceEvents(loadPresenceEvents().map(event => ids.has(event.id) ? {...event, cloudSyncedAt:syncedAt} : event));
+      }
       function mergePresenceEvents(localEvents=[], cloudEvents=[]){
         const byId = new Map();
         [...localEvents, ...cloudEvents].forEach(event => {
@@ -1741,12 +1750,31 @@
         const merged = mergePresenceEvents(loadPresenceEvents(), Array.isArray(cloudEvents) ? cloudEvents : []);
         savePresenceEvents(merged);
         cloudReady = true;
-        return merged;
+        return {merged, cloudEvents:Array.isArray(cloudEvents) ? cloudEvents : []};
       }
       async function pushPresenceEventToCloud(event){
         const api = centralDataApi();
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
         return api.presenceSaveEvent(event);
+      }
+      async function syncPresenceEventsToCloud(cloudEvents=[]){
+        const api = centralDataApi();
+        if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
+        const cloudById = new Map((Array.isArray(cloudEvents) ? cloudEvents : []).map(event => [event.id, event]));
+        const localEvents = loadPresenceEvents();
+        const eventsToSync = localEvents.filter(event => {
+          if(!event?.id) return false;
+          const cloudEvent = cloudById.get(event.id);
+          const syncedAt = Date.parse(event.cloudSyncedAt || "") || 0;
+          return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent) || eventSyncStamp(event) > syncedAt;
+        });
+        const syncedIds = [];
+        for(const event of eventsToSync){
+          await api.presenceSaveEvent(event);
+          syncedIds.push(event.id);
+        }
+        markPresenceEventsSynced(syncedIds);
+        return syncedIds.length;
       }
       async function deletePresenceEventFromCloud(event){
         const api = centralDataApi();
@@ -2600,6 +2628,7 @@
               nextEvents = previousEvents.map(item => item.id === updatedEvent.id ? updatedEvent : item);
               savePresenceEvents(nextEvents);
               await pushPresenceEventToCloud(updatedEvent);
+              markPresenceEventsSynced([updatedEvent.id]);
               selectedAttendanceEventId = updatedEvent.id;
               savedItems = [updatedEvent];
             }else{
@@ -2622,6 +2651,7 @@
               savePresenceEvents(nextEvents);
               selectedAttendanceEventId = savedItems[0]?.id || "";
               await Promise.all(savedItems.map(item => pushPresenceEventToCloud(item)));
+              markPresenceEventsSynced(savedItems.map(item => item.id));
             }
           }catch(error){
             render();
@@ -2761,10 +2791,11 @@
       }
       async function initPresenceCloud(){
         try{
-          await pullPresenceEventsFromCloud();
+          const {cloudEvents=[]} = await pullPresenceEventsFromCloud();
+          const syncedCount = await syncPresenceEventsToCloud(cloudEvents);
           render();
           renderSessionList();
-          if(cloudReady) setSessionMessage("Événements chargés depuis le cloud.", "success");
+          if(cloudReady) setSessionMessage(syncedCount ? `${syncedCount} événement(s) synchronisé(s) avec le cloud.` : "Événements chargés depuis le cloud.", "success");
         }catch(error){
           cloudReady = false;
           setSessionMessage(`Cloud indisponible : affichage local uniquement. ${error?.message || error}`, "error");
