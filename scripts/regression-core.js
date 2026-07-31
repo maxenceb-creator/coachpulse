@@ -1,0 +1,67 @@
+const assert = require('assert/strict');
+
+const players = require('../shared/services/players-service.js');
+const teams = require('../shared/services/teams-service.js');
+const permissions = require('../shared/services/permissions-service.js');
+
+function testPlayerIdsAndSeasons(){
+  const raw = {
+    nom:'Martin',
+    prenom:'Lea',
+    birth:'2016-09-04',
+    team:'U11 A',
+    season:'2025-2026'
+  };
+  const normalized = players.normalizePlayer(raw);
+  assert.equal(normalized.playerId, 'player-lea-martin-2016-09-04');
+
+  const season2526 = players.playerSeasonSnapshot(normalized, '2025-2026');
+  assert.equal(season2526.subCategory, 'U10');
+  assert.equal(season2526.categorie, 'U11');
+  assert.equal(season2526.team, 'U11 A');
+  assert.equal(season2526.teamId, teams.canonicalTeamId('U11 A'));
+
+  const season2627 = players.playerSeasonSnapshot(normalized, '2026-2027');
+  assert.equal(season2627.subCategory, 'U11');
+  assert.equal(season2627.categorie, 'U11');
+  assert.equal(season2627.team, 'U11 A');
+}
+
+function testTeamIdsStayShared(){
+  assert.equal(players.canonicalTeamId('U13 A'), teams.canonicalTeamId('U13 A'));
+  assert.equal(teams.defaultTeamForSubCategory('U15'), 'U16 A');
+  assert.equal(teams.categoryForSubCategory('U15'), 'U16');
+}
+
+function testPlayerFilteringAndDedupe(){
+  const active = players.normalizePlayer({nom:'Dupont', prenom:'Ava', birth:'2014-01-02', status:'active'});
+  const duplicate = {...active, photo:'updated-photo'};
+  const archived = players.normalizePlayer({nom:'Archive', prenom:'Zoé', birth:'2013-03-04', status:'archived'});
+  const rows = players.filterPlayers([active, duplicate, archived], {season:'2025-2026'});
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].playerId, active.playerId);
+}
+
+function testPermissions(){
+  const u13Id = teams.canonicalTeamId('U13 A');
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const scopedCoach = permissions.defaultProfile({uid:'coach-u13', email:'coach@club.test'}, 'ENTRAINEUR', 'SAISIE');
+  scopedCoach.authorizedTeamIds = [u13Id];
+
+  assert.equal(permissions.canAccessTeam(scopedCoach, u13Id), true);
+  assert.equal(permissions.canAccessTeam(scopedCoach, u16Id), false);
+  assert.equal(permissions.canAccessPlayer(scopedCoach, {playerId:'p1', teamId:u13Id}), true);
+  assert.equal(permissions.canAccessPlayer(scopedCoach, {playerId:'p2', teamId:u16Id}), false);
+
+  const admin = permissions.defaultProfile({uid:'admin', email:'admin@club.test'}, 'DIRIGEANT', 'ADMIN');
+  assert.equal(permissions.canAccessTeam(admin, u16Id), true);
+  assert.equal(permissions.canAccessPlayer(admin, {playerId:'p2', teamId:u16Id}), true);
+  assert.equal(permissions.canPerformAction(admin, {id:'database'}, 'delete'), true);
+}
+
+testPlayerIdsAndSeasons();
+testTeamIdsStayShared();
+testPlayerFilteringAndDedupe();
+testPermissions();
+
+console.log('Core regression guards OK');
