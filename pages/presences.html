@@ -723,6 +723,10 @@
       border-radius:14px;
       background:#fbfdfc;
     }
+    .attendance-row.unselected{
+      background:#f7faf8;
+      opacity:.72;
+    }
     .attendance-row-header{
       background:#fff9e8;
       border-color:#eadbb7;
@@ -2342,7 +2346,7 @@
         return ["present","late"].includes(status);
       }
       function isAbsentStatus(status){
-        return !isPresentStatus(status);
+        return !!status && !isPresentStatus(status);
       }
       function defaultAttendanceMinutes(status, event){
         return isPresentStatus(status) ? Number(event.duration || 0) : 0;
@@ -2350,14 +2354,14 @@
       function attendanceEntry(event, playerId){
         const raw = event.attendance?.[playerId];
         if(raw && typeof raw === "object"){
-          const status = raw.status || "absent";
+          const status = raw.status || "";
           return {
             status,
             minutes:Number(raw.minutes ?? defaultAttendanceMinutes(status, event)) || 0,
             comment:raw.comment || ""
           };
         }
-        const status = typeof raw === "string" ? raw : "absent";
+        const status = typeof raw === "string" ? raw : "";
         return {
           status,
           minutes:defaultAttendanceMinutes(status, event),
@@ -2368,7 +2372,7 @@
         return Object.entries(event.attendance || {}).map(([playerId, raw]) => ({
           playerId,
           ...attendanceEntry(event, playerId)
-        }));
+        })).filter(entry => !!entry.status);
       }
       function playerById(playerId, dateValue){
         const service = playersService();
@@ -2895,8 +2899,9 @@
         const counts = attendanceStatuses().reduce((acc, status) => ({...acc, [status.id]:0}), {});
         players.forEach(player => {
           const entry = attendanceEntry(event, player.playerId);
-          counts[entry.status] = (counts[entry.status] || 0) + 1;
+          if(entry.status) counts[entry.status] = (counts[entry.status] || 0) + 1;
         });
+        const selectedCount = players.reduce((sum, player) => sum + (attendanceEntry(event, player.playerId).status ? 1 : 0), 0);
         const statusKpis = attendanceStatuses().map(status => `
           <div class="attendance-kpi">
             <strong>${counts[status.id] || 0}</strong>
@@ -2912,7 +2917,7 @@
             `;
           }).join("");
           return `
-            <div class="attendance-row" data-player-id="${esc(player.playerId)}">
+            <div class="attendance-row ${entry.status ? "" : "unselected"}" data-player-id="${esc(player.playerId)}">
               <div class="attendance-player">
                 <strong>${esc(playerName(player))}</strong>
                 <small>playerId ${esc(player.playerId)} · ${esc(player.team || event.team || "")}</small>
@@ -2935,7 +2940,7 @@
             <span class="attendance-event-pill">${esc(typeLabel(event.type))}</span>
           </header>
           <div class="attendance-kpis" aria-label="Résumé des statuts de présence">
-            <div class="attendance-kpi"><strong>${players.length}</strong><span>Joueuses</span></div>
+            <div class="attendance-kpi"><strong>${selectedCount}</strong><span>Sur séance</span></div>
             ${statusKpis}
           </div>
           <div class="attendance-sheet">
@@ -2956,12 +2961,18 @@
         const current = events[index];
         const previous = attendanceEntry(current, playerId);
         const next = {...previous, ...patch};
-        if(patch.status && patch.minutes == null && previous.status !== patch.status){
+        if(Object.prototype.hasOwnProperty.call(patch, "status") && patch.minutes == null && previous.status !== patch.status){
           next.minutes = defaultAttendanceMinutes(patch.status, current);
+        }
+        const attendance = {...(current.attendance || {})};
+        if(!next.status && !Number(next.minutes || 0) && !String(next.comment || "").trim()){
+          delete attendance[playerId];
+        }else{
+          attendance[playerId] = next;
         }
         events[index] = {
           ...current,
-          attendance:{...(current.attendance || {}), [playerId]:next},
+          attendance,
           updatedAt:new Date().toISOString()
         };
         savePresenceEvents(events);
@@ -3148,7 +3159,8 @@
         document.getElementById("attendanceDetail")?.addEventListener("click", event => {
           const button = event.target.closest("[data-attendance-status][data-attendance-event][data-player-id]");
           if(!button) return;
-          updateAttendanceEntry(button.dataset.attendanceEvent, button.dataset.playerId, {status:button.dataset.attendanceStatus});
+          const nextStatus = button.classList.contains("active") ? "" : button.dataset.attendanceStatus;
+          updateAttendanceEntry(button.dataset.attendanceEvent, button.dataset.playerId, {status:nextStatus});
         });
         updateRecurrenceUi();
         renderSessionList();
