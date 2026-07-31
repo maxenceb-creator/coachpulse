@@ -197,6 +197,12 @@
       border-bottom:1px solid var(--line);
       background:#fbfdfc;
     }
+    .presence-filter-field{
+      display:flex;
+      flex-direction:column;
+      gap:5px;
+      min-width:150px;
+    }
     .calendar-team-filter strong{
       margin-right:4px;
       color:#66756d;
@@ -204,6 +210,73 @@
       font-weight:1000;
       letter-spacing:.08em;
       text-transform:uppercase;
+    }
+    .presence-filter-field > span{
+      color:#66756d;
+      font-size:10px;
+      font-weight:1000;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .team-filter-dropdown{
+      position:relative;
+      min-width:210px;
+    }
+    .team-filter-dropdown summary{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      min-height:40px;
+      border:1px solid #d7eadc;
+      border-radius:12px;
+      background:#fff;
+      color:var(--dark);
+      font-size:13px;
+      font-weight:1000;
+      padding:8px 11px;
+      cursor:pointer;
+      list-style:none;
+    }
+    .team-filter-dropdown summary span{
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .team-filter-dropdown summary::-webkit-details-marker{
+      display:none;
+    }
+    .team-filter-dropdown summary::after{
+      content:"▾";
+      color:#66756d;
+      font-size:12px;
+    }
+    .team-filter-menu{
+      position:absolute;
+      z-index:20;
+      top:calc(100% + 6px);
+      left:0;
+      display:grid;
+      gap:6px;
+      width:min(280px, calc(100vw - 32px));
+      max-height:260px;
+      overflow:auto;
+      padding:10px;
+      border:1px solid #d7eadc;
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 18px 40px rgba(16,37,27,.16);
+    }
+    .presence-date-input{
+      width:100%;
+      min-height:40px;
+      border:1px solid #d7eadc;
+      border-radius:12px;
+      background:#fff;
+      color:var(--dark);
+      font-size:13px;
+      font-weight:900;
+      padding:8px 10px;
     }
     .team-filter-chip{
       display:inline-flex;
@@ -240,6 +313,18 @@
       font-size:12px;
       font-weight:1000;
       padding:7px 11px;
+      cursor:pointer;
+    }
+    .period-filter-clear{
+      align-self:end;
+      min-height:40px;
+      border:1px solid #eadbb7;
+      border-radius:12px;
+      background:#fff9e8;
+      color:#5c4611;
+      font-size:12px;
+      font-weight:1000;
+      padding:8px 12px;
       cursor:pointer;
     }
     .calendar-weekdays,
@@ -1498,6 +1583,7 @@
       let selectedAttendanceEventId = "";
       let editingEventId = "";
       let calendarTeamFilterIds = new Set();
+      let calendarPeriodFilter = {start:"", end:""};
       let cloudReady = false;
       const DEFAULT_PRESENCE_SETTINGS = {
         defaultTeamId:"",
@@ -1677,8 +1763,12 @@
         };
       }
       function filteredEvents(events){
-        if(!calendarTeamFilterIds.size) return events;
-        return events.filter(event => calendarTeamFilterIds.has(event.teamId));
+        return events.filter(event => {
+          if(calendarTeamFilterIds.size && !calendarTeamFilterIds.has(event.teamId)) return false;
+          if(calendarPeriodFilter.start && event.iso < calendarPeriodFilter.start) return false;
+          if(calendarPeriodFilter.end && event.iso > calendarPeriodFilter.end) return false;
+          return true;
+        });
       }
       function selectedCalendarTeamIdForCreation(){
         return calendarTeamFilterIds.size === 1 ? [...calendarTeamFilterIds][0] : "";
@@ -1802,21 +1892,42 @@
       function renderCalendarTeamFilters(rootId="calendarTeamFilters"){
         const root = document.getElementById(rootId);
         if(!root) return;
+        const wasOpen = !!root.querySelector(".team-filter-dropdown")?.open;
         const teams = officialTeams();
+        const selectedTeams = teams.filter(team => calendarTeamFilterIds.has(team.teamId));
+        const teamSummary = selectedTeams.length
+          ? selectedTeams.map(team => team.name).join(", ")
+          : "Toutes les équipes";
         root.innerHTML = `
-          <strong>Équipes</strong>
-          <button class="team-filter-clear" type="button" data-clear-team-filters>
-            ${calendarTeamFilterIds.size ? "Afficher tout" : "Toutes affichées"}
-          </button>
-          ${teams.map(team => {
-            const checked = calendarTeamFilterIds.has(team.teamId);
-            return `
-              <label class="team-filter-chip ${checked ? "active" : ""}">
-                <input type="checkbox" value="${esc(team.teamId)}" ${checked ? "checked" : ""}>
-                ${esc(team.name)}
-              </label>
-            `;
-          }).join("")}
+          <label class="presence-filter-field">
+            <span>Équipes</span>
+            <details class="team-filter-dropdown" ${wasOpen ? "open" : ""}>
+              <summary><span>${esc(teamSummary)}</span></summary>
+              <div class="team-filter-menu">
+                <button class="team-filter-clear" type="button" data-clear-team-filters>
+                  ${calendarTeamFilterIds.size ? "Afficher toutes les équipes" : "Toutes les équipes affichées"}
+                </button>
+                ${teams.map(team => {
+                  const checked = calendarTeamFilterIds.has(team.teamId);
+                  return `
+                    <label class="team-filter-chip ${checked ? "active" : ""}">
+                      <input type="checkbox" value="${esc(team.teamId)}" data-team-filter ${checked ? "checked" : ""}>
+                      ${esc(team.name)}
+                    </label>
+                  `;
+                }).join("")}
+              </div>
+            </details>
+          </label>
+          <label class="presence-filter-field">
+            <span>Début</span>
+            <input class="presence-date-input" type="date" data-period-start value="${esc(calendarPeriodFilter.start)}">
+          </label>
+          <label class="presence-filter-field">
+            <span>Fin</span>
+            <input class="presence-date-input" type="date" data-period-end value="${esc(calendarPeriodFilter.end)}">
+          </label>
+          <button class="period-filter-clear" type="button" data-clear-period-filters>Réinitialiser</button>
         `;
       }
       function updateTeamFilterFromInput(input){
@@ -1824,19 +1935,36 @@
         else calendarTeamFilterIds.delete(input.value);
         render();
       }
+      function updatePeriodFilterFromInput(input){
+        if(input.matches("[data-period-start]")) calendarPeriodFilter.start = input.value || "";
+        if(input.matches("[data-period-end]")) calendarPeriodFilter.end = input.value || "";
+        if(calendarPeriodFilter.start && calendarPeriodFilter.end && calendarPeriodFilter.start > calendarPeriodFilter.end){
+          const previousStart = calendarPeriodFilter.start;
+          calendarPeriodFilter.start = calendarPeriodFilter.end;
+          calendarPeriodFilter.end = previousStart;
+        }
+        render();
+      }
       function clearTeamFilters(){
         calendarTeamFilterIds = new Set();
+        render();
+      }
+      function clearPeriodFilters(){
+        calendarPeriodFilter = {start:"", end:""};
         render();
       }
       function bindTeamFilter(rootId){
         const root = document.getElementById(rootId);
         if(!root) return;
         root.addEventListener("change", event => {
-          const input = event.target.closest("input[type='checkbox']");
-          if(input) updateTeamFilterFromInput(input);
+          const teamInput = event.target.closest("input[data-team-filter]");
+          if(teamInput) updateTeamFilterFromInput(teamInput);
+          const periodInput = event.target.closest("input[data-period-start],input[data-period-end]");
+          if(periodInput) updatePeriodFilterFromInput(periodInput);
         });
         root.addEventListener("click", event => {
           if(event.target.closest("[data-clear-team-filters]")) clearTeamFilters();
+          if(event.target.closest("[data-clear-period-filters]")) clearPeriodFilters();
         });
       }
       function populateSettingsTeamSelect(){
