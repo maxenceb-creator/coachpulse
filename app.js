@@ -3617,6 +3617,15 @@ function presenceUiStatusFromCode(value=''){
   const code = String(value || '').trim().toUpperCase();
   return {P:'present', A:'absent', R:'late', M:'sick', B:'injured'}[code] || String(value || '').trim() || 'absent';
 }
+function presencePlainProcedure(value={}){
+  const source = value && typeof value === 'object' ? value : {};
+  return {
+    warmup:Number(source.warmup ?? source.echauffement ?? 0) || 0,
+    technical:Number(source.technical ?? source.technique ?? 0) || 0,
+    situation:Number(source.situation ?? 0) || 0,
+    game:Number(source.game ?? source.jeu ?? 0) || 0
+  };
+}
 function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   const sessionId = String(session.sessionId || session.id || '').trim();
   const attendance = {};
@@ -3635,7 +3644,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
     startTime:session.startTime || session.start || '',
     endTime:session.endTime || session.end || '',
     duration:Number(session.duration || 0),
-    procedure:session.procedure || session.sessionProcedure || {},
+    procedure:presencePlainProcedure(session.procedure || session.sessionProcedure),
     type:session.type || 'entrainement',
     title:session.theme || session.title || 'Séance',
     teamId:session.teamId || '',
@@ -3691,8 +3700,12 @@ async function presenceSaveEvent(event={}){
   const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
   const sessionId = session.sessionId || event.id;
   const now = new Date().toISOString();
-  await firebaseFns.setDoc(firebaseFns.doc(db, 'sessions', sessionId), {
+  const sessionPayload = {
     ...session,
+    procedure:presencePlainProcedure(session.procedure || event.procedure || event.sessionProcedure)
+  };
+  await firebaseFns.setDoc(firebaseFns.doc(db, 'sessions', sessionId), {
+    ...sessionPayload,
     id:sessionId,
     sessionId,
     source:'Présences',
