@@ -1698,84 +1698,8 @@ if(typeof window.v51Season==='function'){
   window.addEventListener('load',()=>setTimeout(()=>{try{inject();}catch(e){console.warn('CoachAnalysis inject',e)}},600));
 })();
 </script>
-<style id="v723-heatmap-tooltip-unified-css">.cp698-tooltip{position:fixed;z-index:99999;display:none;max-width:320px;background:rgba(7,17,31,.96);color:#fff;border:1px solid rgba(200,164,77,.78);border-radius:16px;padding:11px 13px;box-shadow:0 16px 34px rgba(0,0,0,.30);font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;font-size:12px;line-height:1.25;pointer-events:none;backdrop-filter:blur(8px)}.cp698-tooltip.show{display:block}.cp698-tooltip b{display:block;color:#F3DC8C;font-size:13px;margin-bottom:6px}.cp698-tooltip .row{display:flex;justify-content:space-between;gap:14px;border-top:1px solid rgba(255,255,255,.12);padding-top:5px;margin-top:5px}.cp698-tooltip .total{color:#bbf7d0;font-weight:1000;margin-bottom:3px}.cp698-tooltip .muted{color:#cbd5e1;font-size:11px;margin-top:5px}.cp694-cell{cursor:help!important}.cp694-cell:hover{outline:3px solid rgba(243,220,140,.75);z-index:6!important}.cp694-cell.cp698-open{outline:3px solid #F3DC8C;z-index:7!important}</style>
-<script id="v723-heatmap-tooltip-unified-js">
-(function(){
-  'use strict';
-  const Z=[1,2,3,4,5,6,7,8,9];
-  const US_DANGER=['but','tirCadre','tirNonCadre','centre','progression','entree20','recup','duelWon','duelLost'];
-  const ADV_DANGER=['butAdv','tirCadreAdv','tirNonCadreAdv','centreAdv','progressionAdv','entree20Adv','recupAdv','duelWonAdv','duelLostAdv'];
-  const LABELS={
-    but:'Buts',butAdv:'Buts adv.',tirCadre:'Tirs cadrés',tirCadreAdv:'Tirs cadrés adv.',tirNonCadre:'Tirs non cadrés',tirNonCadreAdv:'Tirs non cadrés adv.',centre:'Centres',centreAdv:'Centres adv.',progression:'Progressions',progressionAdv:'Progressions adv.',entree20:'Entrées 20m',entree20Adv:'Entrées 20m adv.',recup:'Récupérations',recupAdv:'Récupérations adv.',duelWon:'Duels gagnés',duelWonAdv:'Duels gagnés adv.',duelLost:'Duels perdus',duelLostAdv:'Duels perdus adv.'
-  };
-  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const num=v=>Number(v||0)||0;
-  const zoneOk=z=>{z=Number(z);return Number.isInteger(z)&&z>=1&&z<=9?z:null};
-  const row=z=>Math.ceil(Number(z)/3);
-  const col=z=>((Number(z)-1)%3)+1;
-  function zoneName(z,side){
-    const r=row(z), c=['gauche','axe','droite'][col(z)-1];
-    const b=side==='adv'?(r===1?'Zone basse adverse':r===2?'Zone médiane adverse':'Zone haute adverse'):(r===1?'Zone haute ASSE':r===2?'Zone médiane ASSE':'Zone basse ASSE');
-    return `${b} · ${c}`;
-  }
-  function sideFromCell(cell){const p=cell.closest('.cp-side-adv,.cp-side-us');return p&&p.classList.contains('cp-side-adv')?'adv':'us';}
-  function titleFromCell(cell){return cell.closest('.cp694-wrap')?.dataset?.title || cell.closest('.cp66-heat-card')?.querySelector('h4')?.textContent || '';}
-  function keysFromTitle(title,side){
-    const t=String(title||'').toLowerCase();
-    if(t.includes('récup')) return side==='adv'?['recupAdv']:['recup'];
-    if(t.includes('tir')) return side==='adv'?['butAdv','tirCadreAdv','tirNonCadreAdv']:['but','tirCadre','tirNonCadre'];
-    if(t.includes('centre')) return side==='adv'?['centreAdv']:['centre'];
-    if(t.includes('duel')) return side==='adv'?['duelWonAdv','duelLostAdv']:['duelWon','duelLost'];
-    if(t.includes('progress')||t.includes('20')) return side==='adv'?['progressionAdv','entree20Adv']:['progression','entree20'];
-    return side==='adv'?ADV_DANGER:US_DANGER;
-  }
-  function playerFromTitle(title){const s=String(title||''); if(s.startsWith('Actions '))return s.replace(/^Actions\s+/,'').trim(); const parts=s.split(' · '); return parts.length>1?parts.slice(1).join(' · ').trim():null;}
-  function zoneFromCell(cell){
-    const ds=zoneOk(cell.dataset?.zone); if(ds)return ds;
-    const cells=[...cell.parentElement.querySelectorAll('.cp694-cell')];
-    return zoneOk(cells.indexOf(cell)+1)||1;
-  }
-  function visibleCount(cell){const b=cell.querySelector('b');return num(b&&b.textContent);}
-  function collectCount(side,key,z,player){
-    z=zoneOk(z); if(!z)return 0;
-    try{
-      if(typeof window.cpHeatCollect==='function'){
-        const c=window.cpHeatCollect(side,[key],{player:player||undefined})||{};
-        return num(c[z]);
-      }
-    }catch(_){/* fallback below */}
-    try{
-      if(side==='adv') return num(window.state?.opp?.zones?.[key]?.[z]);
-      const names=player?[player]:Object.keys(window.state?.players||{});
-      return names.reduce((s,n)=>s+num(window.state?.players?.[n]?.zones?.[key]?.[z]),0);
-    }catch(_){return 0;}
-  }
-  function buildDetail(cell){
-    const side=sideFromCell(cell), title=titleFromCell(cell), player=playerFromTitle(title), z=zoneFromCell(cell), keys=keysFromTitle(title,side);
-    const displayed=visibleCount(cell);
-    const rows=[]; let total=0;
-    keys.forEach(k=>{const v=collectCount(side,k,z,player); if(v>0){rows.push([LABELS[k]||k,v]); total+=v;}});
-    // Sécurité absolue : le total tooltip doit toujours correspondre au nombre affiché sur la zone.
-    const finalTotal=displayed || total;
-    if(displayed>0 && total===0) rows.push(['Total zone',displayed]);
-    else if(displayed>0 && total!==displayed) rows.push(['Ajustement compteur',displayed-total]);
-    return `<b>${esc((player?player+' · ':'')+zoneName(z,side))}</b><div class="total">${finalTotal} action${finalTotal>1?'s':''}</div>`+
-      (rows.length?rows.map(([label,v])=>`<div class="row"><span>${esc(label)}</span><strong>${v}</strong></div>`).join(''):`<div class="row"><span>Aucune action enregistrée</span><strong>0</strong></div>`)+
-      `<div class="muted">Même source que la heatmap · Z${z}</div>`;
-  }
-  function tooltip(){let el=document.getElementById('cp698Tooltip'); if(!el){el=document.createElement('div');el.id='cp698Tooltip';el.className='cp698-tooltip';document.body.appendChild(el);} return el;}
-  function place(e){const el=tooltip(); const pad=14; let x=(e.clientX||20)+pad,y=(e.clientY||20)+pad; const r=el.getBoundingClientRect(); if(x+r.width>innerWidth-8)x=(e.clientX||20)-r.width-pad; if(y+r.height>innerHeight-8)y=(e.clientY||20)-r.height-pad; el.style.left=Math.max(8,x)+'px'; el.style.top=Math.max(8,y)+'px';}
-  function show(c,e){const el=tooltip(); el.innerHTML=buildDetail(c); el.classList.add('show'); place(e);}
-  document.addEventListener('pointerenter',e=>{const c=e.target.closest?.('.cp694-cell'); if(!c || c.closest('.zoneOverlay'))return; show(c,e);},true);
-  document.addEventListener('pointermove',e=>{const el=tooltip(); if(el.classList.contains('show'))place(e);},true);
-  document.addEventListener('pointerleave',e=>{const c=e.target.closest?.('.cp694-cell'); if(!c)return; tooltip().classList.remove('show'); c.classList.remove('cp698-open');},true);
-  document.addEventListener('click',e=>{const c=e.target.closest?.('.cp694-cell'); if(!c || c.closest('.zoneOverlay'))return; document.querySelectorAll('.cp694-cell.cp698-open').forEach(x=>x.classList.remove('cp698-open')); c.classList.add('cp698-open'); show(c,e);},true);
-  document.addEventListener('click',e=>{if(!e.target.closest?.('.cp694-cell'))tooltip().classList.remove('show');},false);
-  window.cpHeatmapTooltipCheck=function(){
-    return [...document.querySelectorAll('.cp694-cell')].map(c=>({title:titleFromCell(c),side:sideFromCell(c),zone:zoneFromCell(c),displayed:visibleCount(c)}));
-  };
-})();
-</script>
+<link rel="stylesheet" href="coach-stats/heatmap-tooltips.css">
+<script src="coach-stats/heatmap-tooltips.js"></script>
 <style id="coachpulse-v724-polish">:root{--cp724-green:#006b3a;--cp724-green2:#00a862;--cp724-gold:#c8a44d;--cp724-ink:#0a1710;--cp724-muted:#66756d;--cp724-line:#dfe8e3;--cp724-red:#dc2626}body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif!important}body.cp724-ready .page{max-width:1760px!important}body.cp724-ready .card,body.cp724-ready .visualCard,body.cp724-ready .playerCard,body.cp724-ready .impactCard,body.cp724-ready .kpi{border-radius:12px!important}.cp724-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 0}.cp724-actions button{min-height:42px;border-radius:12px!important;padding:9px 12px!important;flex:1 1 170px}.cp724-coach-card{background:#fff;border:1px solid var(--cp724-line);border-radius:12px;padding:14px;margin:10px 0;box-shadow:0 10px 22px rgba(7,18,13,.08)}.cp724-coach-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}.cp724-coach-head h3{margin:0!important;color:var(--cp724-green)!important}.cp724-coach-head span{background:#f4e6b8;color:#173c2b;border-radius:999px;padding:6px 10px;font-weight:1000;font-size:12px}.cp724-coach-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.cp724-coach-box{background:#f8fbf9;border:1px solid #e5eee8;border-radius:10px;padding:11px}.cp724-coach-box b{display:block;margin-bottom:5px;color:#0f3f2a}.cp724-coach-box ul{margin:0;padding-left:17px;font-weight:850;font-size:13px;line-height:1.36}.cp724-health{display:none!important}.cp724-health.ok:before{content:"";display:inline-block;width:8px;height:8px;background:#22c55e;border-radius:999px;margin-right:7px}.cp724-health.warn:before{content:"";display:inline-block;width:8px;height:8px;background:#f59e0b;border-radius:999px;margin-right:7px}.cp724-print-only{display:none}@media(max-width:900px){.cp724-coach-grid{grid-template-columns:1fr}}@media(max-width:560px){.cp724-coach-head{display:grid}.cp724-actions button{flex-basis:100%}}@media print{.tabs,.tt-header,.matchTop,.tools,.cp724-actions,.undoFloat,.playerActionPanel,.advFloat,.cp724-health{display:none!important}.tab.hide{display:block!important}.card,.cp724-coach-card{box-shadow:none!important;break-inside:avoid}.cp724-print-only{display:block}}</style>
 <script id="coachpulse-v724-upgrade">
 (function(){
