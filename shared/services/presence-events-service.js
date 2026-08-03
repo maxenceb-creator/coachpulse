@@ -6,14 +6,21 @@
   const STATUS_MAP = {
     present:{code:'P', label:'Présente'},
     absent:{code:'A', label:'Absente'},
+    excused:{code:'AJ', label:'Absence justifiée'},
     late:{code:'R', label:'En retard'},
     sick:{code:'M', label:'Malade'},
     injured:{code:'B', label:'Blessée'},
+    pole:{code:'PO', label:'Pôle Espoir'},
+    district:{code:'D', label:'District'},
     P:{code:'P', label:'Présente'},
     A:{code:'A', label:'Absente'},
+    ANJ:{code:'ANJ', label:'Absence non justifiée'},
+    AJ:{code:'AJ', label:'Absence justifiée'},
     R:{code:'R', label:'En retard'},
     M:{code:'M', label:'Malade'},
-    B:{code:'B', label:'Blessée'}
+    B:{code:'B', label:'Blessée'},
+    PO:{code:'PO', label:'Pôle Espoir'},
+    D:{code:'D', label:'District'}
   };
 
   function text(value){ return String(value ?? '').trim(); }
