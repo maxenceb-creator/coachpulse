@@ -170,6 +170,17 @@ function testMedicalDataStayLinkedToPlayerAndTeamIds(){
   assert(medicalSource.includes('teamId:injury.teamId||injury.playerSnapshot?.teamId'), 'Les évolutions médicales doivent reprendre le teamId de la blessure.');
 }
 
+function testGlobalExportsStayScoped(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(appSource.includes('function hasGlobalDataAccess'), 'Les exports globaux doivent distinguer les admins complets des éditeurs limités.');
+  assert(appSource.includes('function scopedCentralExportPayload'), 'Les exports Firebase doivent avoir un filtrage centralisé.');
+  assert(appSource.includes('return scopedCentralExportPayload(payload);'), 'Le payload Firebase exporté doit passer par le filtre global.');
+  assert(appSource.includes("if(!guardGlobalDataExportAction()) return;"), 'L’export central doit être réservé aux admins complets.');
+  assert(appSource.includes('return scopedPlayersForAccess(enrichPlayersWithTechnicalFootHints'), 'L’export joueurs doit respecter le périmètre teamId.');
+  assert(appSource.includes("$('#exportBackup').addEventListener('click', () => { if(guardGlobalDataExportAction())"), 'Les backups localStorage doivent être réservés aux admins complets.');
+}
+
 function testMatchDataStayLinkedToPlayerAndTeamIds(){
   const appSource = fs.readFileSync('app.js', 'utf8');
 
@@ -317,6 +328,7 @@ testPermissionsRespectTeamHistoryAndModuleScope();
 testModuleRegistry();
 testAthleticTestsStayLinkedToPlayerAndTeamIds();
 testMedicalDataStayLinkedToPlayerAndTeamIds();
+testGlobalExportsStayScoped();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
