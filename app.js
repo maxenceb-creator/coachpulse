@@ -2295,15 +2295,27 @@ async function adminListRawPlayers(){
   return players.sort((a,b) => label(a).localeCompare(label(b), 'fr'));
 }
 function playerAdminDiff(before={}, after={}){
-  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','poste','numero','foot','pied','meilleurPiedLabel','nationalite','nationality','leftClub','dernierClubQuitte','photo','status','commentaireInterne'];
+  const editable = ['nom','prenom','birth','dateNaissance','categorie','subCategory','team','teamId','teamIds','poste','numero','foot','pied','meilleurPiedLabel','nationalite','nationality','leftClub','dernierClubQuitte','photo','status','commentaireInterne'];
   const changes = {};
+  const comparable = value => Array.isArray(value) ? JSON.stringify(value) : String(value ?? '');
   editable.forEach(key => {
     const next = after[key];
     const prev = before[key];
     if(next === undefined) return;
-    if(String(prev ?? '') !== String(next ?? '')) changes[key] = {before:prev ?? '', after:next ?? ''};
+    if(comparable(prev) !== comparable(next)) changes[key] = {before:prev ?? '', after:next ?? ''};
   });
   return changes;
+}
+function normalizeAdminPlayerTeamIds(player={}, teamService=teamsService()){
+  const ids = [
+    player.teamId,
+    ...(Array.isArray(player.teamIds) ? player.teamIds : [])
+  ].map(value => String(value || '').trim()).filter(Boolean);
+  const clean = [...new Set(ids)];
+  if(clean.length) return clean;
+  const team = String(player.team || player.equipe || '').trim();
+  const teamId = team ? (teamService?.canonicalTeamId?.(team) || stableFirestoreId('team', team)) : '';
+  return teamId ? [teamId] : [];
 }
 async function writeChangeLog({collectionName, documentId, action, before, after, changes, summary}){
   const logId = stableFirestoreId('changeLog', Date.now(), collectionName, documentId);
@@ -2336,6 +2348,7 @@ async function adminCreatePlayer(data={}){
   clean.subCategory = String(clean.subCategory || clean.categorie || '').trim();
   clean.team = String(clean.team || service?.defaultClubTeamFromSubCategory?.(clean.subCategory || clean.categorie) || normalizeTeamFromCategory(clean.categorie || clean.subCategory) || '').trim();
   clean.teamId = clean.team ? (teamService?.canonicalTeamId?.(clean.team) || stableFirestoreId('team', clean.team)) : '';
+  clean.teamIds = normalizeAdminPlayerTeamIds(clean, teamService);
   clean.birth = String(clean.birth || clean.dateNaissance || '').trim();
   if(!clean.birth) throw new Error('Date de naissance obligatoire pour générer un playerId unique.');
   clean.dateNaissance = clean.birth;
@@ -2403,6 +2416,7 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   if(clean.prenom) clean.prenom = String(clean.prenom).trim();
   if((clean.categorie || clean.subCategory) && !clean.team) clean.team = service?.defaultClubTeamFromSubCategory?.(clean.subCategory || clean.categorie) || normalizeTeamFromCategory(clean.categorie || clean.subCategory);
   if(clean.team) clean.teamId = teamService?.canonicalTeamId?.(clean.team) || stableFirestoreId('team', clean.team);
+  if(clean.team || Array.isArray(clean.teamIds) || clean.teamId) clean.teamIds = normalizeAdminPlayerTeamIds({...before, ...clean}, teamService);
   if(clean.foot || clean.pied || clean.meilleurPiedLabel){
     clean.foot = String(clean.foot || clean.pied || clean.meilleurPiedLabel || '').trim();
     clean.pied = clean.foot;
