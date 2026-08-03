@@ -1666,7 +1666,8 @@
         {id:"sick", label:"Malade", short:"M", tone:"gray"},
         {id:"injured", label:"Blessée", short:"B", tone:"navy"},
         {id:"pole", label:"Pôle Espoir", short:"PO", tone:"purple"},
-        {id:"district", label:"District", short:"D", tone:"blue"}
+        {id:"district", label:"District", short:"D", tone:"blue"},
+        {id:"d2", label:"Entraînement groupe pro", short:"D2", tone:"dark", teamIds:["team-u19"]}
       ];
       const ATTENDANCE_CODE_TONES = {
         green:{bg:"#dcfce7", color:"#118048"},
@@ -1676,7 +1677,8 @@
         gray:{bg:"#e5e7eb", color:"#374151"},
         navy:{bg:"#111827", color:"#ffffff"},
         purple:{bg:"#ede9fe", color:"#6d28d9"},
-        blue:{bg:"#dbeafe", color:"#2563eb"}
+        blue:{bg:"#dbeafe", color:"#2563eb"},
+        dark:{bg:"#062016", color:"#f3dc8c"}
       };
       let calendarPageMonth = new Date();
       let selectedCalendarDate = isoDate(new Date());
@@ -1715,14 +1717,14 @@
         return {
           ...DEFAULT_PRESENCE_SETTINGS,
           ...saved,
-          attendanceCodes:normalizeAttendanceCodes(saved.attendanceCodes || DEFAULT_ATTENDANCE_CODES)
+          attendanceCodes:mergeAttendanceCodes(saved.attendanceCodes)
         };
       }
       function savePresenceSettings(settings){
         const next = {
           ...DEFAULT_PRESENCE_SETTINGS,
           ...settings,
-          attendanceCodes:normalizeAttendanceCodes(settings.attendanceCodes || DEFAULT_ATTENDANCE_CODES)
+          attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)
         };
         localStorage.setItem(PRESENCE_SETTINGS_KEY, JSON.stringify(next));
       }
@@ -1750,9 +1752,25 @@
             id,
             label:String(code.label || code.short || "Code").trim(),
             short:String(code.short || code.label || "?").trim().slice(0,4).toUpperCase(),
-            tone:ATTENDANCE_CODE_TONES[code.tone] ? code.tone : "green"
+            tone:ATTENDANCE_CODE_TONES[code.tone] ? code.tone : "green",
+            teamIds:[...new Set([
+              ...(Array.isArray(code.teamIds) ? code.teamIds : []),
+              ...(code.teamId ? [code.teamId] : [])
+            ].map(value => String(value || "").trim()).filter(Boolean))]
           };
         }).filter(code => code.label && code.short);
+      }
+      function mergeAttendanceCodes(codes){
+        const byId = new Map(normalizeAttendanceCodes(DEFAULT_ATTENDANCE_CODES).map(code => [code.id, code]));
+        normalizeAttendanceCodes(Array.isArray(codes) ? codes : []).forEach(code => {
+          const current = byId.get(code.id) || {};
+          byId.set(code.id, {
+            ...current,
+            ...code,
+            teamIds:code.teamIds?.length ? code.teamIds : (current.teamIds || [])
+          });
+        });
+        return [...byId.values()];
       }
       function parseDate(value){
         if(!value) return null;
@@ -1877,6 +1895,56 @@
         const deduped = service?.dedupePlayers ? service.dedupePlayers(normalized) : normalized;
         return deduped.sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
       }
+      function normalizePresenceEventForStorage(event={}){
+        const id = event.id || event.sessionId || event.eventId || "";
+        if(!id) return null;
+        const date = isoDate(parseDate(event.date || event.startDate || event.day || event.start) || new Date());
+        const teamId = eventTeamId(event);
+        const team = teamById(teamId);
+        const teamIds = [...new Set([
+          teamId,
+          ...(Array.isArray(event.teamIds) ? event.teamIds : []),
+          ...(Array.isArray(event.teamSnapshot?.teamIds) ? event.teamSnapshot.teamIds : [])
+        ].map(value => String(value || "").trim()).filter(Boolean))];
+        const normalized = {
+          ...event,
+          id,
+          sessionId:event.sessionId || id,
+          date,
+          teamId,
+          teamIds,
+          teamSnapshot:{
+            ...(event.teamSnapshot || {}),
+            teamId,
+            teamIds,
+            name:team?.name || event.team || event.equipe || "",
+            category:team?.category || event.category || event.categorie || ""
+          },
+          team:team?.name || event.team || event.equipe || "",
+          category:team?.category || event.category || event.categorie || "",
+          attendance:{}
+        };
+        Object.entries(event.attendance || {}).forEach(([playerId, raw]) => {
+          const entry = attendanceEntry({attendance:{[playerId]:raw}, duration:normalized.duration}, playerId);
+          if(!entry.status && !Number(entry.minutes || 0) && !String(entry.comment || "").trim()) return;
+          const player = playerById(playerId, date);
+          const snapshot = {
+            ...playerSnapshotForAttendance(player, teamId, date),
+            ...(raw?.playerSnapshot || {}),
+            playerId,
+            teamId,
+            teamIds
+          };
+          normalized.attendance[playerId] = {
+            ...entry,
+            attendanceId:raw?.attendanceId || `local-attendance-${normalized.id}-${playerId}`,
+            teamId,
+            teamIds,
+            playerSnapshot:snapshot
+          };
+        });
+        return normalized;
+      }
       function eventTitle(event){
         return event.title || event.theme || event.label || event.type || event.text || "Événement";
       }
@@ -1929,10 +1997,11 @@
       }
       function loadPresenceEvents(){
         const events = readJson(PRESENCE_EVENTS_KEY, []);
-        return Array.isArray(events) ? events : [];
+        return Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
       }
       function savePresenceEvents(events){
-        localStorage.setItem(PRESENCE_EVENTS_KEY, JSON.stringify(events));
+        const normalized = (Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id);
+        localStorage.setItem(PRESENCE_EVENTS_KEY, JSON.stringify(normalized));
       }
       function eventSyncStamp(event={}){
         return Date.parse(event.updatedAt || event.createdAt || "") || 0;
@@ -1966,7 +2035,9 @@
       async function pushPresenceEventToCloud(event){
         const api = centralDataApi();
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
-        return api.presenceSaveEvent(event);
+        const normalized = normalizePresenceEventForStorage(event);
+        if(!normalized.teamId) throw new Error("teamId obligatoire pour synchroniser l'événement.");
+        return api.presenceSaveEvent(normalized);
       }
       async function syncPresenceEventsToCloud(cloudEvents=[]){
         const api = centralDataApi();
@@ -2338,6 +2409,10 @@
       function attendanceStatuses(){
         return presenceSettings().attendanceCodes;
       }
+      function attendanceStatusesForTeam(teamId){
+        const targetTeamId = String(teamId || "").trim();
+        return attendanceStatuses().filter(status => !status.teamIds?.length || status.teamIds.includes(targetTeamId));
+      }
       function attendanceCodeTone(statusId){
         const tone = attendanceStatuses().find(status => status.id === statusId)?.tone || "green";
         return ATTENDANCE_CODE_TONES[tone] || ATTENDANCE_CODE_TONES.green;
@@ -2382,6 +2457,26 @@
         ];
         const player = (Array.isArray(rows) ? rows : []).find(row => String(row.playerId || row.id || "") === String(playerId || ""));
         return player ? playerForEventSeason(player, dateValue) : null;
+      }
+      function playerSnapshotForAttendance(player, teamId, dateValue){
+        const seasonal = playerForEventSeason(player || {}, dateValue);
+        const teamIds = [...new Set([
+          seasonal.teamId,
+          teamId,
+          ...(Array.isArray(seasonal.teamIds) ? seasonal.teamIds : [])
+        ].map(value => String(value || "").trim()).filter(Boolean))];
+        return {
+          playerId:seasonal.playerId || player?.playerId || "",
+          nom:seasonal.nom || "",
+          prenom:seasonal.prenom || "",
+          displayName:playerName(seasonal || player || {}),
+          team:seasonal.team || teamById(teamId)?.name || "",
+          teamId:seasonal.teamId || teamId || "",
+          teamIds,
+          categorie:seasonal.categorie || seasonal.category || "",
+          subCategory:seasonal.subCategory || seasonal.sousCategorie || "",
+          photo:seasonal.photo || ""
+        };
       }
       function playersFromPresenceEvents(events){
         const players = new Map();
@@ -2707,7 +2802,10 @@
         return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => [player.playerId, {
           status:"present",
           minutes:Number(duration || 0),
-          comment:""
+          comment:"",
+          teamId,
+          teamIds:[teamId],
+          playerSnapshot:playerSnapshotForAttendance(player, teamId, dateValue)
         }]));
       }
       function sessionProcedureFromForm(form){
@@ -2753,15 +2851,22 @@
       function mergeAttendanceForEvent(previousEvent, teamId, dateValue, duration){
         return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => {
           const previous = previousEvent?.attendance?.[player.playerId] ? attendanceEntry(previousEvent, player.playerId) : null;
+          const playerSnapshot = playerSnapshotForAttendance(player, teamId, dateValue);
           return [player.playerId, previous ? {
             ...previous,
             minutes:isPresentStatus(previous.status)
               ? Number(previous.minutes || duration || 0)
-              : Number(previous.minutes || 0)
+              : Number(previous.minutes || 0),
+            teamId,
+            teamIds:[teamId],
+            playerSnapshot
           } : {
             status:"present",
             minutes:Number(duration || 0),
-            comment:""
+            comment:"",
+            teamId,
+            teamIds:[teamId],
+            playerSnapshot
           }];
         }));
       }
@@ -2830,6 +2935,13 @@
           type,
           title:typeLabel(type),
           teamId:team.teamId,
+          teamIds:[team.teamId],
+          teamSnapshot:{
+            teamId:team.teamId,
+            teamIds:[team.teamId],
+            name:team.name,
+            category:team.category || ""
+          },
           team:team.name,
           category:team.category || "",
           attendance:previousEvent
@@ -2896,13 +3008,14 @@
           content.innerHTML = '<div class="empty-state">Aucune joueuse trouvée pour cette équipe.</div>';
           return;
         }
-        const counts = attendanceStatuses().reduce((acc, status) => ({...acc, [status.id]:0}), {});
+        const availableStatuses = attendanceStatusesForTeam(event.teamId);
+        const counts = availableStatuses.reduce((acc, status) => ({...acc, [status.id]:0}), {});
         players.forEach(player => {
           const entry = attendanceEntry(event, player.playerId);
           if(entry.status) counts[entry.status] = (counts[entry.status] || 0) + 1;
         });
         const selectedCount = players.reduce((sum, player) => sum + (attendanceEntry(event, player.playerId).status ? 1 : 0), 0);
-        const statusKpis = attendanceStatuses().map(status => `
+        const statusKpis = availableStatuses.map(status => `
           <div class="attendance-kpi">
             <strong>${counts[status.id] || 0}</strong>
             <span>${esc(status.label)}</span>
@@ -2910,7 +3023,7 @@
         `).join("");
         const rows = players.map(player => {
           const entry = attendanceEntry(event, player.playerId);
-          const statusButtons = attendanceStatuses().map(status => {
+          const statusButtons = availableStatuses.map(status => {
             const tone = attendanceCodeTone(status.id);
             return `
               <button class="attendance-status-button ${esc(status.id)} ${entry.status === status.id ? "active" : ""}" style="--code-bg:${esc(tone.bg)};--code-color:${esc(tone.color)}" type="button" data-attendance-status="${esc(status.id)}" data-attendance-event="${esc(event.id)}" data-player-id="${esc(player.playerId)}" aria-label="${esc(status.label)} pour ${esc(playerName(player))}" aria-pressed="${entry.status === status.id ? "true" : "false"}" title="${esc(status.label)}">${esc(status.short)}</button>
@@ -2960,6 +3073,10 @@
         if(index < 0) return;
         const current = events[index];
         const previous = attendanceEntry(current, playerId);
+        if(Object.prototype.hasOwnProperty.call(patch, "status")){
+          const allowedStatusIds = new Set(attendanceStatusesForTeam(current.teamId).map(status => status.id));
+          if(patch.status && !allowedStatusIds.has(patch.status)) patch.status = "";
+        }
         const next = {...previous, ...patch};
         if(Object.prototype.hasOwnProperty.call(patch, "status") && patch.minutes == null && previous.status !== patch.status){
           next.minutes = defaultAttendanceMinutes(patch.status, current);
@@ -2968,7 +3085,19 @@
         if(!next.status && !Number(next.minutes || 0) && !String(next.comment || "").trim()){
           delete attendance[playerId];
         }else{
-          attendance[playerId] = next;
+          const player = playerById(playerId, current.date);
+          const playerSnapshot = playerSnapshotForAttendance(player, current.teamId, current.date);
+          attendance[playerId] = {
+            ...next,
+            teamId:current.teamId || "",
+            teamIds:current.teamIds || (current.teamId ? [current.teamId] : []),
+            playerSnapshot:{
+              ...(next.playerSnapshot || playerSnapshot),
+              playerId,
+              teamId:current.teamId || "",
+              teamIds:current.teamIds || (current.teamId ? [current.teamId] : [])
+            }
+          };
         }
         events[index] = {
           ...current,

@@ -75,6 +75,61 @@ function testTeamIdsStayShared(){
   assert.equal(teams.categoryForSubCategory('U15'), 'U16');
 }
 
+function testManualTeamEditOverridesDefaultCategoryTeam(){
+  const edited = players.normalizePlayer({
+    playerId:'player-u16-surclassement',
+    nom:'Martin',
+    prenom:'Ava',
+    birth:'2010-03-01',
+    team:'U19',
+    teamId:teams.canonicalTeamId('U19'),
+    teamIds:[teams.canonicalTeamId('U16 A'), teams.canonicalTeamId('U19')],
+    currentSeason:'2026-2027',
+    seasonHistory:{
+      '2026-2027':{
+        categorie:'U16',
+        subCategory:'U16',
+        team:'U19',
+        teamId:teams.canonicalTeamId('U19'),
+        teamIds:[teams.canonicalTeamId('U16 A'), teams.canonicalTeamId('U19')]
+      }
+    }
+  });
+
+  assert.equal(edited.team, 'U19');
+  assert.equal(edited.teamId, teams.canonicalTeamId('U19'));
+  assert(edited.teamIds.includes(teams.canonicalTeamId('U16 A')));
+  assert(edited.teamIds.includes(teams.canonicalTeamId('U19')));
+}
+
+function testEditedTeamIdsDoNotReAddRemovedEligibleTeam(){
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const u19Id = teams.canonicalTeamId('U19');
+  const edited = players.normalizePlayer({
+    playerId:'player-u16-keeps-explicit-teamids',
+    nom:'Dupont',
+    prenom:'Lina',
+    birth:'2011-02-01',
+    team:'U16 A',
+    teamId:u16Id,
+    teamIds:[u16Id],
+    currentSeason:'2026-2027',
+    seasonHistory:{
+      '2026-2027':{
+        categorie:'U16',
+        subCategory:'U16',
+        team:'U16 A',
+        teamId:u16Id,
+        teamIds:[u16Id]
+      }
+    }
+  });
+
+  assert.equal(edited.teamId, u16Id);
+  assert(edited.teamIds.includes(u16Id));
+  assert(!edited.teamIds.includes(u19Id));
+}
+
 function testPlayerFilteringAndDedupe(){
   const active = players.normalizePlayer({nom:'Dupont', prenom:'Ava', birth:'2014-01-02', status:'active'});
   const duplicate = {...active, photo:'updated-photo'};
@@ -94,6 +149,8 @@ function testPermissions(){
   assert.equal(permissions.canAccessTeam(scopedCoach, u16Id), false);
   assert.equal(permissions.canAccessPlayer(scopedCoach, {playerId:'p1', teamId:u13Id}), true);
   assert.equal(permissions.canAccessPlayer(scopedCoach, {playerId:'p2', teamId:u16Id}), false);
+  assert.equal(permissions.canAccessRecord(scopedCoach, {playerId:'p1', playerSnapshot:{teamIds:[u13Id]}}), true);
+  assert.equal(permissions.canAccessRecord(scopedCoach, {playerId:'p2', playerSnapshot:{teamIds:[u16Id]}}), false);
 
   const admin = permissions.defaultProfile({uid:'admin', email:'admin@club.test'}, 'DIRIGEANT', 'ADMIN');
   assert.equal(permissions.canAccessTeam(admin, u16Id), true);
@@ -122,6 +179,32 @@ function testPermissionsRespectTeamHistoryAndModuleScope(){
   assert.equal(permissions.canViewModule(scopedCoach, {id:'database', active:true}), false);
 }
 
+function testModuleAllPlayersScopeStaysModuleSpecific(){
+  const u13Id = teams.canonicalTeamId('U13 A');
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const scopedCoach = permissions.defaultProfile({uid:'prep-u13', email:'prep@club.test'}, 'PREPARATEUR_PHYSIQUE', 'SAISIE');
+  scopedCoach.authorizedTeamIds = [u13Id];
+  scopedCoach.allowedModules = ['tests-athletiques', 'presences'];
+  scopedCoach.modulePermissions = {
+    'tests-athletiques':{read:true, write:true},
+    presences:{read:true, write:true}
+  };
+  scopedCoach.moduleScopes = {
+    'tests-athletiques':{allPlayers:true}
+  };
+  const u16Player = {playerId:'player-u16', teamId:u16Id, teamIds:[u16Id]};
+  const u16Record = {playerId:'player-u16', teamId:u16Id, playerSnapshot:u16Player};
+
+  assert.equal(permissions.canAccessPlayer(scopedCoach, u16Player), false);
+  assert.equal(permissions.canAccessAllPlayersForModule(scopedCoach, 'tests-athletiques'), true);
+  assert.equal(permissions.canAccessPlayerForModule(scopedCoach, u16Player, 'tests-athletiques'), true);
+  assert.equal(permissions.canAccessRecordForModule(scopedCoach, u16Record, 'tests-athletiques'), true);
+  assert.equal(permissions.filterAuthorizedPlayersForModule(scopedCoach, [u16Player], 'tests-athletiques').length, 1);
+  assert.equal(permissions.canAccessAllPlayersForModule(scopedCoach, 'presences'), false);
+  assert.equal(permissions.canAccessPlayerForModule(scopedCoach, u16Player, 'presences'), false);
+  assert.equal(permissions.filterAuthorizedPlayersForModule(scopedCoach, [u16Player], 'presences').length, 0);
+}
+
 function testModuleRegistry(){
   const catalog = modules.moduleRegistry();
   const ids = catalog.map(module => module.id);
@@ -133,6 +216,234 @@ function testModuleRegistry(){
   const databaseTool = modules.moduleToTool(modules.getModule('database'));
   assert.equal(databaseTool.admin, true);
   assert.equal(databaseTool.src, 'pages/admin-database.html');
+}
+
+function testAthleticTestsStayLinkedToPlayerAndTeamIds(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const athleticSource = fs.readFileSync('pages/tests-athletiques.html', 'utf8');
+  const playerProfileRenderSource = fs.readFileSync('pages/player-profile/playerProfileRender.js', 'utf8');
+
+  assert(appSource.includes("vma:{type:'vma'"), 'La VMA doit rester normalisée dans les métriques athlétiques.');
+  assert(playerProfileRenderSource.includes("vma:{label:'VMA'"), 'La fiche individuelle doit afficher la VMA athlétique.');
+  assert(appSource.includes('const readScopedPhysicalTests = async () =>'), 'Les tests athlétiques Firestore doivent être lus via une requête limitée au périmètre autorisé.');
+  assert(appSource.includes("readWhere('teamIds', 'array-contains-any', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par teamIds.');
+  assert(appSource.includes("readWhere('playerId', 'in', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par playerId.');
+  assert(appSource.includes('filterAuthorizedRecords(normalizeAthleticRows'), 'Les tests athlétiques chargés doivent être filtrés par autorisations.');
+  assert(appSource.includes("readWhere(name, 'teamIds', 'array-contains', teamId)"), 'La fiche équipe doit lire les tests via teamIds.');
+  assert(athleticSource.includes('playerSnapshotForAthletic'), 'La page Tests athlétiques doit envoyer une snapshot joueuse.');
+  assert(athleticSource.includes('teamIds:snapshot.teamIds'), 'La page Tests athlétiques doit envoyer les teamIds dans le payload.');
+}
+
+function testMedicalDataStayLinkedToPlayerAndTeamIds(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const medicalSource = fs.readFileSync('pages/suivi-medical.html', 'utf8');
+
+  assert(appSource.includes('function medicalTeamIdsFromSources'), 'Le médical doit centraliser les teamIds.');
+  assert(appSource.includes('const enrichAndFilter = source =>'), 'Les lectures médicales doivent hériter du périmètre des blessures parentes.');
+  assert(appSource.includes('filterAuthorizedRecords(scopedInjuries)'), 'Les lectures médicales doivent être filtrées par autorisations.');
+  assert(appSource.includes("['medicalFollowUps','medicalFollowUps']"), 'Les suivis médicaux doivent être lus dans le périmètre playerId/teamId.');
+  assert(appSource.includes('medicalFollowUps:filterAuthorizedRecords'), 'Les suivis médicaux doivent être filtrés par autorisations.');
+  assert(appSource.includes("readWhere(collectionName, 'teamIds', 'array-contains-any', chunk)"), 'Les lectures médicales doivent interroger les teamIds.');
+  assert(appSource.includes("readWhere(collectionName, 'playerId', 'in', chunk)"), 'Les lectures médicales doivent interroger les playerId autorisés.');
+  assert(appSource.includes("throw new Error('Accès non autorisé à cette joueuse.')"), 'Les écritures médicales doivent vérifier la joueuse.');
+  assert(appSource.includes("throw new Error('Accès non autorisé à cette équipe.')"), 'Les écritures médicales doivent vérifier le teamId.');
+  assert(medicalSource.includes('teamIds=[...new Set'), 'Le formulaire médical doit transmettre les teamIds.');
+  assert(medicalSource.includes('teamId:injury.teamId||injury.playerSnapshot?.teamId'), 'Les évolutions médicales doivent reprendre le teamId de la blessure.');
+}
+
+function testGlobalExportsStayScoped(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(appSource.includes('function hasGlobalDataAccess'), 'Les exports globaux doivent distinguer les admins complets des éditeurs limités.');
+  assert(appSource.includes('function scopedCentralExportPayload'), 'Les exports Firebase doivent avoir un filtrage centralisé.');
+  assert(appSource.includes('return scopedCentralExportPayload(payload);'), 'Le payload Firebase exporté doit passer par le filtre global.');
+  assert(appSource.includes("if(!guardGlobalDataExportAction()) return;"), 'L’export central doit être réservé aux admins complets.');
+  assert(appSource.includes('return scopedPlayersForAccess(enrichPlayersWithTechnicalFootHints'), 'L’export joueurs doit respecter le périmètre teamId.');
+  assert(appSource.includes("$('#exportBackup').addEventListener('click', () => { if(guardGlobalDataExportAction())"), 'Les backups localStorage doivent être réservés aux admins complets.');
+}
+
+function testDataHubImportsStayScoped(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(appSource.includes('function validateImportDocsAccess'), 'Les imports doivent valider les documents préparés avant écriture.');
+  assert(appSource.includes('validateImportDocsAccess(docs);'), 'Les flux d’import doivent appeler le verrou teamId/playerId.');
+  assert(appSource.includes("if(hasGlobalDataAccess()) await exportCentralFirestore('json');"), 'Les imports ne doivent lancer un backup global que pour un admin complet.');
+  assert(appSource.includes("teamIds:[...new Set([p.teamId"), 'Les joueuses Data Hub doivent conserver leurs teamIds.');
+  assert(appSource.includes('teamIds:teamId ? [teamId] : []'), 'Les séances Data Hub doivent conserver leurs teamIds.');
+  assert(appSource.includes('teamIds:Array.isArray(linkedPlayer.teamIds)'), 'Les tests Data Hub doivent transmettre les teamIds dans la snapshot joueuse.');
+}
+
+function testFirestoreRulesProtectExistingAndIncomingScope(){
+  const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
+  const scopedCollections = ['players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps','workloads','convocations','individualReports'];
+
+  assert(!rulesSource.includes('allow create, update: if canWriteSportData()'), 'Les règles sportives ne doivent pas grouper create/update sans vérifier resource.data.');
+  assert(!rulesSource.includes('allow create, update: if canWriteMedicalData()'), 'Les règles médicales ne doivent pas grouper create/update sans vérifier resource.data.');
+  assert(!rulesSource.includes('allow create, update: if canWritePhysicalData()'), 'Les règles physiques ne doivent pas grouper create/update sans vérifier resource.data.');
+  scopedCollections.forEach(collection => {
+    assert(rulesSource.includes(`match /${collection}/`), `La collection ${collection} doit être déclarée dans firestore.rules.`);
+  });
+  assert(rulesSource.includes('canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data)'), 'Les updates doivent valider l’ancien et le nouveau périmètre teamId/playerId.');
+  assert(rulesSource.includes('match /{document=**}'), 'Les règles doivent conserver le bloc catch-all.');
+  assert(rulesSource.includes('allow read, write: if false;'), 'Le bloc catch-all doit refuser les accès non déclarés.');
+}
+
+function testAccessRegressionSurfaceStaysComplete(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
+  const permissionsSource = fs.readFileSync('shared/services/permissions-service.js', 'utf8');
+  const playersSource = fs.readFileSync('shared/services/players-service.js', 'utf8');
+  const teamsSource = fs.readFileSync('shared/services/teams-service.js', 'utf8');
+
+  [
+    'getAuthorizedTeamIds',
+    'canAccessTeam:canAccessTeamId',
+    'canAccessPlayer:canAccessPlayerRecord',
+    'canAccessRecord',
+    'filterAuthorizedTeams',
+    'filterAuthorizedPlayers',
+    'filterAuthorizedRecords'
+  ].forEach(exportName => {
+    assert(appSource.includes(exportName), `Le moteur d'autorisation global doit exposer ${exportName}.`);
+  });
+
+  [
+    'function purgeUnauthorizedLocalData',
+    'function clearSensitiveLocalData',
+    'async function playerProfileLoadData',
+    'async function teamProfileLoadData',
+    'async function medicalListData',
+    'async function athleticListData',
+    'async function presenceListEvents',
+    'function validateImportDocsAccess',
+    'function scopedCentralExportPayload'
+  ].forEach(functionName => {
+    assert(appSource.includes(functionName), `${functionName} doit rester présent pour sécuriser lectures, caches, imports et exports.`);
+  });
+
+  [
+    'function teamIds',
+    'function canAccessTeam',
+    'function canAccessPlayer',
+    'function canAccessRecord',
+    'function filterAuthorizedTeams',
+    'function filterAuthorizedPlayers',
+    'function filterAuthorizedPlayersForModule',
+    'function filterAuthorizedRecords'
+  ].forEach(functionName => {
+    assert(permissionsSource.includes(functionName), `${functionName} doit rester centralisé dans permissions-service.`);
+  });
+  assert(permissionsSource.includes('getAuthorizedTeamIds:teamIds'), 'permissions-service doit exposer getAuthorizedTeamIds via son service public.');
+
+  [
+    'matchEvents',
+    'attendance',
+    'technicalTests',
+    'physicalTests',
+    'injuries',
+    'medicalFollowUps',
+    'convocations',
+    'individualReports'
+  ].forEach(collectionName => {
+    assert(playersSource.includes(`'${collectionName}'`), `${collectionName} doit rester dans les collections liées au playerId.`);
+  });
+
+  assert(teamsSource.includes("name:'U19', category:'U19', subCategories:['U16','U17','U18','U19']"), 'U16 doit rester rattachable à U19 pour les surclassements.');
+  assert(rulesSource.includes('function canAccessScopedData(data)'), 'Les règles Firestore doivent conserver le verrou teamId/playerId central.');
+  assert((rulesSource.match(/canAccessScopedData\(resource\.data\) && canAccessScopedData\(request\.resource\.data\)/g) || []).length >= 10, 'Les updates Firestore doivent contrôler ancien et nouveau périmètre sur les collections sensibles.');
+}
+
+function testMatchDataStayLinkedToPlayerAndTeamIds(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(appSource.includes('const matchTeamIds = [...new Set'), 'Les matchs doivent conserver une liste teamIds stable.');
+  assert(appSource.includes('teamSnapshot:{team:matchTeam'), 'Les matchs doivent exposer une snapshot équipe.');
+  assert(appSource.includes('const eventTeamIds = [...new Set'), 'Les événements de match doivent conserver leurs teamIds.');
+  assert(appSource.includes('const playerSnapshot = eventPlayerId ?'), 'Les événements de match liés à une joueuse doivent exposer une playerSnapshot.');
+  assert(appSource.includes('matchSnapshot:{...matchSnapshot'), 'Les événements de match doivent exposer une matchSnapshot.');
+
+  const u13Id = teams.canonicalTeamId('U13 A');
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const scopedCoach = permissions.defaultProfile({uid:'coach-u13', email:'coach@club.test'}, 'ENTRAINEUR', 'SAISIE');
+  scopedCoach.authorizedTeamIds = [u13Id];
+
+  assert.equal(permissions.canAccessRecord(scopedCoach, {matchSnapshot:{teamIds:[u13Id]}}), true);
+  assert.equal(Boolean(permissions.canAccessRecord(scopedCoach, {matchSnapshot:{teamIds:[u16Id]}})), false);
+}
+
+function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
+  const events = [{
+    id:'presence-event-test',
+    date:'2026-08-03',
+    startTime:'18:00',
+    endTime:'19:30',
+    duration:90,
+    type:'entrainement',
+    teamId:'team-u13-a',
+    teamIds:['team-u13-a'],
+    team:'U13 A',
+    attendance:{
+      'player-a':{
+        status:'present',
+        minutes:90,
+        comment:'OK',
+        playerSnapshot:{
+          playerId:'player-a',
+          prenom:'Ava',
+          nom:'Dupont',
+          teamId:'team-u13-a',
+          teamIds:['team-u13-a']
+        }
+      },
+      'player-b':{
+        status:'excused',
+        minutes:0,
+        comment:'Sélection',
+        playerSnapshot:{
+          playerId:'player-b',
+          prenom:'Lina',
+          nom:'Martin',
+          teamId:'team-u13-a',
+          teamIds:['team-u13-a']
+        }
+      }
+    }
+  }];
+  const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
+  const window = loadBrowserScript('shared/services/presence-events-service.js', {
+    localStorage:{
+      getItem(key){ return key === 'coachpulse:presenceEvents:v1' ? JSON.stringify(events) : null; },
+      setItem(){},
+      removeItem(){}
+    }
+  });
+
+  const byTeam = window.CoachPulsePresenceEventsService.collectionsForTeam('team-u13-a');
+  const byPlayer = window.CoachPulsePresenceEventsService.collectionsForPlayer('player-a');
+
+  assert.equal(byTeam.sessions.length, 1);
+  assert.equal(byTeam.attendance.length, 2);
+  assert.equal(byTeam.attendance[0].playerId, 'player-a');
+  assert.equal(byTeam.attendance[0].teamId, 'team-u13-a');
+  assert.equal(byTeam.attendance[0].teamIds.join(','), 'team-u13-a');
+  assert.equal(byTeam.attendance[1].status, 'AJ');
+  assert.equal(byPlayer.sessions[0].teamId, 'team-u13-a');
+  assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
+  assert(presencePageSource.includes('function normalizePresenceEventForStorage'), 'La page Présences doit normaliser les événements avant stockage.');
+  assert(presencePageSource.includes('return api.presenceSaveEvent(normalized);'), 'La synchronisation cloud doit envoyer un événement normalisé.');
+}
+
+function testPresenceD2CodeStaysScopedToU19(){
+  const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
+  const presenceServiceSource = fs.readFileSync('shared/services/presence-events-service.js', 'utf8');
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(presencePageSource.includes('short:"D2"'), 'Le code D2 doit être disponible dans les paramètres Présences.');
+  assert(presencePageSource.includes('teamIds:["team-u19"]'), 'Le code D2 doit rester limité au teamId U19.');
+  assert(presencePageSource.includes('function attendanceStatusesForTeam'), 'La feuille de présence doit filtrer les codes selon le teamId.');
+  assert(presencePageSource.includes('allowedStatusIds.has(patch.status)'), 'La sauvegarde doit refuser un code non autorisé pour l’équipe.');
+  assert(presenceServiceSource.includes("D2:{code:'D2'"), 'Le service partagé doit normaliser le code D2.');
+  assert(appSource.includes("'D2'"), 'Les imports Présences doivent reconnaître le code D2.');
 }
 
 function testPlayerProfileDataFallsBackToSelectedPlayerOnly(){
@@ -196,10 +507,22 @@ function testPlayerProfileRenderStartsEmptyAndUsesPlayerIds(){
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
+testManualTeamEditOverridesDefaultCategoryTeam();
+testEditedTeamIdsDoNotReAddRemovedEligibleTeam();
 testPlayerFilteringAndDedupe();
 testPermissions();
 testPermissionsRespectTeamHistoryAndModuleScope();
+testModuleAllPlayersScopeStaysModuleSpecific();
 testModuleRegistry();
+testAthleticTestsStayLinkedToPlayerAndTeamIds();
+testMedicalDataStayLinkedToPlayerAndTeamIds();
+testGlobalExportsStayScoped();
+testDataHubImportsStayScoped();
+testFirestoreRulesProtectExistingAndIncomingScope();
+testAccessRegressionSurfaceStaysComplete();
+testMatchDataStayLinkedToPlayerAndTeamIds();
+testPresenceEventsStayLinkedToPlayerAndTeamIds();
+testPresenceD2CodeStaysScopedToU19();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
 Promise.resolve()

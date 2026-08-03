@@ -13,6 +13,33 @@
 body{background:#f3f5f4!important;padding-bottom:0!important}
 .head,.hub-head{display:none!important}
 main{padding-top:14px!important}
+body{overflow-x:hidden!important}
+main,.layout,.card,.body-card,.body-card>*{min-width:0!important;max-width:100%!important}
+.field label,.card h2{overflow-wrap:normal!important;word-break:normal!important;hyphens:none!important;line-height:1.1!important}
+.field label{text-wrap:balance}
+.actions button{min-width:min(170px,100%)!important;white-space:normal!important;line-height:1.08!important}
+@media(max-width:900px){
+  main{padding:10px!important}
+  .layout,.body-card,.form-grid,.filters,.profile-grid,.summary-row{grid-template-columns:1fr!important}
+  .body-map{min-height:560px!important}
+  .zone-panel{min-height:120px!important}
+  .actions{display:grid!important;grid-template-columns:1fr!important}
+  .actions button{width:100%!important}
+}
+@media(min-width:901px) and (max-width:1180px){
+  .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+}
+@media(max-width:700px){
+  .body-map{min-height:480px!important}
+  .silhouette{inset:18px 38px!important}
+  .card h2{font-size:clamp(22px,7vw,32px)!important}
+}
+main{overflow-x:clip!important}
+.layout{grid-template-columns:repeat(auto-fit,minmax(min(520px,100%),1fr))!important}
+.body-card{grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr))!important}
+.form-grid{grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))!important}
+.field,input,select,textarea{min-width:0!important;max-width:100%!important}
+.zone-panel,textarea{overflow-wrap:anywhere!important}
 
 </style>
 </head>
@@ -98,7 +125,7 @@ const api=()=>window.parent?.CoachPulseCentralData;
 const APP_OPEN_DATE=new Date();
 const zones=[
 ['Tête',50,8],['Cou',50,15],['Épaule gauche',36,21],['Épaule droite',64,21],['Bras gauche',27,32],['Bras droit',73,32],['Coude gauche',22,43],['Coude droit',78,43],['Poignet gauche',19,55],['Poignet droit',81,55],['Main gauche',17,64],['Main droite',83,64],['Dos',50,31],['Lombaires',50,45],['Hanche gauche',42,52],['Hanche droite',58,52],['Cuisse gauche',42,65],['Cuisse droite',58,65],['Genou gauche',41,78],['Genou droit',59,78],['Mollet gauche',40,88],['Mollet droit',60,88],['Cheville gauche',39,96],['Cheville droite',61,96],['Pied gauche',35,99],['Pied droit',65,99]];
-let players=[], data={injuries:[],injuryUpdates:[],medicalAppointments:[],rehabRoutines:[]}, selectedZone='', filtered=[], caps={canRead:false,canWrite:false,canExport:false,role:'STAFF'};
+let players=[], data={injuries:[],injuryUpdates:[],medicalAppointments:[],rehabRoutines:[],medicalFollowUps:[]}, selectedZone='', filtered=[], caps={canRead:false,canWrite:false,canExport:false,role:'STAFF'};
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 function pid(p){return p.playerId||p.id}
 function upper(v){return String(v??'').trim().toUpperCase()}
@@ -216,9 +243,33 @@ function renderPlayerMedical(){
   bindProfileInputs(id);
 }
 function renderFilters(){const seasons=unique([currentSeason(),...data.injuries.map(injurySeason)]);const previous={season:$('#filterSeason')?.value||'',player:$('#filterPlayer')?.value||'',cat:$('#filterCat')?.value||'',team:$('#filterTeam')?.value||''};$('#filterSeason').innerHTML='<option value="">Saison courante</option><option value="all">Toutes saisons</option>'+seasons.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');if([...$('#filterSeason').options].some(o=>o.value===previous.season))$('#filterSeason').value=previous.season;const seasonPlayers=sortedPlayersForSelect();fillPlayerSelect($('#filterPlayer'),{empty:'Joueuse',showCat:false});if([...$('#filterPlayer').options].some(o=>o.value===previous.player))$('#filterPlayer').value=previous.player;fill('#filterCat',unique(seasonPlayers.map(p=>playerMainCategory(p))),'Catégorie');if([...$('#filterCat').options].some(o=>o.value===previous.cat))$('#filterCat').value=previous.cat;fill('#filterTeam',unique(seasonPlayers.map(p=>p.team)),'Équipe');if([...$('#filterTeam').options].some(o=>o.value===previous.team))$('#filterTeam').value=previous.team;fill('#filterZone',zones.map(z=>z[0]),'Zone');fillPlayerSelect($('#playerSelect'),{empty:'Choisir une joueuse',showCat:false})}
-function readForm(){const p=playerById($('#playerSelect').value);const declaredAt=$('#declaredAt').value;const season=api()?.seasonFromDate?.(declaredAt)||currentSeason();const ps=api()?.playerForSeason?.(p,season)||p;return{playerId:$('#playerSelect').value,playerSnapshot:{nom:upper(ps.nom||''),prenom:upper(ps.prenom||''),categorie:playerMainCategory(ps)||'',subCategory:playerSubCategory(ps)||'',team:ps.team||'',teamId:ps.teamId||'',photo:ps.photo||'',poste:ps.poste||''},season,declaredAt,bodyZone:$('#bodyZone').value.trim(),side:$('#side').value,injuryType:$('#injuryType').value.trim(),description:$('#description').value.trim(),painLevel:Number($('#painLevel').value||0),context:$('#context').value,availability:$('#availability').value,absenceDuration:$('#absenceDuration').value.trim(),estimatedReturnDate:$('#estimatedReturnDate').value,urgency:$('#urgency').value,staffComment:$('#staffComment').value.trim(),status:'active',medicalFollowUp:{physioBooked:$('#physioBooked').value,physioDate:$('#physioDate').value,physioReport:$('#physioReport').value.trim(),doctorBooked:$('#doctorBooked').value,doctorDate:$('#doctorDate').value,doctorReport:$('#doctorReport').value.trim(),exams:$('#exams').value,prescription:$('#prescription').value.trim(),returnAuthorization:$('#returnAuthorization').value}}}
+function readForm(){
+  const p=playerById($('#playerSelect').value);
+  const declaredAt=$('#declaredAt').value;
+  const season=api()?.seasonFromDate?.(declaredAt)||currentSeason();
+  const ps=api()?.playerForSeason?.(p,season)||p;
+  const teamIds=[...new Set([ps.teamId,...(Array.isArray(ps.teamIds)?ps.teamIds:[])].filter(Boolean))];
+  const teamId=ps.teamId||teamIds[0]||'';
+  return{
+    playerId:$('#playerSelect').value,
+    teamId,
+    teamIds,
+    playerSnapshot:{
+      nom:upper(ps.nom||''),
+      prenom:upper(ps.prenom||''),
+      categorie:playerMainCategory(ps)||'',
+      subCategory:playerSubCategory(ps)||'',
+      team:ps.team||'',
+      teamId,
+      teamIds,
+      photo:ps.photo||'',
+      poste:ps.poste||''
+    },
+    season,declaredAt,bodyZone:$('#bodyZone').value.trim(),side:$('#side').value,injuryType:$('#injuryType').value.trim(),description:$('#description').value.trim(),painLevel:Number($('#painLevel').value||0),context:$('#context').value,availability:$('#availability').value,absenceDuration:$('#absenceDuration').value.trim(),estimatedReturnDate:$('#estimatedReturnDate').value,urgency:$('#urgency').value,staffComment:$('#staffComment').value.trim(),status:'active',medicalFollowUp:{physioBooked:$('#physioBooked').value,physioDate:$('#physioDate').value,physioReport:$('#physioReport').value.trim(),doctorBooked:$('#doctorBooked').value,doctorDate:$('#doctorDate').value,doctorReport:$('#doctorReport').value.trim(),exams:$('#exams').value,prescription:$('#prescription').value.trim(),returnAuthorization:$('#returnAuthorization').value}
+  };
+}
 async function saveInjury(){try{const item=readForm();if(!item.playerId||!item.bodyZone)return setStatus('Joueuse et zone obligatoires.',true);const saved=await api().medicalSaveInjury(item);setStatus('Fiche blessure enregistrée.');await load();$('#updateInjury').value=saved.injuryId||saved.id}catch(e){setStatus(e.message||String(e),true)}}
-async function saveUpdate(){try{const injuryId=$('#updateInjury').value;if(!injuryId)return setStatus('Choisis une blessure à mettre à jour.',true);const injury=data.injuries.find(i=>(i.injuryId||i.id)===injuryId)||{};await api().medicalAddUpdate(injuryId,{playerId:injury.playerId,date:$('#updateDate').value,painLevel:$('#updatePain').value,status:$('#updateStatus').value,comment:$('#updateComment').value.trim(),nextStep:$('#nextStep').value.trim(),nextControlDate:$('#nextControlDate').value});setStatus('Évolution ajoutée.');await load()}catch(e){setStatus(e.message||String(e),true)}}
+async function saveUpdate(){try{const injuryId=$('#updateInjury').value;if(!injuryId)return setStatus('Choisis une blessure à mettre à jour.',true);const injury=data.injuries.find(i=>(i.injuryId||i.id)===injuryId)||{};await api().medicalAddUpdate(injuryId,{playerId:injury.playerId,teamId:injury.teamId||injury.playerSnapshot?.teamId||'',teamIds:injury.teamIds||injury.playerSnapshot?.teamIds||[],playerSnapshot:injury.playerSnapshot||{},date:$('#updateDate').value,painLevel:$('#updatePain').value,status:$('#updateStatus').value,comment:$('#updateComment').value.trim(),nextStep:$('#nextStep').value.trim(),nextControlDate:$('#nextControlDate').value});setStatus('Évolution ajoutée.');await load()}catch(e){setStatus(e.message||String(e),true)}}
 function resetForm(){document.querySelectorAll('input,textarea').forEach(el=>{if(!el.id.startsWith('filter')&&!['q','updatePain'].includes(el.id))el.value=''});$('#painLevel').value=5;$('#updatePain').value=4;selectedZone='';renderBody();renderZonePanel()}
 async function load(){try{setStatus('Chargement...');players=(await api().medicalListPlayers()).map(normalizeMedicalPlayer);data=await api().medicalListData();renderFilters();renderKpis();renderBody();renderZonePanel();renderTable();setStatus(`${data.injuries.length} fiche(s) médicale(s).`)}catch(e){setStatus(e.message||String(e),true)}}
 function applyCaps(){caps=api()?.medicalCapabilities?.()||caps;$('#saveInjuryBtn').disabled=!caps.canWrite;$('#saveUpdateBtn').disabled=!caps.canWrite;$('#exportJsonBtn').style.display=caps.canExport?'':'none';$('#exportCsvBtn').style.display=caps.canExport?'':'none';if(!caps.canWrite)setStatus('Consultation seule pour ce rôle.',false)}
