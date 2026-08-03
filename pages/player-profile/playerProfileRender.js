@@ -192,14 +192,7 @@
   }
   function renderAttendanceTable(rows=[]){
     const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,8);
-    return table(
-      ['Date','Statut','Minutes','Commentaire'],
-      sorted.map(row => {
-        const comment = row.comment || row.commentaire || row.note || '';
-        return `<tr><td>${esc(Filters.dateOf(row) || '-')}</td><td>${esc(row.status || row.code || '-')}</td><td>${esc(row.minutes || row.duration || '-')}</td><td>${comment ? esc(comment) : '<span class="muted">-</span>'}</td></tr>`;
-      }),
-      'Aucune présence sur cette période.'
-    );
+    return table(['Date','Statut','Minutes'], sorted.map(row => `<tr><td>${esc(Filters.dateOf(row) || '-')}</td><td>${esc(row.status || row.code || '-')}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`), 'Aucune présence sur cette période.');
   }
   function renderMatchStats(rows=[]){
     const grouped = Object.entries(rows.reduce((out,row) => {

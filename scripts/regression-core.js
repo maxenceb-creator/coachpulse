@@ -477,12 +477,6 @@ function testPlayerProfileRenderStartsEmptyAndUsesPlayerIds(){
   assert(emptyIdentity.includes('Sélectionne une joueuse pour charger sa fiche complète.'));
 }
 
-function testPlayerProfileDisplaysAttendanceComments(){
-  const source = fs.readFileSync('pages/player-profile/playerProfileRender.js', 'utf8');
-  assert(source.includes("'Commentaire'"), 'La fiche individuelle doit afficher une colonne commentaire dans les présences.');
-  assert(source.includes('row.comment || row.commentaire || row.note'), 'La fiche individuelle doit récupérer les commentaires de séance liés au playerId.');
-}
-
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -502,7 +496,6 @@ testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPresenceD2CodeStaysScopedToU19();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
-testPlayerProfileDisplaysAttendanceComments();
 
 Promise.resolve()
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)
