@@ -12,7 +12,7 @@
     {name:'U13 A', category:'U13', subCategories:['U12','U13','U14']},
     {name:'U13 B', category:'U13', subCategories:['U12','U13']},
     {name:'U16 A', category:'U16', subCategories:['U15','U16']},
-    {name:'U19', category:'U19', subCategories:['U17','U18','U19']},
+    {name:'U19', category:'U19', subCategories:['U16','U17','U18','U19']},
     {name:'R1', category:'SENIORS', subCategories:['SENIORS']}
   ];
   const DEFAULT_DB_OPTIONS = {

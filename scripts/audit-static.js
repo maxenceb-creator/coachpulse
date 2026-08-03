@@ -12,7 +12,9 @@ const requiredFiles = [
   'pages/team-profile/teamProfile.js',
   'shared/services/permissions-service.js',
   'shared/services/players-service.js',
-  'shared/services/teams-service.js'
+  'shared/services/teams-service.js',
+  'scripts/pwa-tablet-check.js',
+  'docs/pwa-tablet-checklist.md'
 ];
 
 const conflictMarkers = ['<<<<<<<', '=======', '>>>>>>>'];
@@ -88,6 +90,9 @@ if(app.includes("'staff','settings'")) errors.push('Ancienne collection staff en
 
 if(!sw.includes('NETWORK_FIRST_ASSETS') || !sw.includes('networkFirst')) {
   errors.push('Service worker sans strategie network-first pour les fichiers shell critiques');
+}
+if(!sw.includes('skipWaiting()') || !sw.includes('clients.claim()')) {
+  errors.push('Service worker sans activation immediate de la nouvelle version');
 }
 
 const firebaseConfig = readJson('firebase.json');

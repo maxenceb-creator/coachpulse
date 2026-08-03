@@ -17,7 +17,7 @@
     {team:'U13 A', category:'U13', subCategories:['U12','U13','U14']},
     {team:'U13 B', category:'U13', subCategories:['U12','U13']},
     {team:'U16 A', category:'U16', subCategories:['U15','U16']},
-    {team:'U19', category:'U19', subCategories:['U17','U18','U19']},
+    {team:'U19', category:'U19', subCategories:['U16','U17','U18','U19']},
     {team:'R1', category:'SENIORS', subCategories:['SENIORS']}
   ];
 
@@ -75,6 +75,11 @@
     return TEAM_CATEGORY_RULES.find(rule => rule.subCategories.some(sub => normalizeUpper(sub).replace(/\s+/g, '') === key)) || null;
   }
 
+  function teamCategoryRulesForSubCategory(value){
+    const key = normalizeUpper(value).replace(/\s+/g, '');
+    return TEAM_CATEGORY_RULES.filter(rule => rule.subCategories.some(sub => normalizeUpper(sub).replace(/\s+/g, '') === key));
+  }
+
   function teamCategoryRuleForTeam(value){
     const key = compactTeamKey(value);
     return TEAM_CATEGORY_RULES.find(rule => compactTeamKey(rule.team) === key) || null;
@@ -91,7 +96,13 @@
     const seasonTeam = computedSub ? defaultClubTeamFromSubCategory(subCategory) : '';
     const team = rule?.team || resolveClubTeam(fromHistory.team || seasonTeam || player.team || player.equipe, subCategory || categorie) || asText(fromHistory.team || seasonTeam || player.team || player.equipe || categorie);
     const teamId = canonicalTeamId(team || categorie);
-    return {season:selectedSeason, categorie, subCategory, team, teamId};
+    const teamIds = [...new Set([
+      teamId,
+      ...teamCategoryRulesForSubCategory(subCategory).map(item => canonicalTeamId(item.team)),
+      ...(Array.isArray(fromHistory.teamIds) ? fromHistory.teamIds : []),
+      ...(Array.isArray(player.teamIds) ? player.teamIds : [])
+    ].map(asText).filter(Boolean))];
+    return {season:selectedSeason, categorie, subCategory, team, teamId, teamIds};
   }
 
   function playerSeasonSnapshot(player={}, season=seasonFromDate()){
@@ -103,7 +114,13 @@
       subCategory:snapshot.subCategory || normalized.subCategory || '',
       sousCategorie:snapshot.subCategory || normalized.sousCategorie || normalized.subCategory || '',
       team:snapshot.team || normalized.team || '',
-      teamId:snapshot.teamId || normalized.teamId || canonicalTeamId(snapshot.team || normalized.team || snapshot.categorie || normalized.categorie || 'global')
+      teamId:snapshot.teamId || normalized.teamId || canonicalTeamId(snapshot.team || normalized.team || snapshot.categorie || normalized.categorie || 'global'),
+      teamIds:[...new Set([
+        snapshot.teamId,
+        normalized.teamId,
+        ...(Array.isArray(snapshot.teamIds) ? snapshot.teamIds : []),
+        ...(Array.isArray(normalized.teamIds) ? normalized.teamIds : [])
+      ].map(asText).filter(Boolean))]
     };
   }
 
@@ -271,6 +288,12 @@
       subCategory: currentSnapshot.subCategory || subCategory,
       team: currentSnapshot.team || team,
       teamId: isOfficialTeamId(raw.teamId) ? asText(raw.teamId) : (currentSnapshot.teamId || canonicalTeamId(currentSnapshot.team || team || categorie || 'global')),
+      teamIds: [...new Set([
+        isOfficialTeamId(raw.teamId) ? asText(raw.teamId) : '',
+        currentSnapshot.teamId,
+        ...(Array.isArray(currentSnapshot.teamIds) ? currentSnapshot.teamIds : []),
+        ...(Array.isArray(raw.teamIds) ? raw.teamIds : [])
+      ].map(asText).filter(Boolean))],
       poste: asText(raw.poste || raw.position),
       numero: asText(raw.numero || raw.number),
       photo: asText(raw.photo || raw.avatar),
@@ -279,6 +302,8 @@
       meilleurPiedLabel: asText(raw.meilleurPiedLabel || raw.foot || raw.pied || raw.meilleurPied || raw.piedFort || raw.piedFortLabel || raw.preferredFoot || raw.preferredFootLabel || raw.strongFoot || raw.strongFootLabel || raw.dominantFoot),
       nationalite: asText(raw.nationalite || raw.nationalité || raw.nationality || raw.nationalityLabel || raw.country || raw.countryName || raw.pays),
       nationality: asText(raw.nationality || raw.nationalite || raw.nationalité || raw.nationalityLabel || raw.country || raw.countryName || raw.pays),
+      leftClub: asText(raw.leftClub || raw.dernierClubQuitte || raw.lastClubLeft),
+      dernierClubQuitte: asText(raw.dernierClubQuitte || raw.leftClub || raw.lastClubLeft),
       birth,
       dateNaissance: asText(raw.dateNaissance || birth),
       currentSeason,
@@ -344,6 +369,12 @@
       subCategory:snapshot.subCategory || normalized.subCategory,
       team:snapshot.team || normalized.team,
       teamId:snapshot.teamId || canonicalTeamId(snapshot.team || normalized.team || snapshot.categorie || normalized.categorie || 'global'),
+      teamIds:[...new Set([
+        snapshot.teamId,
+        normalized.teamId,
+        ...(Array.isArray(snapshot.teamIds) ? snapshot.teamIds : []),
+        ...(Array.isArray(normalized.teamIds) ? normalized.teamIds : [])
+      ].map(asText).filter(Boolean))],
       currentSeason:snapshot.season || normalized.currentSeason,
       seasonStart:snapshot.season ? `${snapshot.season.slice(0,4)}-07-01` : normalized.seasonStart,
       seasonEnd:snapshot.season ? `${snapshot.season.slice(5)}-06-30` : normalized.seasonEnd
@@ -520,7 +551,7 @@
     CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
     stableId, canonicalPlayerId, canonicalTeamId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
     categorySnapshotForSeason, playerSeasonSnapshot, playerForSeason, normalizeTeamFromCategory, defaultClubTeamFromSubCategory, resolveClubTeam,
-    teamCategoryRuleForSubCategory, teamCategoryRuleForTeam, displayName, splitName,
+    teamCategoryRuleForSubCategory, teamCategoryRulesForSubCategory, teamCategoryRuleForTeam, displayName, splitName,
     normalizePlayer, normalizePlayerForWrite, identityKey, personKey, dedupePlayers,
     readCachedPlayers, writeCache, filterPlayers,
     listPlayers, readFirestorePlayers, getPlayer, savePlayer, archivePlayer, invalidatePlayersCache,
