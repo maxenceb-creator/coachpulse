@@ -13,6 +13,33 @@
 body{background:#f3f5f4!important;padding-bottom:0!important}
 .head,.hub-head{display:none!important}
 main{padding-top:14px!important}
+body{overflow-x:hidden!important}
+main,.layout,.card,.body-card,.body-card>*{min-width:0!important;max-width:100%!important}
+.field label,.card h2{overflow-wrap:normal!important;word-break:normal!important;hyphens:none!important;line-height:1.1!important}
+.field label{text-wrap:balance}
+.actions button{min-width:min(170px,100%)!important;white-space:normal!important;line-height:1.08!important}
+@media(max-width:900px){
+  main{padding:10px!important}
+  .layout,.body-card,.form-grid,.filters,.profile-grid,.summary-row{grid-template-columns:1fr!important}
+  .body-map{min-height:560px!important}
+  .zone-panel{min-height:120px!important}
+  .actions{display:grid!important;grid-template-columns:1fr!important}
+  .actions button{width:100%!important}
+}
+@media(min-width:901px) and (max-width:1180px){
+  .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+}
+@media(max-width:700px){
+  .body-map{min-height:480px!important}
+  .silhouette{inset:18px 38px!important}
+  .card h2{font-size:clamp(22px,7vw,32px)!important}
+}
+main{overflow-x:clip!important}
+.layout{grid-template-columns:repeat(auto-fit,minmax(min(520px,100%),1fr))!important}
+.body-card{grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr))!important}
+.form-grid{grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))!important}
+.field,input,select,textarea{min-width:0!important;max-width:100%!important}
+.zone-panel,textarea{overflow-wrap:anywhere!important}
 
 </style>
 </head>
