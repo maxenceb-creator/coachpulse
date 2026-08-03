@@ -32,6 +32,7 @@ const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
 const appDataCache = {
   athleticRows:{rows:null, loadedAt:0},
+  presenceEvents:{rows:null, loadedAt:0, key:''},
   playerProfiles:new Map(),
   teamProfiles:new Map()
 };
@@ -53,6 +54,11 @@ function invalidateAppDataCaches(scope='all'){
   if(scope === 'all' || scope === 'athletic'){
     appDataCache.athleticRows.rows = null;
     appDataCache.athleticRows.loadedAt = 0;
+  }
+  if(scope === 'all' || scope === 'presence' || scope === 'presences'){
+    appDataCache.presenceEvents.rows = null;
+    appDataCache.presenceEvents.loadedAt = 0;
+    appDataCache.presenceEvents.key = '';
   }
   if(scope === 'all' || scope === 'players' || scope === 'playerProfiles') appDataCache.playerProfiles.clear();
   if(scope === 'all' || scope === 'players' || scope === 'teams' || scope === 'teamProfiles') appDataCache.teamProfiles.clear();
@@ -218,6 +224,16 @@ function guardGlobalDataExportAction(label='Export global réservé aux administ
 }
 function scopedPlayersForAccess(players=[]){
   return hasGlobalDataAccess() ? players : filterAuthorizedPlayers(players);
+}
+function scopedPlayersForModuleAccess(players=[], moduleId=''){
+  return hasGlobalDataAccess() || canAccessAllPlayersForModule(moduleId)
+    ? players
+    : filterAuthorizedPlayersForModule(players, moduleId);
+}
+function scopedRecordsForModuleAccess(records=[], moduleId=''){
+  return hasGlobalDataAccess() || canAccessAllPlayersForModule(moduleId)
+    ? records
+    : filterAuthorizedRecordsForModule(records, moduleId);
 }
 function scopedCentralExportPayload(payload={}){
   if(hasGlobalDataAccess()) return payload;
@@ -3589,7 +3605,10 @@ async function listPlayers(filters={}){
     const service = playersService();
     const filtered = service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
     const hints = await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints());
-    return filterAuthorizedPlayers(enrichPlayersWithTechnicalFootHints(filtered, hints));
+    const enriched = enrichPlayersWithTechnicalFootHints(filtered, hints);
+    return filters.moduleId || filters.module
+      ? scopedPlayersForModuleAccess(enriched, filters.moduleId || filters.module)
+      : filterAuthorizedPlayers(enriched);
   });
 }
 async function listTeams(filters={}){
@@ -3623,7 +3642,7 @@ async function getPlayer(playerId){
 }
 async function medicalListPlayers(){
   if(!guardMedical('read')) return [];
-  return listPlayers();
+  return listPlayers({moduleId:'medical'});
 }
 async function medicalListData(){
   if(!guardMedical('read')) return localMedicalPayload();
@@ -3643,11 +3662,11 @@ async function medicalListData(){
       });
     };
     return {
-      injuries:filterAuthorizedRecords(scopedInjuries),
-      injuryUpdates:filterAuthorizedRecords((source.injuryUpdates || []).map(inheritScope)),
-      medicalAppointments:filterAuthorizedRecords((source.medicalAppointments || []).map(inheritScope)),
-      rehabRoutines:filterAuthorizedRecords((source.rehabRoutines || []).map(inheritScope)),
-      medicalFollowUps:filterAuthorizedRecords((source.medicalFollowUps || []).map(inheritScope))
+      injuries:scopedRecordsForModuleAccess(scopedInjuries, 'medical'),
+      injuryUpdates:scopedRecordsForModuleAccess((source.injuryUpdates || []).map(inheritScope), 'medical'),
+      medicalAppointments:scopedRecordsForModuleAccess((source.medicalAppointments || []).map(inheritScope), 'medical'),
+      rehabRoutines:scopedRecordsForModuleAccess((source.rehabRoutines || []).map(inheritScope), 'medical'),
+      medicalFollowUps:scopedRecordsForModuleAccess((source.medicalFollowUps || []).map(inheritScope), 'medical')
     };
   };
   if(db && currentUser){
@@ -3662,7 +3681,7 @@ async function medicalListData(){
       return docsFromSnap(await firebaseFns.getDocs(q));
     };
     const readScopedMedicalRows = async collectionName => {
-      if(isAdmin()) return readAll(collectionName);
+      if(isAdmin() || canAccessAllPlayersForModule('medical')) return readAll(collectionName);
       const authorizedTeamIds = getAuthorizedTeamIds();
       const playerIds = (await listPlayers()).map(player => player.playerId || player.id).filter(Boolean);
       const chunks = rows => {
@@ -3830,7 +3849,7 @@ async function athleticListData(filters={}){
   const bundled = await bundledAthleticPayload();
   bundled.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `bundled-${idx}`, row));
   local.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `local-${idx}`, row));
-  const players = await listPlayers({season:'all', includeArchived:true});
+  const players = await listPlayers({season:'all', includeArchived:true, moduleId:'tests-athletiques'});
   if(db && currentUser){
     const docsFromSnap = snap => {
       const rows = [];
@@ -3848,7 +3867,7 @@ async function athleticListData(filters={}){
       return out;
     };
     const readScopedPhysicalTests = async () => {
-      if(isAdmin()) return docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'physicalTests')));
+      if(isAdmin() || canAccessAllPlayersForModule('tests-athletiques')) return docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'physicalTests')));
       const authorizedTeamIds = getAuthorizedTeamIds();
       const playerIds = players.map(player => player.playerId || player.id).filter(Boolean);
       const reads = [];
@@ -3867,7 +3886,7 @@ async function athleticListData(filters={}){
     saveLocalAthleticPayload([...rawById.values()]);
   }
   const rawRows = [...rawById.values()];
-  const rows = filterAuthorizedRecords(normalizeAthleticRows(rawRows, players));
+  const rows = scopedRecordsForModuleAccess(normalizeAthleticRows(rawRows, players), 'tests-athletiques');
   appDataCache.athleticRows.rows = rows;
   appDataCache.athleticRows.loadedAt = now;
   return filterRows(rows);
@@ -4037,6 +4056,20 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
 async function presenceListEvents(){
   if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const authorizedTeamIds = getAuthorizedTeamIds();
+  const cacheKey = [
+    currentUser.uid,
+    isAdmin() ? 'admin' : 'staff',
+    canAccessAllPlayersForModule('presences') ? 'allPlayers' : 'teamScope',
+    authorizedTeamIds.slice().sort().join(',')
+  ].join(':');
+  if(
+    appDataCache.presenceEvents.rows
+    && appDataCache.presenceEvents.key === cacheKey
+    && Date.now() - appDataCache.presenceEvents.loadedAt < DATA_CACHE_TTL_MS
+  ){
+    return cloneData(appDataCache.presenceEvents.rows);
+  }
   const docsFromSnap = snap => {
     const rows = [];
     snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
@@ -4046,13 +4079,60 @@ async function presenceListEvents(){
     const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, operator, value));
     return docsFromSnap(await firebaseFns.getDocs(q));
   };
-  const authorizedTeamIds = getAuthorizedTeamIds();
+  const readWhereSafe = async (collectionName, constraints=[]) => {
+    try{
+      const q = firebaseFns.query(
+        firebaseFns.collection(db, collectionName),
+        ...constraints.map(item => firebaseFns.where(item.field, item.operator, item.value))
+      );
+      return docsFromSnap(await firebaseFns.getDocs(q));
+    }catch(error){
+      console.warn('[Présences] Lecture cloud ignorée', collectionName, constraints.map(item => item.field).join(','), cleanError(error));
+      return [];
+    }
+  };
+  const uniqueRows = rows => [...new Map(rows.map(row => [row.sessionId || row.id || JSON.stringify(row), row])).values()];
+  const readPresenceSessionsForAllPlayersScope = async () => {
+    const modernRows = uniqueRows(await readWhereSafe('sessions', [{field:'createdFromPresenceModule', operator:'==', value:true}]));
+    if(modernRows.length) return modernRows;
+    return uniqueRows(await readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}]));
+  };
+  const readPresenceSessionsForTeams = async chunks => {
+    const modernReads = [];
+    chunks.forEach(chunk => {
+      modernReads.push(readWhereSafe('sessions', [
+        {field:'createdFromPresenceModule', operator:'==', value:true},
+        {field:'teamId', operator:'in', value:chunk}
+      ]));
+      modernReads.push(readWhereSafe('sessions', [
+        {field:'createdFromPresenceModule', operator:'==', value:true},
+        {field:'teamIds', operator:'array-contains-any', value:chunk}
+      ]));
+    });
+    const modernRows = uniqueRows((await Promise.all(modernReads)).flat());
+    if(modernRows.length) return modernRows;
+    const legacyReads = [];
+    chunks.forEach(chunk => {
+      legacyReads.push(readWhereSafe('sessions', [
+        {field:'source', operator:'==', value:'Présences'},
+        {field:'teamId', operator:'in', value:chunk}
+      ]));
+      legacyReads.push(readWhereSafe('sessions', [
+        {field:'source', operator:'==', value:'Présences'},
+        {field:'teamIds', operator:'array-contains-any', value:chunk}
+      ]));
+    });
+    return uniqueRows((await Promise.all(legacyReads)).flat());
+  };
+  if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return [];
   const teamChunks = [];
   for(let i=0;i<authorizedTeamIds.length;i+=10) teamChunks.push(authorizedTeamIds.slice(i,i+10));
-  const sessionRows = isAdmin() || !teamChunks.length
+  const sessionRows = isAdmin()
     ? docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'sessions')))
-    : (await Promise.all(teamChunks.map(chunk => readWhere('sessions', 'teamId', 'in', chunk)))).flat();
-  const sessions = filterAuthorizedRecords(sessionRows)
+    : canAccessAllPlayersForModule('presences')
+      ? await readPresenceSessionsForAllPlayersScope()
+      : await readPresenceSessionsForTeams(teamChunks);
+  const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
     .filter(row => row.sessionId || row.id)
     .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true);
   const sessionIds = [...new Set(sessions.map(row => row.sessionId || row.id).filter(Boolean))];
@@ -4061,11 +4141,13 @@ async function presenceListEvents(){
   const attendanceRows = sessionChunks.length
     ? (await Promise.all(sessionChunks.map(chunk => readWhere('attendance', 'sessionId', 'in', chunk)))).flat()
     : [];
-  const attendance = filterAuthorizedRecords(attendanceRows);
-  return sessions
+  const attendance = scopedRecordsForModuleAccess(attendanceRows, 'presences');
+  const events = sessions
     .map(session => presenceCloudEventFromSession(session, attendance))
     .filter(event => event.id && event.date)
     .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+  appDataCache.presenceEvents = {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey};
+  return events;
 }
 async function presenceSaveEvent(event={}){
   if(!canEditModule('presences')) throw new Error('Modification Présences non autorisée.');
@@ -4143,6 +4225,7 @@ async function presenceSaveEvent(event={}){
       updatedByEmail:currentUser.email || ''
     }, {merge:true}))
   ]);
+  invalidateAppDataCaches('presences');
   invalidateAppDataCaches('teamProfiles');
   return {sessionId, attendance:attendanceRows.length};
 }
@@ -4157,6 +4240,7 @@ async function presenceDeleteEvent(event={}){
   attendanceSnap.forEach(docSnap => deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'attendance', docSnap.id))));
   deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'sessions', sessionId)));
   await Promise.all(deletes);
+  invalidateAppDataCaches('presences');
   invalidateAppDataCaches('teamProfiles');
   return {sessionId, deleted:deletes.length};
 }

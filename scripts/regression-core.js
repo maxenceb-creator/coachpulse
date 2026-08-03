@@ -228,7 +228,7 @@ function testAthleticTestsStayLinkedToPlayerAndTeamIds(){
   assert(appSource.includes('const readScopedPhysicalTests = async () =>'), 'Les tests athlétiques Firestore doivent être lus via une requête limitée au périmètre autorisé.');
   assert(appSource.includes("readWhere('teamIds', 'array-contains-any', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par teamIds.');
   assert(appSource.includes("readWhere('playerId', 'in', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par playerId.');
-  assert(appSource.includes('filterAuthorizedRecords(normalizeAthleticRows'), 'Les tests athlétiques chargés doivent être filtrés par autorisations.');
+  assert(appSource.includes("scopedRecordsForModuleAccess(normalizeAthleticRows(rawRows, players), 'tests-athletiques')"), 'Les tests athlétiques chargés doivent être filtrés par autorisations et scopes module.');
   assert(appSource.includes("readWhere(name, 'teamIds', 'array-contains', teamId)"), 'La fiche équipe doit lire les tests via teamIds.');
   assert(athleticSource.includes('playerSnapshotForAthletic'), 'La page Tests athlétiques doit envoyer une snapshot joueuse.');
   assert(athleticSource.includes('teamIds:snapshot.teamIds'), 'La page Tests athlétiques doit envoyer les teamIds dans le payload.');
@@ -240,9 +240,9 @@ function testMedicalDataStayLinkedToPlayerAndTeamIds(){
 
   assert(appSource.includes('function medicalTeamIdsFromSources'), 'Le médical doit centraliser les teamIds.');
   assert(appSource.includes('const enrichAndFilter = source =>'), 'Les lectures médicales doivent hériter du périmètre des blessures parentes.');
-  assert(appSource.includes('filterAuthorizedRecords(scopedInjuries)'), 'Les lectures médicales doivent être filtrées par autorisations.');
+  assert(appSource.includes("scopedRecordsForModuleAccess(scopedInjuries, 'medical')"), 'Les lectures médicales doivent être filtrées par autorisations et scopes module.');
   assert(appSource.includes("['medicalFollowUps','medicalFollowUps']"), 'Les suivis médicaux doivent être lus dans le périmètre playerId/teamId.');
-  assert(appSource.includes('medicalFollowUps:filterAuthorizedRecords'), 'Les suivis médicaux doivent être filtrés par autorisations.');
+  assert(appSource.includes("medicalFollowUps:scopedRecordsForModuleAccess"), 'Les suivis médicaux doivent être filtrés par autorisations et scopes module.');
   assert(appSource.includes("readWhere(collectionName, 'teamIds', 'array-contains-any', chunk)"), 'Les lectures médicales doivent interroger les teamIds.');
   assert(appSource.includes("readWhere(collectionName, 'playerId', 'in', chunk)"), 'Les lectures médicales doivent interroger les playerId autorisés.');
   assert(appSource.includes("throw new Error('Accès non autorisé à cette joueuse.')"), 'Les écritures médicales doivent vérifier la joueuse.');
@@ -302,6 +302,7 @@ function testAccessRegressionSurfaceStaysComplete(){
     'canAccessRecord',
     'filterAuthorizedTeams',
     'filterAuthorizedPlayers',
+    'filterAuthorizedPlayersForModule',
     'filterAuthorizedRecords'
   ].forEach(exportName => {
     assert(appSource.includes(exportName), `Le moteur d'autorisation global doit exposer ${exportName}.`);
@@ -316,7 +317,9 @@ function testAccessRegressionSurfaceStaysComplete(){
     'async function athleticListData',
     'async function presenceListEvents',
     'function validateImportDocsAccess',
-    'function scopedCentralExportPayload'
+    'function scopedCentralExportPayload',
+    'function scopedPlayersForModuleAccess',
+    'function scopedRecordsForModuleAccess'
   ].forEach(functionName => {
     assert(appSource.includes(functionName), `${functionName} doit rester présent pour sécuriser lectures, caches, imports et exports.`);
   });
@@ -334,6 +337,14 @@ function testAccessRegressionSurfaceStaysComplete(){
     assert(permissionsSource.includes(functionName), `${functionName} doit rester centralisé dans permissions-service.`);
   });
   assert(permissionsSource.includes('getAuthorizedTeamIds:teamIds'), 'permissions-service doit exposer getAuthorizedTeamIds via son service public.');
+  assert(rulesSource.includes('function moduleScopeAllowsAllPlayers'), 'Les règles Firestore doivent reconnaître les scopes toutes joueuses par module.');
+  assert(rulesSource.includes('function canAccessScopedDataForModule'), 'Les règles Firestore doivent appliquer les scopes complets au niveau module.');
+  assert(rulesSource.includes("canAccessModule('presences') && isPresenceSession"), 'Les sessions créées par Présences doivent être lisibles via le module Présences.');
+  assert(appSource.includes("canAccessAllPlayersForModule('presences')"), 'La lecture cloud Présences doit gérer le scope complet du module.');
+  assert(appSource.includes('readPresenceSessionsForTeams'), 'Le module Présences doit lire les sessions cloud via les teamIds autorisés.');
+  assert(appSource.includes("field:'createdFromPresenceModule'"), 'Le module Présences doit cibler les sessions créées depuis Présences.');
+  assert(appSource.includes("moduleId:'tests-athletiques'"), 'Les Tests athlétiques doivent demander les joueuses dans leur scope module.');
+  assert(fs.readFileSync('pages/tests-techniques.html', 'utf8').includes('moduleId:"tests"'), 'Les Tests techniques doivent demander les joueuses dans leur scope module.');
 
   [
     'matchEvents',
