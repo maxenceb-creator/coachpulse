@@ -207,6 +207,70 @@ function testFirestoreRulesProtectExistingAndIncomingScope(){
   assert(rulesSource.includes('allow read, write: if false;'), 'Le bloc catch-all doit refuser les accès non déclarés.');
 }
 
+function testAccessRegressionSurfaceStaysComplete(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
+  const permissionsSource = fs.readFileSync('shared/services/permissions-service.js', 'utf8');
+  const playersSource = fs.readFileSync('shared/services/players-service.js', 'utf8');
+  const teamsSource = fs.readFileSync('shared/services/teams-service.js', 'utf8');
+
+  [
+    'getAuthorizedTeamIds',
+    'canAccessTeam:canAccessTeamId',
+    'canAccessPlayer:canAccessPlayerRecord',
+    'canAccessRecord',
+    'filterAuthorizedTeams',
+    'filterAuthorizedPlayers',
+    'filterAuthorizedRecords'
+  ].forEach(exportName => {
+    assert(appSource.includes(exportName), `Le moteur d'autorisation global doit exposer ${exportName}.`);
+  });
+
+  [
+    'function purgeUnauthorizedLocalData',
+    'function clearSensitiveLocalData',
+    'async function playerProfileLoadData',
+    'async function teamProfileLoadData',
+    'async function medicalListData',
+    'async function athleticListData',
+    'async function presenceListEvents',
+    'function validateImportDocsAccess',
+    'function scopedCentralExportPayload'
+  ].forEach(functionName => {
+    assert(appSource.includes(functionName), `${functionName} doit rester présent pour sécuriser lectures, caches, imports et exports.`);
+  });
+
+  [
+    'function teamIds',
+    'function canAccessTeam',
+    'function canAccessPlayer',
+    'function canAccessRecord',
+    'function filterAuthorizedTeams',
+    'function filterAuthorizedPlayers',
+    'function filterAuthorizedRecords'
+  ].forEach(functionName => {
+    assert(permissionsSource.includes(functionName), `${functionName} doit rester centralisé dans permissions-service.`);
+  });
+  assert(permissionsSource.includes('getAuthorizedTeamIds:teamIds'), 'permissions-service doit exposer getAuthorizedTeamIds via son service public.');
+
+  [
+    'matchEvents',
+    'attendance',
+    'technicalTests',
+    'physicalTests',
+    'injuries',
+    'medicalFollowUps',
+    'convocations',
+    'individualReports'
+  ].forEach(collectionName => {
+    assert(playersSource.includes(`'${collectionName}'`), `${collectionName} doit rester dans les collections liées au playerId.`);
+  });
+
+  assert(teamsSource.includes("name:'U19', category:'U19', subCategories:['U16','U17','U18','U19']"), 'U16 doit rester rattachable à U19 pour les surclassements.');
+  assert(rulesSource.includes('function canAccessScopedData(data)'), 'Les règles Firestore doivent conserver le verrou teamId/playerId central.');
+  assert((rulesSource.match(/canAccessScopedData\(resource\.data\) && canAccessScopedData\(request\.resource\.data\)/g) || []).length >= 10, 'Les updates Firestore doivent contrôler ancien et nouveau périmètre sur les collections sensibles.');
+}
+
 function testMatchDataStayLinkedToPlayerAndTeamIds(){
   const appSource = fs.readFileSync('app.js', 'utf8');
 
@@ -357,6 +421,7 @@ testMedicalDataStayLinkedToPlayerAndTeamIds();
 testGlobalExportsStayScoped();
 testDataHubImportsStayScoped();
 testFirestoreRulesProtectExistingAndIncomingScope();
+testAccessRegressionSurfaceStaysComplete();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
