@@ -3166,6 +3166,7 @@ function athleticNumber(value){
   return Number.isFinite(n) ? n : '';
 }
 const ATHLETIC_METRICS = {
+  vma:{type:'vma', label:'VMA', unit:'km/h', direction:'high'},
   vmi:{type:'vmi', label:'VMI 30/15 IFT', unit:'km/h', direction:'high'},
   illinois:{type:'illinois', label:'Illinois', unit:'s', direction:'low'},
   v10s:{type:'v10s', label:'Vitesse 10m', unit:'s', direction:'low'},
@@ -3226,13 +3227,13 @@ function athleticMetricKey(label='', row={}){
   if(key.includes('40m') || key.includes('vitesse40') || key.includes('sprint40')){
     return key.includes('kmh') || unit.includes('kmh') ? 'v40kmh' : 'v40s';
   }
-  if(['vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].includes(key)) return key;
+  if(['vma','vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].includes(key)) return key;
   return '';
 }
 function athleticTestsFromRow(row={}){
   const tests = {};
   const source = row.tests && typeof row.tests === 'object' ? row.tests : {};
-  ['vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].forEach(key => {
+  ['vma','vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj'].forEach(key => {
     const value = athleticNumber(source[key] ?? row[key]);
     if(value !== '') tests[key] = value;
   });
@@ -3302,6 +3303,18 @@ function resolveAthleticPlayer(row={}, lookup={}){
     .filter(Boolean);
   return names.map(name => lookup.byName?.get(name)).find(Boolean) || null;
 }
+function athleticTeamIdsFromSources(...sources){
+  return [...new Set(sources.flatMap(source => [
+    source?.teamId,
+    source?.team_id,
+    source?.team?.teamId,
+    source?.teamSnapshot?.teamId,
+    source?.playerSnapshot?.teamId,
+    ...(Array.isArray(source?.teamIds) ? source.teamIds : []),
+    ...(Array.isArray(source?.teamSnapshot?.teamIds) ? source.teamSnapshot.teamIds : []),
+    ...(Array.isArray(source?.playerSnapshot?.teamIds) ? source.playerSnapshot.teamIds : [])
+  ]).map(value => String(value || '').trim()).filter(Boolean))];
+}
 function normalizeAthleticRows(rawRows=[], players=[]){
   const service = playersService();
   const lookup = athleticPlayerLookup(players);
@@ -3316,6 +3329,8 @@ function normalizeAthleticRows(rawRows=[], players=[]){
     if(!playerId) return;
     const seasonPlayer = rawPlayer && service?.playerForSeason ? service.playerForSeason(rawPlayer, season) : (rawPlayer || raw.playerSnapshot || {});
     const canonicalId = seasonPlayer.playerId || seasonPlayer.id || playerId;
+    const teamIds = athleticTeamIdsFromSources(raw, raw.playerSnapshot, rawPlayer, seasonPlayer);
+    const teamId = seasonPlayer.teamId || raw.teamId || raw.playerSnapshot?.teamId || teamIds[0] || '';
     const groupId = stableFirestoreId('physicalTest', canonicalId, date || 'date-inconnue', season);
     const previous = grouped.get(groupId) || {
       id:groupId,
@@ -3331,12 +3346,17 @@ function normalizeAthleticRows(rawRows=[], players=[]){
         categorie:seasonPlayer.categorie || raw.categorie || raw.category || '',
         subCategory:seasonPlayer.subCategory || raw.subCategory || raw.sousCategorie || '',
         team:seasonPlayer.team || raw.team || raw.equipe || '',
+        teamId,
+        teamIds,
         photo:seasonPlayer.photo || raw.playerSnapshot?.photo || ''
       },
       date,
       season,
       categorie:seasonPlayer.categorie || raw.categorie || raw.category || '',
       subCategory:seasonPlayer.subCategory || raw.subCategory || raw.sousCategorie || '',
+      team:seasonPlayer.team || raw.team || raw.equipe || '',
+      teamId,
+      teamIds,
       tests:{},
       metrics:[],
       comment:raw.comment || raw.commentaire || raw.note || '',
@@ -3548,7 +3568,7 @@ async function athleticListData(filters={}){
   }
   const rawRows = [...rawById.values()];
   const players = await listPlayers({season:'all', includeArchived:true});
-  const rows = normalizeAthleticRows(rawRows, players);
+  const rows = filterAuthorizedRecords(normalizeAthleticRows(rawRows, players));
   appDataCache.athleticRows.rows = rows;
   appDataCache.athleticRows.loadedAt = now;
   return filterRows(rows);
@@ -3570,6 +3590,9 @@ async function athleticSaveTest(test={}){
   const comment = test.comment || test.commentaire || test.note || '';
   const tests = test.tests || {};
   const metrics = athleticMetricsFromTests(tests, comment);
+  const teamIds = athleticTeamIdsFromSources(test, canonicalPlayer, seasonPlayer);
+  const teamId = seasonPlayer.teamId || canonicalPlayer.teamId || test.teamId || teamIds[0] || '';
+  if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
   const playerSnapshot = {
     playerId:canonicalPlayerId,
     nom:seasonPlayer.nom || '',
@@ -3578,7 +3601,8 @@ async function athleticSaveTest(test={}){
     categorie:seasonPlayer.categorie || '',
     subCategory:seasonPlayer.subCategory || '',
     team:seasonPlayer.team || '',
-    teamId:seasonPlayer.teamId || '',
+    teamId,
+    teamIds,
     photo:seasonPlayer.photo || ''
   };
   const physicalTestId = test.physicalTestId || test.testId || stableFirestoreId('physicalTest', canonicalPlayerId, date, season);
@@ -3595,7 +3619,8 @@ async function athleticSaveTest(test={}){
     categorie:playerSnapshot.categorie,
     subCategory:playerSnapshot.subCategory,
     team:playerSnapshot.team,
-    teamId:playerSnapshot.teamId,
+    teamId,
+    teamIds,
     tests,
     metrics,
     testTypes:metrics.map(metric => metric.type),
@@ -3644,8 +3669,8 @@ async function athleticExport(format='json'){
   const data = await athleticListData({season:'all'});
   const payload = {app:'CoachPulse', module:'tests-athletiques', exportedAt:new Date().toISOString(), data};
   if(format === 'csv'){
-    const rows = [['physicalTestId','playerId','joueuse','season','date','categorie','subCategory','vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj']];
-    data.forEach(row => rows.push([row.physicalTestId||row.testId||row.id||'', row.playerId||'', row.playerName||'', row.season||'', row.date||'', row.categorie||'', row.subCategory||'', row.tests?.vmi||'', row.tests?.illinois||'', row.tests?.v10s||'', row.tests?.v10kmh||'', row.tests?.v40s||'', row.tests?.v40kmh||'', row.tests?.cmj||'']));
+    const rows = [['physicalTestId','playerId','teamId','teamIds','joueuse','season','date','categorie','subCategory','vma','vmi','illinois','v10s','v10kmh','v40s','v40kmh','cmj']];
+    data.forEach(row => rows.push([row.physicalTestId||row.testId||row.id||'', row.playerId||'', row.teamId||'', (row.teamIds||[]).join(','), row.playerName||'', row.season||'', row.date||'', row.categorie||'', row.subCategory||'', row.tests?.vma||'', row.tests?.vmi||'', row.tests?.illinois||'', row.tests?.v10s||'', row.tests?.v10kmh||'', row.tests?.v40s||'', row.tests?.v40kmh||'', row.tests?.cmj||'']));
     downloadText(rows.map(row => row.map(csvEscape).join(';')).join('\n'), 'coachpulse_tests_athletiques.csv', 'text/csv;charset=utf-8');
   }else exportJson(payload, 'coachpulse_tests_athletiques.json');
 }
