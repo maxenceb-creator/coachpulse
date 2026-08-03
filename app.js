@@ -1100,15 +1100,80 @@ function collectCentralFirestoreDocs(){
   const matches = Array.isArray(stats?.matches) ? stats.matches : (Array.isArray(stats) ? stats.filter(x => x?.score || x?.events || x?.actions) : []);
   matches.forEach((m, idx) => {
     const matchTeam = m.team || m.equipe || '';
-    const matchTeamId = teamsService()?.canonicalTeamId?.(matchTeam) || (matchTeam ? stableFirestoreId('team', matchTeam) : '');
+    const matchTeamId = m.teamId || m.team_id || m.teamSnapshot?.teamId || teamsService()?.canonicalTeamId?.(matchTeam) || (matchTeam ? stableFirestoreId('team', matchTeam) : '');
+    const matchTeamIds = [...new Set([
+      matchTeamId,
+      ...(Array.isArray(m.teamIds) ? m.teamIds : []),
+      ...(Array.isArray(m.teamSnapshot?.teamIds) ? m.teamSnapshot.teamIds : [])
+    ].map(value => String(value || '').trim()).filter(Boolean))];
     const matchId = m.matchId || m.id || stableFirestoreId('match', m.date, matchTeam, m.opponent || m.adversaire, idx);
-    addDoc(docs,'matches',matchId,{matchId,date:m.date || '',team:matchTeam,teamId:matchTeamId,opponent:m.opponent || m.adversaire || '',score:m.score || '',competition:m.competition || '',source:'Coach Stats'});
+    const matchSnapshot = {
+      matchId,
+      date:m.date || '',
+      team:matchTeam,
+      teamId:matchTeamId || matchTeamIds[0] || '',
+      teamIds:matchTeamIds,
+      opponent:m.opponent || m.adversaire || '',
+      score:m.score || '',
+      competition:m.competition || ''
+    };
+    addDoc(docs,'matches',matchId,{
+      ...m,
+      id:matchId,
+      matchId,
+      team:matchTeam,
+      teamId:matchSnapshot.teamId,
+      teamIds:matchTeamIds,
+      teamSnapshot:{team:matchTeam, name:matchTeam, teamId:matchSnapshot.teamId, teamIds:matchTeamIds},
+      opponent:m.opponent || m.adversaire || '',
+      score:m.score || '',
+      competition:m.competition || '',
+      source:m.source || 'Coach Stats'
+    });
     const actions = Array.isArray(m.events) ? m.events : (Array.isArray(m.actions) ? m.actions : []);
     actions.forEach((ev, evIdx) => {
       const player = ev.playerId ? playerIndex.get(ev.playerId) : normalizePlayer({joueuse:ev.player || ev.joueuse || '', categorie:ev.categorie || '', source:'Coach Stats'});
-      addDoc(docs,'matchEvents',ev.eventId || stableFirestoreId('event', matchId, ev.minute, ev.action || ev.type, evIdx), {
-        eventId:ev.eventId || stableFirestoreId('event', matchId, ev.minute, ev.action || ev.type, evIdx),
-        matchId, playerId:ev.playerId || player.playerId || '', team:ev.team || matchTeam || '', teamId:teamsService()?.canonicalTeamId?.(ev.team || matchTeam) || matchTeamId, minute:ev.minute || '', action:ev.action || ev.type || '', zone:ev.zone || '', source:'Coach Stats'
+      const eventId = ev.eventId || stableFirestoreId('event', matchId, ev.minute, ev.action || ev.type, evIdx);
+      const eventTeam = ev.team || ev.equipe || matchTeam || '';
+      const eventTeamId = ev.teamId || ev.team_id || ev.teamSnapshot?.teamId || teamsService()?.canonicalTeamId?.(eventTeam) || matchSnapshot.teamId;
+      const eventPlayerId = ev.playerId || player?.playerId || '';
+      const eventTeamIds = [...new Set([
+        eventTeamId,
+        ...matchTeamIds,
+        player?.teamId,
+        ...(Array.isArray(ev.teamIds) ? ev.teamIds : []),
+        ...(Array.isArray(ev.teamSnapshot?.teamIds) ? ev.teamSnapshot.teamIds : []),
+        ...(Array.isArray(player?.teamIds) ? player.teamIds : [])
+      ].map(value => String(value || '').trim()).filter(Boolean))];
+      const playerSnapshot = eventPlayerId ? {
+        playerId:eventPlayerId,
+        id:eventPlayerId,
+        nom:player?.nom || ev.playerSnapshot?.nom || '',
+        prenom:player?.prenom || ev.playerSnapshot?.prenom || '',
+        displayName:player?.displayName || ev.playerSnapshot?.displayName || ev.player || ev.joueuse || '',
+        categorie:ev.categorie || player?.categorie || ev.playerSnapshot?.categorie || '',
+        subCategory:ev.sousCategorie || ev.subCategory || player?.subCategory || ev.playerSnapshot?.subCategory || '',
+        team:eventTeam || player?.team || ev.playerSnapshot?.team || '',
+        teamId:player?.teamId || eventTeamId || eventTeamIds[0] || '',
+        teamIds:eventTeamIds,
+        photo:player?.photo || ev.playerSnapshot?.photo || ''
+      } : null;
+      addDoc(docs,'matchEvents',eventId, {
+        ...ev,
+        id:eventId,
+        eventId,
+        matchId,
+        playerId:eventPlayerId,
+        playerSnapshot,
+        team:eventTeam,
+        teamId:eventTeamId || eventTeamIds[0] || '',
+        teamIds:eventTeamIds,
+        teamSnapshot:{team:eventTeam, name:eventTeam, teamId:eventTeamId || eventTeamIds[0] || '', teamIds:eventTeamIds},
+        matchSnapshot:{...matchSnapshot, teamId:eventTeamId || matchSnapshot.teamId, teamIds:eventTeamIds},
+        minute:ev.minute || '',
+        action:ev.action || ev.type || '',
+        zone:ev.zone || '',
+        source:ev.source || 'Coach Stats'
       });
     });
   });
