@@ -3140,6 +3140,49 @@ function localMedicalPayload(){
 function saveLocalMedicalPayload(payload){
   localStorage.setItem('coachpulse:medicalData', JSON.stringify(payload || {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[]}));
 }
+function medicalTeamIdsFromSources(...sources){
+  return [...new Set(sources.flatMap(source => [
+    source?.teamId,
+    source?.team_id,
+    source?.team?.teamId,
+    source?.teamSnapshot?.teamId,
+    source?.playerSnapshot?.teamId,
+    ...(Array.isArray(source?.teamIds) ? source.teamIds : []),
+    ...(Array.isArray(source?.teamSnapshot?.teamIds) ? source.teamSnapshot.teamIds : []),
+    ...(Array.isArray(source?.playerSnapshot?.teamIds) ? source.playerSnapshot.teamIds : [])
+  ]).map(value => String(value || '').trim()).filter(Boolean))];
+}
+function medicalPlayerSnapshot(player={}, seasonPlayer={}, incomingSnapshot={}){
+  const teamIds = medicalTeamIdsFromSources(incomingSnapshot, player, seasonPlayer);
+  const teamId = seasonPlayer.teamId || player.teamId || incomingSnapshot.teamId || teamIds[0] || '';
+  return {
+    ...(incomingSnapshot || {}),
+    playerId:seasonPlayer.playerId || player.playerId || player.id || incomingSnapshot.playerId || '',
+    nom:String(seasonPlayer.nom || player.nom || incomingSnapshot.nom || '').toUpperCase(),
+    prenom:String(seasonPlayer.prenom || player.prenom || incomingSnapshot.prenom || '').toUpperCase(),
+    displayName:seasonPlayer.displayName || player.displayName || incomingSnapshot.displayName || '',
+    categorie:seasonPlayer.categorie || player.categorie || incomingSnapshot.categorie || '',
+    subCategory:seasonPlayer.subCategory || seasonPlayer.sousCategorie || player.subCategory || incomingSnapshot.subCategory || '',
+    team:seasonPlayer.team || player.team || incomingSnapshot.team || '',
+    teamId,
+    teamIds,
+    photo:seasonPlayer.photo || player.photo || incomingSnapshot.photo || '',
+    poste:seasonPlayer.poste || player.poste || incomingSnapshot.poste || ''
+  };
+}
+function scopedMedicalRow(row={}){
+  const teamIds = medicalTeamIdsFromSources(row, row.playerSnapshot);
+  return {
+    ...row,
+    teamId:row.teamId || row.playerSnapshot?.teamId || teamIds[0] || '',
+    teamIds,
+    playerSnapshot:row.playerSnapshot ? {
+      ...row.playerSnapshot,
+      teamId:row.playerSnapshot.teamId || row.teamId || teamIds[0] || '',
+      teamIds:medicalTeamIdsFromSources(row.playerSnapshot, row)
+    } : row.playerSnapshot
+  };
+}
 function localAthleticPayload(){
   return parseStoredJson('coachpulse:athleticTests', []);
 }
@@ -3431,15 +3474,66 @@ async function medicalListPlayers(){
 async function medicalListData(){
   if(!guardMedical('read')) return localMedicalPayload();
   const payload = {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[]};
+  const enrichAndFilter = source => {
+    const scopedInjuries = (source.injuries || []).map(scopedMedicalRow);
+    const injuryById = new Map(scopedInjuries.map(injury => [injury.injuryId || injury.id, injury]).filter(([id]) => id));
+    const inheritScope = row => {
+      const parent = injuryById.get(row.injuryId) || {};
+      return scopedMedicalRow({
+        ...parent,
+        ...row,
+        playerId:row.playerId || parent.playerId || '',
+        teamId:row.teamId || parent.teamId || parent.playerSnapshot?.teamId || '',
+        teamIds:row.teamIds || parent.teamIds || parent.playerSnapshot?.teamIds || [],
+        playerSnapshot:{...(parent.playerSnapshot || {}), ...(row.playerSnapshot || {})}
+      });
+    };
+    return {
+      injuries:filterAuthorizedRecords(scopedInjuries),
+      injuryUpdates:filterAuthorizedRecords((source.injuryUpdates || []).map(inheritScope)),
+      medicalAppointments:filterAuthorizedRecords((source.medicalAppointments || []).map(inheritScope)),
+      rehabRoutines:filterAuthorizedRecords((source.rehabRoutines || []).map(inheritScope))
+    };
+  };
   if(db && currentUser){
+    const docsFromSnap = snap => {
+      const rows = [];
+      snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
+      return rows;
+    };
+    const readAll = async collectionName => docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, collectionName)));
+    const readWhere = async (collectionName, field, operator, value) => {
+      const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, operator, value));
+      return docsFromSnap(await firebaseFns.getDocs(q));
+    };
+    const readScopedMedicalRows = async collectionName => {
+      if(isAdmin()) return readAll(collectionName);
+      const authorizedTeamIds = getAuthorizedTeamIds();
+      const playerIds = (await listPlayers()).map(player => player.playerId || player.id).filter(Boolean);
+      const chunks = rows => {
+        const out = [];
+        for(let i=0;i<rows.length;i+=10) out.push(rows.slice(i,i+10));
+        return out;
+      };
+      const reads = [];
+      chunks(authorizedTeamIds).forEach(chunk => {
+        reads.push(readWhere(collectionName, 'teamId', 'in', chunk));
+        reads.push(readWhere(collectionName, 'teamIds', 'array-contains-any', chunk));
+        reads.push(readWhere(collectionName, 'playerSnapshot.teamId', 'in', chunk));
+        reads.push(readWhere(collectionName, 'playerSnapshot.teamIds', 'array-contains-any', chunk));
+      });
+      chunks(playerIds).forEach(chunk => reads.push(readWhere(collectionName, 'playerId', 'in', chunk)));
+      const rows = reads.length ? (await Promise.all(reads.map(promise => promise.catch(() => [])))).flat() : [];
+      return [...new Map(rows.map(row => [row.id, row])).values()];
+    };
     for(const [collection, key] of [['injuries','injuries'], ['injuryUpdates','injuryUpdates'], ['medicalAppointments','medicalAppointments'], ['rehabRoutines','rehabRoutines']]){
-      const snap = await firebaseFns.getDocs(firebaseFns.collection(db, collection));
-      snap.forEach(docSnap => payload[key].push({id:docSnap.id, ...docSnap.data()}));
+      payload[key] = await readScopedMedicalRows(collection);
     }
+    Object.assign(payload, enrichAndFilter(payload));
     saveLocalMedicalPayload(payload);
     return payload;
   }
-  return localMedicalPayload();
+  return enrichAndFilter(localMedicalPayload());
 }
 async function medicalSaveInjury(injury={}){
   if(!guardMedical('write')) return null;
@@ -3448,25 +3542,24 @@ async function medicalSaveInjury(injury={}){
   const injuryId = injury.injuryId || injury.id || stableFirestoreId('injury', injury.playerId, injury.declaredAt || now, injury.bodyZone || 'zone');
   const season = injury.season || seasonFromDate(injury.declaredAt || now);
   const player = await getPlayer(injury.playerId);
+  if(!player || !canAccessPlayerRecord(player)) throw new Error('Accès non autorisé à cette joueuse.');
   const seasonalPlayer = player ? playerForSeason(player, season) : null;
-  const playerSnapshot = seasonalPlayer ? {
-    ...(injury.playerSnapshot || {}),
-    nom:String(seasonalPlayer.nom || injury.playerSnapshot?.nom || '').toUpperCase(),
-    prenom:String(seasonalPlayer.prenom || injury.playerSnapshot?.prenom || '').toUpperCase(),
-    categorie:seasonalPlayer.categorie || injury.playerSnapshot?.categorie || '',
-    subCategory:seasonalPlayer.subCategory || seasonalPlayer.sousCategorie || injury.playerSnapshot?.subCategory || '',
-    team:seasonalPlayer.team || injury.playerSnapshot?.team || '',
-    teamId:seasonalPlayer.teamId || injury.playerSnapshot?.teamId || '',
-    photo:seasonalPlayer.photo || injury.playerSnapshot?.photo || '',
-    poste:seasonalPlayer.poste || injury.playerSnapshot?.poste || ''
-  } : (injury.playerSnapshot || {});
+  const playerSnapshot = medicalPlayerSnapshot(player, seasonalPlayer || {}, injury.playerSnapshot || {});
+  const teamIds = medicalTeamIdsFromSources(injury, playerSnapshot, player, seasonalPlayer);
+  const teamId = playerSnapshot.teamId || injury.teamId || teamIds[0] || '';
+  if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
   const clean = {
     ...injury,
     id:injuryId,
     injuryId,
     playerId:injury.playerId,
-    playerSnapshot,
+    teamId,
+    teamIds,
+    playerSnapshot:{...playerSnapshot, teamIds},
     season,
+    categorie:playerSnapshot.categorie || injury.categorie || '',
+    subCategory:playerSnapshot.subCategory || injury.subCategory || '',
+    team:playerSnapshot.team || injury.team || '',
     status:injury.status || injury.availability || 'active',
     bodyZone:injury.bodyZone || '',
     painLevel:Number(injury.painLevel || 0),
@@ -3492,13 +3585,35 @@ async function medicalAddUpdate(injuryId, update={}){
   if(!guardMedical('write')) return null;
   if(!injuryId) throw new Error('injuryId obligatoire.');
   const now = new Date().toISOString();
+  const local = localMedicalPayload();
+  let parentInjury = local.injuries.find(x => (x.injuryId || x.id) === injuryId) || null;
+  if(db && currentUser){
+    const injurySnap = await firebaseFns.getDoc(firebaseFns.doc(db, 'injuries', injuryId)).catch(() => null);
+    if(injurySnap?.exists?.()) parentInjury = {id:injurySnap.id, ...injurySnap.data()};
+  }
+  if(!parentInjury) throw new Error('Blessure introuvable.');
+  const playerId = update.playerId || parentInjury.playerId || '';
+  const player = playerId ? await getPlayer(playerId) : null;
+  if(player && !canAccessPlayerRecord(player)) throw new Error('Accès non autorisé à cette joueuse.');
+  const teamIds = medicalTeamIdsFromSources(update, parentInjury, parentInjury.playerSnapshot, player);
+  const teamId = update.teamId || parentInjury.teamId || parentInjury.playerSnapshot?.teamId || teamIds[0] || '';
+  if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
   const updateId = update.updateId || stableFirestoreId('injuryUpdate', injuryId, now);
   const clean = {
     ...update,
     id:updateId,
     updateId,
     injuryId,
-    playerId:update.playerId || '',
+    playerId,
+    teamId,
+    teamIds,
+    playerSnapshot:{
+      ...(parentInjury.playerSnapshot || {}),
+      ...(update.playerSnapshot || {}),
+      playerId,
+      teamId,
+      teamIds
+    },
     date:update.date || now.slice(0,10),
     painLevel:Number(update.painLevel || 0),
     createdAt:now,
@@ -3515,7 +3630,6 @@ async function medicalAddUpdate(injuryId, update={}){
     if(clean.nextControlDate) injuryPatch.nextControlDate = clean.nextControlDate;
     await firebaseFns.setDoc(firebaseFns.doc(db, 'injuries', injuryId), injuryPatch, {merge:true});
   }
-  const local = localMedicalPayload();
   local.injuryUpdates.push(clean);
   const idx = local.injuries.findIndex(x => (x.injuryId||x.id) === injuryId);
   if(idx >= 0){
