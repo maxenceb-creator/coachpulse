@@ -181,6 +181,17 @@ function testGlobalExportsStayScoped(){
   assert(appSource.includes("$('#exportBackup').addEventListener('click', () => { if(guardGlobalDataExportAction())"), 'Les backups localStorage doivent être réservés aux admins complets.');
 }
 
+function testDataHubImportsStayScoped(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(appSource.includes('function validateImportDocsAccess'), 'Les imports doivent valider les documents préparés avant écriture.');
+  assert(appSource.includes('validateImportDocsAccess(docs);'), 'Les flux d’import doivent appeler le verrou teamId/playerId.');
+  assert(appSource.includes("if(hasGlobalDataAccess()) await exportCentralFirestore('json');"), 'Les imports ne doivent lancer un backup global que pour un admin complet.');
+  assert(appSource.includes("teamIds:[...new Set([p.teamId"), 'Les joueuses Data Hub doivent conserver leurs teamIds.');
+  assert(appSource.includes('teamIds:teamId ? [teamId] : []'), 'Les séances Data Hub doivent conserver leurs teamIds.');
+  assert(appSource.includes('teamIds:Array.isArray(linkedPlayer.teamIds)'), 'Les tests Data Hub doivent transmettre les teamIds dans la snapshot joueuse.');
+}
+
 function testMatchDataStayLinkedToPlayerAndTeamIds(){
   const appSource = fs.readFileSync('app.js', 'utf8');
 
@@ -329,6 +340,7 @@ testModuleRegistry();
 testAthleticTestsStayLinkedToPlayerAndTeamIds();
 testMedicalDataStayLinkedToPlayerAndTeamIds();
 testGlobalExportsStayScoped();
+testDataHubImportsStayScoped();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
