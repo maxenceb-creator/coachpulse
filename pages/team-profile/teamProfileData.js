@@ -28,15 +28,26 @@
     return text(row.season || row.saison || row.currentSeason) || seasonFromDate(dateOf(row));
   }
   function rowTeamIds(row={}){
-    return [
+    const ids = [
       row.teamId,
       row.team_id,
       row.team?.teamId,
       row.teamSnapshot?.teamId,
       row.playerSnapshot?.teamId,
       row.sessionSnapshot?.teamId,
-      row.matchSnapshot?.teamId
-    ].map(text).filter(Boolean);
+      row.matchSnapshot?.teamId,
+      ...(Array.isArray(row.teamIds) ? row.teamIds : []),
+      ...(Array.isArray(row.authorizedTeamIds) ? row.authorizedTeamIds : []),
+      ...(Array.isArray(row.teamSnapshot?.teamIds) ? row.teamSnapshot.teamIds : []),
+      ...(Array.isArray(row.playerSnapshot?.teamIds) ? row.playerSnapshot.teamIds : []),
+      ...(Array.isArray(row.sessionSnapshot?.teamIds) ? row.sessionSnapshot.teamIds : []),
+      ...(Array.isArray(row.matchSnapshot?.teamIds) ? row.matchSnapshot.teamIds : [])
+    ];
+    const history = row.seasonHistory || row.seasons || {};
+    Object.values(history || {}).forEach(snapshot => ids.push(...rowTeamIds(snapshot || {})));
+    const assignments = Array.isArray(row.teamAssignments) ? row.teamAssignments : [];
+    assignments.forEach(assignment => ids.push(...rowTeamIds(assignment || {})));
+    return [...new Set(ids.map(text).filter(Boolean))];
   }
   function rowMatchesTeam(row={}, teamId=''){ return Boolean(text(teamId) && rowTeamIds(row).includes(text(teamId))); }
   async function listTeams(){

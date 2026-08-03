@@ -270,6 +270,7 @@
     </div>`;
   }
   const physicalLabels = {
+    vma:{label:'VMA', unit:'km/h', direction:'high'},
     vmi:{label:'VMI', unit:'km/h', direction:'high'},
     illinois:{label:'Illinois', unit:'s', direction:'low'},
     v10s:{label:'10m', unit:'s', direction:'low'},

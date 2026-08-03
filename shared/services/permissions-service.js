@@ -92,6 +92,15 @@
     'tests-techniques':{read:true, write:true}
   };
 
+  const MODULE_ALIASES = {
+    matches:'stats',
+    attendance:'presences',
+    technicalTests:'tests',
+    physicalTests:'tests-athletiques',
+    playerProfiles:'playerProfile',
+    teamProfiles:'teamProfile'
+  };
+
   const LEGACY_ROLE_MODULES = {
     ADMIN:'*',
     RESPONSABLE:['stats','presences','tests','methodologie','database','dataHub','admin','medical','playerProfile','teamProfile','injuries','workload','convocations','individualReports'],
@@ -111,6 +120,14 @@
   function normalizeKey(value, fallback=''){
     const raw = asText(value || fallback).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     return raw || fallback;
+  }
+  function moduleIdOf(module){
+    const raw = asText(module?.id || module || '');
+    return MODULE_ALIASES[raw] || raw;
+  }
+  function moduleKeys(module){
+    const raw = asText(module?.id || module || '');
+    return [...new Set([raw, moduleIdOf(raw)].filter(Boolean))];
   }
 
   function normalizeRole(role){
@@ -187,6 +204,30 @@
     return out;
   }
 
+  function moduleScopes(profile={}){
+    return profile?.moduleScopes || profile?.moduleAccessScopes || profile?.permissionsScopes || {};
+  }
+
+  function moduleScope(profile={}, module=''){
+    const scopes = moduleScopes(profile);
+    for(const key of moduleKeys(module)){
+      if(Object.prototype.hasOwnProperty.call(scopes || {}, key)) return scopes[key];
+    }
+    return null;
+  }
+
+  function scopeAllowsAllPlayers(scope){
+    if(scope === true) return true;
+    if(typeof scope === 'string') return ['ALL_PLAYERS','ALLPLAYERS','TOUTES_JOUEUSES','TOUTES'].includes(normalizeKey(scope, ''));
+    if(Array.isArray(scope)) return scope.some(scopeAllowsAllPlayers);
+    if(!scope || typeof scope !== 'object') return false;
+    return scope.allPlayers === true
+      || scope.allPlayers === 'true'
+      || String(scope.players || '').toLowerCase() === 'all'
+      || String(scope.playerScope || '').toLowerCase() === 'all'
+      || scope.scope === 'allPlayers';
+  }
+
   function hasExplicitModuleScope(profile={}){
     if(normalizePermission(null, profile) === 'ADMIN') return false;
     return list(profile?.allowedModules || profile?.modulesAutorises).length > 0
@@ -205,19 +246,19 @@
       const legacy = legacyRoleModules(profile);
       return legacy === '*' || legacy.includes(moduleId);
     }
-    const overrides = moduleOverrides(profile)[moduleId] || {};
+    const overrides = moduleKeys(moduleId).map(key => moduleOverrides(profile)[key]).find(Boolean) || {};
     return overrides.read === true;
   }
 
   function hasSpecificModuleRule(profile={}, moduleId=''){
     const specific = profile?.modulePermissions || profile?.permissionsSpecifiques || {};
-    return Object.prototype.hasOwnProperty.call(specific || {}, moduleId);
+    return moduleKeys(moduleId).some(key => Object.prototype.hasOwnProperty.call(specific || {}, key));
   }
 
   function moduleActionAllowed(profile={}, moduleId='', action='read'){
     if(normalizePermission(null, profile) === 'ADMIN') return true;
     if(!hasSpecificModuleRule(profile, moduleId)) return true;
-    const overrides = moduleOverrides(profile)[moduleId] || {};
+    const overrides = moduleKeys(moduleId).map(key => moduleOverrides(profile)[key]).find(Boolean) || {};
     if(action === 'read') return overrides.read === true;
     if(action === 'write') return overrides.write === true;
     if(action === 'delete') return overrides.delete === true;
@@ -271,7 +312,11 @@
       row?.sessionSnapshot?.teamId,
       row?.matchSnapshot?.teamId,
       ...(Array.isArray(row?.teamIds) ? row.teamIds : []),
-      ...(Array.isArray(row?.authorizedTeamIds) ? row.authorizedTeamIds : [])
+      ...(Array.isArray(row?.authorizedTeamIds) ? row.authorizedTeamIds : []),
+      ...(Array.isArray(row?.teamSnapshot?.teamIds) ? row.teamSnapshot.teamIds : []),
+      ...(Array.isArray(row?.playerSnapshot?.teamIds) ? row.playerSnapshot.teamIds : []),
+      ...(Array.isArray(row?.sessionSnapshot?.teamIds) ? row.sessionSnapshot.teamIds : []),
+      ...(Array.isArray(row?.matchSnapshot?.teamIds) ? row.matchSnapshot.teamIds : [])
     ].map(asText).filter(Boolean);
   }
 
@@ -301,11 +346,31 @@
     return hasAnyTeamAccess(profile, playerTeamIds(player));
   }
 
+  function canAccessAllPlayersForModule(profile={}, module=''){
+    if(!isActive(profile)) return false;
+    if(normalizePermission(null, profile) === 'ADMIN') return true;
+    const moduleId = moduleIdOf(module);
+    if(!canViewModule(profile, {id:moduleId, active:true})) return false;
+    return scopeAllowsAllPlayers(moduleScope(profile, moduleId));
+  }
+
+  function canAccessPlayerForModule(profile={}, player={}, module=''){
+    if(canAccessPlayer(profile, player)) return true;
+    return canAccessAllPlayersForModule(profile, module);
+  }
+
   function canAccessRecord(profile={}, record={}){
     if(!isActive(profile)) return false;
     if(normalizePermission(null, profile) === 'ADMIN') return true;
     return hasAnyTeamAccess(profile, rowTeamIds(record))
       || (record?.playerSnapshot && canAccessPlayer(profile, record.playerSnapshot));
+  }
+
+  function canAccessRecordForModule(profile={}, record={}, module=''){
+    if(canAccessRecord(profile, record)) return true;
+    if(!canAccessAllPlayersForModule(profile, module)) return false;
+    const linkedPlayer = record?.playerSnapshot || record?.player || (record?.playerId ? {playerId:record.playerId} : null);
+    return Boolean(linkedPlayer?.playerId || linkedPlayer?.id || record?.playerId);
   }
 
   function filterAuthorizedTeams(profile={}, teams=[]){
@@ -316,8 +381,16 @@
     return (players || []).filter(player => canAccessPlayer(profile, player));
   }
 
+  function filterAuthorizedPlayersForModule(profile={}, players=[], module=''){
+    return (players || []).filter(player => canAccessPlayerForModule(profile, player, module));
+  }
+
   function filterAuthorizedRecords(profile={}, records=[]){
     return (records || []).filter(record => canAccessRecord(profile, record));
+  }
+
+  function filterAuthorizedRecordsForModule(profile={}, records=[], module=''){
+    return (records || []).filter(record => canAccessRecordForModule(profile, record, module));
   }
 
   function visibleModules(modules=[], profileOrRole, section){
@@ -346,19 +419,23 @@
       authorizedTeamIds:[],
       allowedModules:[],
       modulePermissions:{},
+      moduleScopes:{},
       userType:'staff'
     };
   }
 
   const service = {
     ROLES, ROLE_ALIASES, ROLE_LABELS, PERMISSIONS, PERMISSION_LABELS, PERMISSION_RANK,
-    MODULE_PERMISSIONS, LEGACY_ROLE_MODULES,
+    MODULE_PERMISSIONS, MODULE_ALIASES, LEGACY_ROLE_MODULES,
     normalizeRole, roleLabel, getRole, normalizePermission, permissionLabel, hasPermission, isActive,
+    moduleIdOf, moduleKeys, moduleScopes, moduleScope, scopeAllowsAllPlayers,
     canUseModule, canViewModule, canEditModule, canDeleteData,
     canReadModule, canPerformAction,
     canManageUsers, canManageCoreData, canAccessTeam, canAccessPlayer,
-    canAccessRecord, hasAnyTeamAccess, rowTeamIds, playerTeamIds,
-    filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedRecords,
+    canAccessAllPlayersForModule, canAccessPlayerForModule,
+    canAccessRecord, canAccessRecordForModule, hasAnyTeamAccess, rowTeamIds, playerTeamIds,
+    filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule,
+    filterAuthorizedRecords, filterAuthorizedRecordsForModule,
     visibleModules, teamIds, getAuthorizedTeamIds:teamIds, moduleOverrides, moduleActionAllowed, hasExplicitModuleScope, defaultProfile
   };
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-67-20260729-tablet-cache-refresh';
+const CACHE_NAME = 'coachpulse-v6-4-68-20260803-launch-cache-refresh';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
