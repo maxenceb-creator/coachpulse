@@ -163,6 +163,24 @@ function testMedicalDataStayLinkedToPlayerAndTeamIds(){
   assert(medicalSource.includes('teamId:injury.teamId||injury.playerSnapshot?.teamId'), 'Les évolutions médicales doivent reprendre le teamId de la blessure.');
 }
 
+function testMatchDataStayLinkedToPlayerAndTeamIds(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(appSource.includes('const matchTeamIds = [...new Set'), 'Les matchs doivent conserver une liste teamIds stable.');
+  assert(appSource.includes('teamSnapshot:{team:matchTeam'), 'Les matchs doivent exposer une snapshot équipe.');
+  assert(appSource.includes('const eventTeamIds = [...new Set'), 'Les événements de match doivent conserver leurs teamIds.');
+  assert(appSource.includes('const playerSnapshot = eventPlayerId ?'), 'Les événements de match liés à une joueuse doivent exposer une playerSnapshot.');
+  assert(appSource.includes('matchSnapshot:{...matchSnapshot'), 'Les événements de match doivent exposer une matchSnapshot.');
+
+  const u13Id = teams.canonicalTeamId('U13 A');
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const scopedCoach = permissions.defaultProfile({uid:'coach-u13', email:'coach@club.test'}, 'ENTRAINEUR', 'SAISIE');
+  scopedCoach.authorizedTeamIds = [u13Id];
+
+  assert.equal(permissions.canAccessRecord(scopedCoach, {matchSnapshot:{teamIds:[u13Id]}}), true);
+  assert.equal(Boolean(permissions.canAccessRecord(scopedCoach, {matchSnapshot:{teamIds:[u16Id]}})), false);
+}
+
 function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   const events = [{
     id:'presence-event-test',
@@ -276,6 +294,7 @@ testPermissionsRespectTeamHistoryAndModuleScope();
 testModuleRegistry();
 testAthleticTestsStayLinkedToPlayerAndTeamIds();
 testMedicalDataStayLinkedToPlayerAndTeamIds();
+testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
