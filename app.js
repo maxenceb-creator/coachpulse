@@ -1909,6 +1909,27 @@ function findExistingPlayerForImport(existing, player){
   const person = stableFirestoreId('person', player.nom, player.prenom);
   return existing.byId.get(player.playerId) || existing.byKey.get(keyBirth) || existing.byKey.get(key) || existing.byPerson.get(personBirth) || existing.byPerson.get(person);
 }
+function importedDocAccessIssue(collection, doc={}){
+  if(hasGlobalDataAccess()) return '';
+  if(collection === 'players') return canAccessPlayerRecord(doc) ? '' : `joueuse hors périmètre (${doc.displayName || doc.playerId || doc.id || 'sans nom'})`;
+  if(collection === 'teams') return canAccessTeamId(doc.teamId || doc.id) ? '' : `équipe hors périmètre (${doc.name || doc.teamId || doc.id || 'sans nom'})`;
+  if(collection === 'staff_members' || collection === 'settings' || collection === 'changeLogs') return 'collection réservée aux administrateurs complets';
+  if(collection === 'syncLogs') return '';
+  return canAccessRecord(doc) ? '' : `document ${collection} hors périmètre (${doc.id || doc.playerId || doc.teamId || 'sans identifiant'})`;
+}
+function validateImportDocsAccess(docs){
+  if(hasGlobalDataAccess()) return;
+  const issues = [];
+  Object.entries(docs || {}).forEach(([collection, rows]) => {
+    (rows instanceof Map ? [...rows.values()] : []).forEach(doc => {
+      const issue = importedDocAccessIssue(collection, doc);
+      if(issue) issues.push(issue);
+    });
+  });
+  if(issues.length){
+    throw new Error(`Import bloqué : ${issues.slice(0, 5).join(' · ')}${issues.length > 5 ? ` · +${issues.length - 5} autre(s)` : ''}`);
+  }
+}
 const PLAYER_IMPORT_AUTHORITATIVE_FIELDS = new Set(['categorie','subCategory','team','teamId','birth','dateNaissance','photo','foot','poste']);
 function mergePlayerForImport(existing, incoming){
   const out = {}, changes = {};
@@ -1953,7 +1974,7 @@ async function commitImportPlan(plan){
       playerIdMap.set(player.playerId, foundId);
       resolvedPlayers.set(foundId, {...found, playerId:foundId, id:foundId});
       const merged = mergePlayerForImport(found, player);
-      if(Object.keys(merged.out).length) addDoc(docs,'players',foundId,{...merged.out, playerId:foundId, lastImportSource:plan.source});
+      if(Object.keys(merged.out).length) addDoc(docs,'players',foundId,{...merged.out, playerId:foundId, teamId:merged.out.teamId || found.teamId || player.teamId || '', teamIds:merged.out.teamIds || found.teamIds || player.teamIds || [], lastImportSource:plan.source});
     }else{
       playerIdMap.set(player.playerId, player.playerId);
       resolvedPlayers.set(player.playerId, player);
@@ -1964,7 +1985,8 @@ async function commitImportPlan(plan){
     const player = resolvedPlayers.get(doc.playerId);
     const season = doc.season || doc.saison || seasonFromDate(doc.date || new Date());
     const snap = player ? playerSeasonSnapshot(player, season) : null;
-    return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || ''} : doc;
+    const teamIds = snap ? [...new Set([snap.teamId, doc.teamId, ...(Array.isArray(snap.teamIds) ? snap.teamIds : []), ...(Array.isArray(doc.teamIds) ? doc.teamIds : [])].filter(Boolean))] : (Array.isArray(doc.teamIds) ? doc.teamIds : []);
+    return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || teamIds[0] || '', teamIds, playerSnapshot:{...(doc.playerSnapshot || {}), playerId:doc.playerId || '', teamId:snap.teamId || doc.teamId || '', teamIds}} : doc;
   }
   function remapImportedDoc(collection, doc={}){
     const resolvedPlayerId = playerIdMap.get(doc.playerId) || doc.playerId || '';
@@ -1986,6 +2008,7 @@ async function commitImportPlan(plan){
       addDoc(docs,collection,clean.id || clean.attendanceId || clean.testId || clean.sessionId || clean.teamId,clean);
     });
   });
+  validateImportDocsAccess(docs);
   const count = await pushCentralDocsToFirestore(docs);
   await pullCentralPlayersToLocal(false).catch(()=>{});
   return count;
@@ -1993,7 +2016,7 @@ async function commitImportPlan(plan){
 async function importPlayerRowsToFirestore(rows, options={}){
   const plan = buildImportPlan(rows, {source:options.source || 'Import Excel/CSV/JSON'});
   if(options.dryRun) return analyzeImportAgainstFirestore(plan);
-  await exportCentralFirestore('json');
+  if(hasGlobalDataAccess()) await exportCentralFirestore('json');
   return commitImportPlan(plan);
 }
 let importUiState = {file:null, rows:[], plan:null, report:null};
@@ -2087,7 +2110,7 @@ async function commitImport(){
   if(!importUiState.report) return alert('Lance d’abord la simulation.');
   if(!confirm(`Importer dans Firebase ?\nCréations prévues : ${importUiState.report.created}\nMises à jour prévues : ${importUiState.report.updated}\nLignes ignorées : ${importUiState.report.ignored}\n\nAucune suppression automatique ne sera faite.`)) return;
   try{
-    await exportCentralFirestore('json');
+    if(hasGlobalDataAccess()) await exportCentralFirestore('json');
     const count = await commitImportPlan(importUiState.plan);
     alert(`Import terminé : ${count} documents préparés/actualisés dans Firebase.`);
     await simulateImport();
@@ -2100,7 +2123,7 @@ function normalizeDataHubPlayer(item, meta={}){
     team:item.equipe || item.team, birth:item.dateNaissance || item.birth,
     photo:item.photo, poste:item.poste, source:meta.fileName || item.source || 'Data Hub'
   });
-  return {...p, poste:item.poste || '', dateNaissance:item.dateNaissance || p.birth || '', connector:item.connector || 'fichesJoueuses'};
+  return {...p, teamIds:[...new Set([p.teamId, ...(Array.isArray(p.teamIds) ? p.teamIds : [])].filter(Boolean))], poste:item.poste || '', dateNaissance:item.dateNaissance || p.birth || '', connector:item.connector || 'fichesJoueuses'};
 }
 function hubPlayerDiff(existing={}, incoming={}){
   const changes = {};
@@ -2115,10 +2138,13 @@ function normalizeDataHubSession(item, meta={}){
   const date = item.date || '';
   const categorie = item.categorie || '';
   const subCategory = item.sousCategorie || item.subCategory || '';
+  const team = item.equipe || item.team || '';
+  const teamId = item.teamId || teamsService()?.canonicalTeamId?.(team || categorie || subCategory) || (team || categorie || subCategory ? stableFirestoreId('team', team || categorie || subCategory) : '');
   const theme = item.theme || 'Import présence';
-  const sessionId = item.sessionId || stableFirestoreId('session', date || 'date-inconnue', theme, categorie, subCategory);
+  const sessionId = item.sessionId || stableFirestoreId('session', date || 'date-inconnue', theme, teamId || categorie, subCategory);
   return {
     sessionId, id:sessionId, date, categorie, subCategory, categories:[categorie].filter(Boolean),
+    team, teamId, teamIds:teamId ? [teamId] : [],
     theme, type:item.sessionType || item.typeSeance || 'Séance', duration:Number(item.duration || 0),
     source:meta.fileName || item.source || 'Data Hub'
   };
@@ -2183,6 +2209,8 @@ function normalizeDataHubTest(item, meta={}, existing=null){
       categorie:linkedPlayer.categorie || '',
       subCategory:linkedPlayer.subCategory || '',
       team:linkedPlayer.team || '',
+      teamId:linkedPlayer.teamId || '',
+      teamIds:Array.isArray(linkedPlayer.teamIds) ? linkedPlayer.teamIds : [linkedPlayer.teamId].filter(Boolean),
       photo:linkedPlayer.photo || ''
     } : undefined,
     source:meta.fileName || item.source || 'Data Hub'
@@ -2219,7 +2247,8 @@ function applyDataHubSeasonSnapshot(doc={}, playerMap){
   const player = playerMap.get(doc.playerId);
   const season = doc.season || doc.saison || seasonFromDate(doc.date || new Date());
   const snap = player ? playerSeasonSnapshot(player, season) : null;
-  return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || ''} : doc;
+  const teamIds = snap ? [...new Set([snap.teamId, doc.teamId, ...(Array.isArray(snap.teamIds) ? snap.teamIds : []), ...(Array.isArray(doc.teamIds) ? doc.teamIds : [])].filter(Boolean))] : (Array.isArray(doc.teamIds) ? doc.teamIds : []);
+  return snap ? {...doc, season, categorie:snap.categorie || doc.categorie || '', subCategory:snap.subCategory || doc.subCategory || doc.sousCategorie || '', sousCategorie:snap.subCategory || doc.sousCategorie || doc.subCategory || '', team:snap.team || doc.team || '', teamId:snap.teamId || doc.teamId || teamIds[0] || '', teamIds, playerSnapshot:{...(doc.playerSnapshot || {}), teamId:snap.teamId || doc.playerSnapshot?.teamId || doc.teamId || '', teamIds}} : doc;
 }
 function remapDataHubAttendance(item, meta, playerIdMap, playerMap){
   const base = normalizeDataHubAttendance(item, meta);
@@ -2343,7 +2372,7 @@ async function syncDataHubItems(items=[], meta={}){
       if(found){
         const id = found.playerId || found.id;
         const changes = hubPlayerDiff(found, player);
-        if(Object.keys(changes).length) addDoc(docs,'players',id,{...changes, playerId:id, lastDataHubSyncAt:new Date().toISOString(), lastDataHubSource:meta.fileName || ''});
+        if(Object.keys(changes).length) addDoc(docs,'players',id,{...changes, playerId:id, teamId:changes.teamId || found.teamId || player.teamId || '', teamIds:changes.teamIds || found.teamIds || player.teamIds || [], lastDataHubSyncAt:new Date().toISOString(), lastDataHubSource:meta.fileName || ''});
       }else{
         addDoc(docs,'players',player.playerId,{...player, createdFromDataHub:true, createdAtIso:new Date().toISOString()});
       }
@@ -2369,7 +2398,8 @@ async function syncDataHubItems(items=[], meta={}){
     rowsRead:report.rowsRead, created:report.created, updated:report.updated, ignored:report.unchanged, errors:report.errors,
     potentialDuplicates:report.potentialDuplicates, anomalies:report.anomalies.slice(0,80)
   });
-  await exportCentralFirestore('json');
+  validateImportDocsAccess(docs);
+  if(hasGlobalDataAccess()) await exportCentralFirestore('json');
   const written = await pushCentralDocsToFirestore(docs);
   await pullCentralPlayersToLocal(false).catch(()=>{});
   return {...report, mode:'sync', written, syncLogId:logId};
