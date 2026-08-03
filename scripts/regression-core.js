@@ -341,6 +341,8 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(rulesSource.includes('function canAccessScopedDataForModule'), 'Les règles Firestore doivent appliquer les scopes complets au niveau module.');
   assert(rulesSource.includes("canAccessModule('presences') && isPresenceSession"), 'Les sessions créées par Présences doivent être lisibles via le module Présences.');
   assert(appSource.includes("canAccessAllPlayersForModule('presences')"), 'La lecture cloud Présences doit gérer le scope complet du module.');
+  assert(appSource.includes('readPresenceSessionsForTeams'), 'Le module Présences doit lire les sessions cloud via les teamIds autorisés.');
+  assert(appSource.includes("field:'createdFromPresenceModule'"), 'Le module Présences doit cibler les sessions créées depuis Présences.');
   assert(appSource.includes("moduleId:'tests-athletiques'"), 'Les Tests athlétiques doivent demander les joueuses dans leur scope module.');
   assert(fs.readFileSync('pages/tests-techniques.html', 'utf8').includes('moduleId:"tests"'), 'Les Tests techniques doivent demander les joueuses dans leur scope module.');
 

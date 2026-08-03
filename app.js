@@ -4059,13 +4059,61 @@ async function presenceListEvents(){
     const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, operator, value));
     return docsFromSnap(await firebaseFns.getDocs(q));
   };
+  const readWhereSafe = async (collectionName, constraints=[]) => {
+    try{
+      const q = firebaseFns.query(
+        firebaseFns.collection(db, collectionName),
+        ...constraints.map(item => firebaseFns.where(item.field, item.operator, item.value))
+      );
+      return docsFromSnap(await firebaseFns.getDocs(q));
+    }catch(error){
+      console.warn('[Présences] Lecture cloud ignorée', collectionName, constraints.map(item => item.field).join(','), cleanError(error));
+      return [];
+    }
+  };
+  const uniqueRows = rows => [...new Map(rows.map(row => [row.sessionId || row.id || JSON.stringify(row), row])).values()];
+  const readPresenceSessionsForAllPlayersScope = async () => uniqueRows([
+    ...(await readWhereSafe('sessions', [{field:'createdFromPresenceModule', operator:'==', value:true}])),
+    ...(await readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}]))
+  ]);
+  const readPresenceSessionsForTeams = async chunks => {
+    const reads = [];
+    chunks.forEach(chunk => {
+      reads.push(readWhereSafe('sessions', [
+        {field:'createdFromPresenceModule', operator:'==', value:true},
+        {field:'teamId', operator:'in', value:chunk}
+      ]));
+      reads.push(readWhereSafe('sessions', [
+        {field:'createdFromPresenceModule', operator:'==', value:true},
+        {field:'teamIds', operator:'array-contains-any', value:chunk}
+      ]));
+      reads.push(readWhereSafe('sessions', [
+        {field:'source', operator:'==', value:'Présences'},
+        {field:'teamId', operator:'in', value:chunk}
+      ]));
+      reads.push(readWhereSafe('sessions', [
+        {field:'source', operator:'==', value:'Présences'},
+        {field:'teamIds', operator:'array-contains-any', value:chunk}
+      ]));
+    });
+    const targetedRows = uniqueRows((await Promise.all(reads)).flat());
+    if(targetedRows.length) return targetedRows;
+    const fallbackReads = [];
+    chunks.forEach(chunk => {
+      fallbackReads.push(readWhereSafe('sessions', [{field:'teamId', operator:'in', value:chunk}]));
+      fallbackReads.push(readWhereSafe('sessions', [{field:'teamIds', operator:'array-contains-any', value:chunk}]));
+    });
+    return uniqueRows((await Promise.all(fallbackReads)).flat());
+  };
   const authorizedTeamIds = getAuthorizedTeamIds();
   if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return [];
   const teamChunks = [];
   for(let i=0;i<authorizedTeamIds.length;i+=10) teamChunks.push(authorizedTeamIds.slice(i,i+10));
-  const sessionRows = isAdmin() || canAccessAllPlayersForModule('presences')
+  const sessionRows = isAdmin()
     ? docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'sessions')))
-    : (await Promise.all(teamChunks.map(chunk => readWhere('sessions', 'teamId', 'in', chunk)))).flat();
+    : canAccessAllPlayersForModule('presences')
+      ? await readPresenceSessionsForAllPlayersScope()
+      : await readPresenceSessionsForTeams(teamChunks);
   const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
     .filter(row => row.sessionId || row.id)
     .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true);
