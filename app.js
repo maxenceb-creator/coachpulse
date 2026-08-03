@@ -2560,6 +2560,21 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
   if((clean.categorie || clean.subCategory) && !clean.team) clean.team = service?.defaultClubTeamFromSubCategory?.(clean.subCategory || clean.categorie) || normalizeTeamFromCategory(clean.categorie || clean.subCategory);
   if(clean.team) clean.teamId = teamService?.canonicalTeamId?.(clean.team) || stableFirestoreId('team', clean.team);
   if(clean.team || Array.isArray(clean.teamIds) || clean.teamId) clean.teamIds = normalizeAdminPlayerTeamIds({...before, ...clean}, teamService);
+  if(clean.team || clean.teamId || clean.categorie || clean.subCategory || Array.isArray(clean.teamIds)){
+    const season = clean.currentSeason || before.currentSeason || currentSeason();
+    clean.seasonHistory = {
+      ...(before.seasonHistory && typeof before.seasonHistory === 'object' ? before.seasonHistory : {}),
+      [season]:{
+        ...((before.seasonHistory && typeof before.seasonHistory === 'object' ? before.seasonHistory[season] : {}) || {}),
+        categorie:clean.categorie ?? before.categorie ?? '',
+        subCategory:clean.subCategory ?? before.subCategory ?? before.sousCategorie ?? '',
+        team:clean.team ?? before.team ?? '',
+        teamId:clean.teamId ?? before.teamId ?? '',
+        teamIds:clean.teamIds ?? before.teamIds ?? [],
+        updatedAtIso:new Date().toISOString()
+      }
+    };
+  }
   if(clean.foot || clean.pied || clean.meilleurPiedLabel){
     clean.foot = String(clean.foot || clean.pied || clean.meilleurPiedLabel || '').trim();
     clean.pied = clean.foot;

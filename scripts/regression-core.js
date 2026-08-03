@@ -75,6 +75,61 @@ function testTeamIdsStayShared(){
   assert.equal(teams.categoryForSubCategory('U15'), 'U16');
 }
 
+function testManualTeamEditOverridesDefaultCategoryTeam(){
+  const edited = players.normalizePlayer({
+    playerId:'player-u16-surclassement',
+    nom:'Martin',
+    prenom:'Ava',
+    birth:'2010-03-01',
+    team:'U19',
+    teamId:teams.canonicalTeamId('U19'),
+    teamIds:[teams.canonicalTeamId('U16 A'), teams.canonicalTeamId('U19')],
+    currentSeason:'2026-2027',
+    seasonHistory:{
+      '2026-2027':{
+        categorie:'U16',
+        subCategory:'U16',
+        team:'U19',
+        teamId:teams.canonicalTeamId('U19'),
+        teamIds:[teams.canonicalTeamId('U16 A'), teams.canonicalTeamId('U19')]
+      }
+    }
+  });
+
+  assert.equal(edited.team, 'U19');
+  assert.equal(edited.teamId, teams.canonicalTeamId('U19'));
+  assert(edited.teamIds.includes(teams.canonicalTeamId('U16 A')));
+  assert(edited.teamIds.includes(teams.canonicalTeamId('U19')));
+}
+
+function testEditedTeamIdsDoNotReAddRemovedEligibleTeam(){
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const u19Id = teams.canonicalTeamId('U19');
+  const edited = players.normalizePlayer({
+    playerId:'player-u16-keeps-explicit-teamids',
+    nom:'Dupont',
+    prenom:'Lina',
+    birth:'2011-02-01',
+    team:'U16 A',
+    teamId:u16Id,
+    teamIds:[u16Id],
+    currentSeason:'2026-2027',
+    seasonHistory:{
+      '2026-2027':{
+        categorie:'U16',
+        subCategory:'U16',
+        team:'U16 A',
+        teamId:u16Id,
+        teamIds:[u16Id]
+      }
+    }
+  });
+
+  assert.equal(edited.teamId, u16Id);
+  assert(edited.teamIds.includes(u16Id));
+  assert(!edited.teamIds.includes(u19Id));
+}
+
 function testPlayerFilteringAndDedupe(){
   const active = players.normalizePlayer({nom:'Dupont', prenom:'Ava', birth:'2014-01-02', status:'active'});
   const duplicate = {...active, photo:'updated-photo'};
@@ -425,6 +480,8 @@ function testPlayerProfileRenderStartsEmptyAndUsesPlayerIds(){
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
+testManualTeamEditOverridesDefaultCategoryTeam();
+testEditedTeamIdsDoNotReAddRemovedEligibleTeam();
 testPlayerFilteringAndDedupe();
 testPermissions();
 testPermissionsRespectTeamHistoryAndModuleScope();
