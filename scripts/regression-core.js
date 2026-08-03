@@ -135,6 +135,19 @@ function testModuleRegistry(){
   assert.equal(databaseTool.src, 'pages/admin-database.html');
 }
 
+function testAthleticTestsStayLinkedToPlayerAndTeamIds(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const athleticSource = fs.readFileSync('pages/tests-athletiques.html', 'utf8');
+  const playerProfileRenderSource = fs.readFileSync('pages/player-profile/playerProfileRender.js', 'utf8');
+
+  assert(appSource.includes("vma:{type:'vma'"), 'La VMA doit rester normalisée dans les métriques athlétiques.');
+  assert(playerProfileRenderSource.includes("vma:{label:'VMA'"), 'La fiche individuelle doit afficher la VMA athlétique.');
+  assert(appSource.includes('filterAuthorizedRecords(normalizeAthleticRows'), 'Les tests athlétiques chargés doivent être filtrés par autorisations.');
+  assert(appSource.includes("readWhere(name, 'teamIds', 'array-contains', teamId)"), 'La fiche équipe doit lire les tests via teamIds.');
+  assert(athleticSource.includes('playerSnapshotForAthletic'), 'La page Tests athlétiques doit envoyer une snapshot joueuse.');
+  assert(athleticSource.includes('teamIds:snapshot.teamIds'), 'La page Tests athlétiques doit envoyer les teamIds dans le payload.');
+}
+
 function testPlayerProfileDataFallsBackToSelectedPlayerOnly(){
   const window = loadBrowserScript('pages/player-profile/playerProfileData.js', {
     parent:{
@@ -200,6 +213,7 @@ testPlayerFilteringAndDedupe();
 testPermissions();
 testPermissionsRespectTeamHistoryAndModuleScope();
 testModuleRegistry();
+testAthleticTestsStayLinkedToPlayerAndTeamIds();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
 Promise.resolve()
