@@ -180,7 +180,7 @@ document.addEventListener('DOMContentLoaded',init);
     try{
       const api=window.parent&&window.parent.CoachPulseCentralData;
       if(api&&typeof api.listPlayers==="function"){
-        const filters=season&&season!=="all"?{season}:season==="all"?{season:"all"}:{};
+        const filters=season&&season!=="all"?{season,moduleId:"tests"}:season==="all"?{season:"all",moduleId:"tests"}:{moduleId:"tests"};
         const players=await api.listPlayers(filters);
         if(Array.isArray(players)&&players.length)return players;
       }

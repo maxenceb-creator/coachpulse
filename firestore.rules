@@ -66,6 +66,29 @@ service cloud.firestore {
         );
     }
 
+    function moduleScopeAllowsAllPlayers(moduleId) {
+      return permissionLevel() == 'ADMIN'
+        || role() == 'ADMIN'
+        || (
+          staffDoc().data.keys().hasAny(['moduleScopes'])
+          && staffDoc().data.moduleScopes is map
+          && staffDoc().data.moduleScopes.keys().hasAny([moduleId])
+          && staffDoc().data.moduleScopes[moduleId] is map
+          && staffDoc().data.moduleScopes[moduleId].keys().hasAny(['allPlayers'])
+          && staffDoc().data.moduleScopes[moduleId].allPlayers == true
+        );
+    }
+
+    function hasAnyAllPlayersModuleScope() {
+      return moduleScopeAllowsAllPlayers('stats')
+        || moduleScopeAllowsAllPlayers('presences')
+        || moduleScopeAllowsAllPlayers('tests')
+        || moduleScopeAllowsAllPlayers('tests-athletiques')
+        || moduleScopeAllowsAllPlayers('medical')
+        || moduleScopeAllowsAllPlayers('playerProfile')
+        || moduleScopeAllowsAllPlayers('teamProfile');
+    }
+
     function canManageUsers() {
       return canEditData() && canAccessModule('admin');
     }
@@ -202,6 +225,21 @@ service cloud.firestore {
         || (data.keys().hasAny(['sessionId']) && canAccessLinkedSession(data.sessionId));
     }
 
+    function canAccessScopedDataForModule(data, moduleId) {
+      return canAccessScopedData(data) || moduleScopeAllowsAllPlayers(moduleId);
+    }
+
+    function isPresenceSession(data) {
+      return (
+          data.keys().hasAny(['createdFromPresenceModule'])
+          && data.createdFromPresenceModule == true
+        )
+        || (
+          data.keys().hasAny(['source'])
+          && data.source == 'Présences'
+        );
+    }
+
     function canReadPlayerDoc(playerId, data) {
       return canReadData()
         && canAccessPlayerId(playerId)
@@ -264,7 +302,8 @@ service cloud.firestore {
     }
 
     match /players/{playerId} {
-      allow read: if canReadPlayerDoc(playerId, resource.data) && (canAccessModule('database') || canAccessModule('playerProfile'));
+      allow read: if (canReadPlayerDoc(playerId, resource.data) && (canAccessModule('database') || canAccessModule('playerProfile')))
+        || (canReadData() && canAccessPlayerId(playerId) && hasAnyAllPlayersModuleScope());
       allow create: if canManageCoreData()
         && canAccessModule('database')
         && request.resource.data.playerId == playerId
@@ -321,30 +360,44 @@ service cloud.firestore {
     }
 
     match /sessions/{sessionId} {
-      allow read: if (canReadData() && canAccessModule('methodologie') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteSportData() && canAccessModule('methodologie') && canAccessScopedData(request.resource.data);
-      allow update: if canWriteSportData() && canAccessModule('methodologie') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
+      allow read: if (
+          canReadData()
+          && (
+            (canAccessModule('methodologie') && canAccessScopedData(resource.data))
+            || (canAccessModule('presences') && isPresenceSession(resource.data) && canAccessScopedDataForModule(resource.data, 'presences'))
+          )
+        ) || canReadPlayerProfileData(resource.data);
+      allow create: if canWriteSportData()
+        && (
+          (canAccessModule('methodologie') && canAccessScopedData(request.resource.data))
+          || (canAccessModule('presences') && isPresenceSession(request.resource.data) && canAccessScopedDataForModule(request.resource.data, 'presences'))
+        );
+      allow update: if canWriteSportData()
+        && (
+          (canAccessModule('methodologie') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data))
+          || (canAccessModule('presences') && isPresenceSession(resource.data) && isPresenceSession(request.resource.data) && canAccessScopedDataForModule(resource.data, 'presences') && canAccessScopedDataForModule(request.resource.data, 'presences'))
+        );
       allow delete: if noDelete();
     }
 
     match /attendance/{attendanceId} {
-      allow read: if (canReadData() && canAccessModule('presences') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteSportData() && canAccessModule('presences') && canAccessScopedData(request.resource.data);
-      allow update: if canWriteSportData() && canAccessModule('presences') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
+      allow read: if (canReadData() && canAccessModule('presences') && canAccessScopedDataForModule(resource.data, 'presences')) || canReadPlayerProfileData(resource.data);
+      allow create: if canWriteSportData() && canAccessModule('presences') && canAccessScopedDataForModule(request.resource.data, 'presences');
+      allow update: if canWriteSportData() && canAccessModule('presences') && canAccessScopedDataForModule(resource.data, 'presences') && canAccessScopedDataForModule(request.resource.data, 'presences');
       allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /technicalTests/{testId} {
-      allow read: if (canReadData() && canAccessModule('tests') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteSportData() && canAccessModule('tests') && canAccessScopedData(request.resource.data);
-      allow update: if canWriteSportData() && canAccessModule('tests') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
+      allow read: if (canReadData() && canAccessModule('tests') && canAccessScopedDataForModule(resource.data, 'tests')) || canReadPlayerProfileData(resource.data);
+      allow create: if canWriteSportData() && canAccessModule('tests') && canAccessScopedDataForModule(request.resource.data, 'tests');
+      allow update: if canWriteSportData() && canAccessModule('tests') && canAccessScopedDataForModule(resource.data, 'tests') && canAccessScopedDataForModule(request.resource.data, 'tests');
       allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /physicalTests/{testId} {
-      allow read: if (canReadData() && canAccessModule('tests') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWritePhysicalData() && canAccessModule('tests') && canAccessScopedData(request.resource.data);
-      allow update: if canWritePhysicalData() && canAccessModule('tests') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
+      allow read: if (canReadData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques')) || canReadPlayerProfileData(resource.data);
+      allow create: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(request.resource.data, 'tests-athletiques');
+      allow update: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques') && canAccessScopedDataForModule(request.resource.data, 'tests-athletiques');
       allow delete: if canDeleteCoreData(resource.data);
     }
 
