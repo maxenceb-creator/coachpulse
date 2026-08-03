@@ -34,6 +34,12 @@ main,.layout,.card,.body-card,.body-card>*{min-width:0!important;max-width:100%!
   .silhouette{inset:18px 38px!important}
   .card h2{font-size:clamp(22px,7vw,32px)!important}
 }
+main{overflow-x:clip!important}
+.layout{grid-template-columns:repeat(auto-fit,minmax(min(520px,100%),1fr))!important}
+.body-card{grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr))!important}
+.form-grid{grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))!important}
+.field,input,select,textarea{min-width:0!important;max-width:100%!important}
+.zone-panel,textarea{overflow-wrap:anywhere!important}
 
 </style>
 </head>
