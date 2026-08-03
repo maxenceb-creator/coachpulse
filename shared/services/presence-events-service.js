@@ -12,6 +12,7 @@
     injured:{code:'B', label:'Blessée'},
     pole:{code:'PO', label:'Pôle Espoir'},
     district:{code:'D', label:'District'},
+    d2:{code:'D2', label:'Entraînement groupe pro'},
     P:{code:'P', label:'Présente'},
     A:{code:'A', label:'Absente'},
     ANJ:{code:'ANJ', label:'Absence non justifiée'},
@@ -20,7 +21,8 @@
     M:{code:'M', label:'Malade'},
     B:{code:'B', label:'Blessée'},
     PO:{code:'PO', label:'Pôle Espoir'},
-    D:{code:'D', label:'District'}
+    D:{code:'D', label:'District'},
+    D2:{code:'D2', label:'Entraînement groupe pro'}
   };
 
   function text(value){ return String(value ?? '').trim(); }

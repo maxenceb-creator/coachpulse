@@ -351,6 +351,19 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   assert(presencePageSource.includes('return api.presenceSaveEvent(normalized);'), 'La synchronisation cloud doit envoyer un événement normalisé.');
 }
 
+function testPresenceD2CodeStaysScopedToU19(){
+  const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
+  const presenceServiceSource = fs.readFileSync('shared/services/presence-events-service.js', 'utf8');
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(presencePageSource.includes('short:"D2"'), 'Le code D2 doit être disponible dans les paramètres Présences.');
+  assert(presencePageSource.includes('teamIds:["team-u19"]'), 'Le code D2 doit rester limité au teamId U19.');
+  assert(presencePageSource.includes('function attendanceStatusesForTeam'), 'La feuille de présence doit filtrer les codes selon le teamId.');
+  assert(presencePageSource.includes('allowedStatusIds.has(patch.status)'), 'La sauvegarde doit refuser un code non autorisé pour l’équipe.');
+  assert(presenceServiceSource.includes("D2:{code:'D2'"), 'Le service partagé doit normaliser le code D2.');
+  assert(appSource.includes("'D2'"), 'Les imports Présences doivent reconnaître le code D2.');
+}
+
 function testPlayerProfileDataFallsBackToSelectedPlayerOnly(){
   const window = loadBrowserScript('pages/player-profile/playerProfileData.js', {
     parent:{
@@ -424,6 +437,7 @@ testFirestoreRulesProtectExistingAndIncomingScope();
 testAccessRegressionSurfaceStaysComplete();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
+testPresenceD2CodeStaysScopedToU19();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
 Promise.resolve()
