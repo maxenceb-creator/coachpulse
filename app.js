@@ -189,6 +189,32 @@ function guardAdminAction(label='Action réservée aux éditeurs autorisés'){
   alert(label);
   return false;
 }
+function hasGlobalDataAccess(){
+  return isAdminLikeProfile(currentProfile || {})
+    || isSeedAdminEmail(currentProfile?.email || currentUser?.email || '');
+}
+function guardGlobalDataExportAction(label='Export global réservé aux administrateurs complets'){
+  if(hasGlobalDataAccess()) return true;
+  alert(label);
+  return false;
+}
+function scopedPlayersForAccess(players=[]){
+  return hasGlobalDataAccess() ? players : filterAuthorizedPlayers(players);
+}
+function scopedCentralExportPayload(payload={}){
+  if(hasGlobalDataAccess()) return payload;
+  const collections = payload.collections || {};
+  const nextCollections = {};
+  Object.entries(collections).forEach(([name, rows]) => {
+    const list = Array.isArray(rows) ? rows : [];
+    if(name === 'players') nextCollections[name] = filterAuthorizedPlayers(list);
+    else if(name === 'teams') nextCollections[name] = filterAuthorizedTeams(list);
+    else if(name === 'staff_members') nextCollections[name] = list.filter(row => row.uid === currentUser?.uid || row.staffId === currentUser?.uid || row.id === currentUser?.uid);
+    else if(['settings','syncLogs','changeLogs'].includes(name)) nextCollections[name] = [];
+    else nextCollections[name] = filterAuthorizedRecords(list);
+  });
+  return {...payload, collections:nextCollections, scopedExport:true, authorizedTeamIds:getAuthorizedTeamIds()};
+}
 function escapeHtml(v){
   return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 }
@@ -1238,7 +1264,7 @@ async function readCentralFirestoreExport(){
     payload.collections[name] = [];
     snap.forEach(docSnap => payload.collections[name].push({id:docSnap.id, ...docSnap.data()}));
   }
-  return payload;
+  return scopedCentralExportPayload(payload);
 }
 async function playerProfileLoadData(options={}){
   return measureAsync('playerProfileLoadData', async () => {
@@ -1588,7 +1614,7 @@ function centralPayloadToCsv(payload){
   return rows.map(row => row.map(csvEscape).join(';')).join('\n');
 }
 async function exportCentralFirestore(format){
-  if(!guardAdminAction()) return;
+  if(!guardGlobalDataExportAction()) return;
   try{
     const payload = await readCentralFirestoreExport();
     if(format === 'csv') downloadText(centralPayloadToCsv(payload), 'coachpulse_firebase_centralise.csv', 'text/csv;charset=utf-8');
@@ -2365,12 +2391,12 @@ async function adminListPlayers(filters={}){
     ...await technicalFirestorePlayerFootHints().catch(() => [])
   ]);
   const forceRefresh = !!filters.forceRefresh;
-  if(service?.listPlayers) return enrichPlayersWithTechnicalFootHints(await service.listPlayers(firestoreServiceContext({forceRefresh}), filters), hints);
-  if(service?.readFirestorePlayers) return enrichPlayersWithTechnicalFootHints(await service.readFirestorePlayers(firestoreServiceContext({forceRefresh}), filters), hints);
+  if(service?.listPlayers) return scopedPlayersForAccess(enrichPlayersWithTechnicalFootHints(await service.listPlayers(firestoreServiceContext({forceRefresh}), filters), hints));
+  if(service?.readFirestorePlayers) return scopedPlayersForAccess(enrichPlayersWithTechnicalFootHints(await service.readFirestorePlayers(firestoreServiceContext({forceRefresh}), filters), hints));
   const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
   const players = [];
   snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
-  return enrichPlayersWithTechnicalFootHints(sortPlayersForApp(players).filter(p => filters.includeArchived || filters.status || String(p.status || 'active').toLowerCase() !== 'archived'), hints);
+  return scopedPlayersForAccess(enrichPlayersWithTechnicalFootHints(sortPlayersForApp(players).filter(p => filters.includeArchived || filters.status || String(p.status || 'active').toLowerCase() !== 'archived'), hints));
 }
 async function adminListRawPlayers(){
   if(!guardAdminAction()) return [];
@@ -4609,8 +4635,8 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferr
 installBtn.addEventListener('click', async () => { if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; installBtn.hidden = true; });
 
 $('#saveNow').addEventListener('click', snapshotLocalData);
-$('#exportBackup').addEventListener('click', () => { if(guardAdminAction()) exportJson(buildPayload(), 'coachpulse_sauvegarde_locale_v6.json'); });
-$('#exportGlobal').addEventListener('click', () => { if(guardAdminAction()) exportJson(buildPayload(), 'coachpulse_export_global_v6.json'); });
+$('#exportBackup').addEventListener('click', () => { if(guardGlobalDataExportAction()) exportJson(buildPayload(), 'coachpulse_sauvegarde_locale_v6.json'); });
+$('#exportGlobal').addEventListener('click', () => { if(guardGlobalDataExportAction()) exportJson(buildPayload(), 'coachpulse_export_global_v6.json'); });
 $('#importBackupInput').addEventListener('change', async e => {
   if(!guardAdminAction()) { e.target.value=''; return; }
   const file = e.target.files?.[0]; if(!file) return;
