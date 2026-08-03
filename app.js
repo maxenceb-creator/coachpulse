@@ -1621,7 +1621,7 @@ async function exportCentralFirestore(format){
     else exportJson(payload, 'coachpulse_firebase_centralise.json');
   }catch(e){ alert('Export Firebase impossible : '+cleanError(e)); }
 }
-const IMPORT_STATUS_CODES = new Set(['P','R','ANJ','AJ','M','B','PO','D']);
+const IMPORT_STATUS_CODES = new Set(['P','R','ANJ','AJ','M','B','PO','D','D2']);
 const IMPORT_FIELD_ALIASES = {
   fullName:['joueuse','joueur','nom complet','nom prenom','nom prénom','athlete','athlète','player','player name','licencie','licencié'],
   nom:['nom','last name','surname','name'],
