@@ -2383,6 +2383,26 @@
         const player = (Array.isArray(rows) ? rows : []).find(row => String(row.playerId || row.id || "") === String(playerId || ""));
         return player ? playerForEventSeason(player, dateValue) : null;
       }
+      function playerSnapshotForAttendance(player, teamId, dateValue){
+        const seasonal = playerForEventSeason(player || {}, dateValue);
+        const teamIds = [...new Set([
+          seasonal.teamId,
+          teamId,
+          ...(Array.isArray(seasonal.teamIds) ? seasonal.teamIds : [])
+        ].map(value => String(value || "").trim()).filter(Boolean))];
+        return {
+          playerId:seasonal.playerId || player?.playerId || "",
+          nom:seasonal.nom || "",
+          prenom:seasonal.prenom || "",
+          displayName:playerName(seasonal || player || {}),
+          team:seasonal.team || teamById(teamId)?.name || "",
+          teamId:seasonal.teamId || teamId || "",
+          teamIds,
+          categorie:seasonal.categorie || seasonal.category || "",
+          subCategory:seasonal.subCategory || seasonal.sousCategorie || "",
+          photo:seasonal.photo || ""
+        };
+      }
       function playersFromPresenceEvents(events){
         const players = new Map();
         events.forEach(event => {
@@ -2707,7 +2727,10 @@
         return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => [player.playerId, {
           status:"present",
           minutes:Number(duration || 0),
-          comment:""
+          comment:"",
+          teamId,
+          teamIds:[teamId],
+          playerSnapshot:playerSnapshotForAttendance(player, teamId, dateValue)
         }]));
       }
       function sessionProcedureFromForm(form){
@@ -2753,15 +2776,22 @@
       function mergeAttendanceForEvent(previousEvent, teamId, dateValue, duration){
         return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => {
           const previous = previousEvent?.attendance?.[player.playerId] ? attendanceEntry(previousEvent, player.playerId) : null;
+          const playerSnapshot = playerSnapshotForAttendance(player, teamId, dateValue);
           return [player.playerId, previous ? {
             ...previous,
             minutes:isPresentStatus(previous.status)
               ? Number(previous.minutes || duration || 0)
-              : Number(previous.minutes || 0)
+              : Number(previous.minutes || 0),
+            teamId,
+            teamIds:[teamId],
+            playerSnapshot
           } : {
             status:"present",
             minutes:Number(duration || 0),
-            comment:""
+            comment:"",
+            teamId,
+            teamIds:[teamId],
+            playerSnapshot
           }];
         }));
       }
@@ -2830,6 +2860,13 @@
           type,
           title:typeLabel(type),
           teamId:team.teamId,
+          teamIds:[team.teamId],
+          teamSnapshot:{
+            teamId:team.teamId,
+            teamIds:[team.teamId],
+            name:team.name,
+            category:team.category || ""
+          },
           team:team.name,
           category:team.category || "",
           attendance:previousEvent
@@ -2968,7 +3005,13 @@
         if(!next.status && !Number(next.minutes || 0) && !String(next.comment || "").trim()){
           delete attendance[playerId];
         }else{
-          attendance[playerId] = next;
+          const player = playerById(playerId, current.date);
+          attendance[playerId] = {
+            ...next,
+            teamId:current.teamId || "",
+            teamIds:current.teamIds || (current.teamId ? [current.teamId] : []),
+            playerSnapshot:next.playerSnapshot || playerSnapshotForAttendance(player, current.teamId, current.date)
+          };
         }
         events[index] = {
           ...current,

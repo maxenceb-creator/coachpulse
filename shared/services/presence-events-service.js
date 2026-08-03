@@ -29,11 +29,48 @@
     const raw = text(value);
     return STATUS_MAP[raw] || STATUS_MAP[raw.toUpperCase()] || STATUS_MAP.absent;
   }
+  function uniqueTexts(values=[]){
+    return [...new Set(values.map(text).filter(Boolean))];
+  }
   function eventId(event={}){
     return text(event.id || event.sessionId || event.eventId);
   }
+  function teamIdsFromEvent(event={}){
+    return uniqueTexts([
+      event.teamId,
+      event.team_id,
+      event.teamSnapshot?.teamId,
+      event.sessionSnapshot?.teamId,
+      ...(Array.isArray(event.teamIds) ? event.teamIds : []),
+      ...(Array.isArray(event.teamSnapshot?.teamIds) ? event.teamSnapshot.teamIds : []),
+      ...(Array.isArray(event.sessionSnapshot?.teamIds) ? event.sessionSnapshot.teamIds : [])
+    ]);
+  }
+  function playerSnapshotFromRaw(raw={}, playerId='', event={}){
+    const snapshot = raw && typeof raw === 'object' && raw.playerSnapshot && typeof raw.playerSnapshot === 'object'
+      ? raw.playerSnapshot
+      : {};
+    const teamIds = uniqueTexts([
+      ...(Array.isArray(snapshot.teamIds) ? snapshot.teamIds : []),
+      ...(Array.isArray(raw?.teamIds) ? raw.teamIds : []),
+      ...teamIdsFromEvent(event)
+    ]);
+    return {
+      playerId:text(snapshot.playerId || playerId),
+      nom:text(snapshot.nom || snapshot.lastName),
+      prenom:text(snapshot.prenom || snapshot.firstName),
+      displayName:text(snapshot.displayName || snapshot.name),
+      team:text(snapshot.team || event.team),
+      teamId:text(snapshot.teamId || raw?.teamId || event.teamId),
+      teamIds,
+      categorie:text(snapshot.categorie || snapshot.category || event.category || event.categorie),
+      subCategory:text(snapshot.subCategory || snapshot.sousCategorie),
+      photo:text(snapshot.photo)
+    };
+  }
   function sessionFromEvent(event={}){
     const sessionId = eventId(event);
+    const teamIds = teamIdsFromEvent(event);
     return {
       id:sessionId,
       sessionId,
@@ -45,6 +82,13 @@
       type:text(event.type || 'entrainement'),
       theme:text(event.title || event.theme || 'Séance'),
       teamId:text(event.teamId),
+      teamIds,
+      teamSnapshot:{
+        teamId:text(event.teamId),
+        teamIds,
+        name:text(event.team),
+        category:text(event.category || event.categorie)
+      },
       team:text(event.team),
       category:text(event.category || event.categorie),
       recurrence:text(event.recurrence),
@@ -74,16 +118,27 @@
   }
   function attendanceRowsFromEvent(event={}){
     const sessionId = eventId(event);
+    const eventTeamIds = teamIdsFromEvent(event);
+    const sessionSnapshot = sessionFromEvent(event);
     const attendance = event.attendance || {};
     return Object.entries(attendance).map(([playerId, raw]) => {
       const entry = attendanceEntryFromRaw(raw, event);
       const attendanceId = text(raw?.attendanceId) || `local-attendance-${sessionId}-${playerId}`;
+      const playerSnapshot = playerSnapshotFromRaw(raw, playerId, event);
+      const teamIds = uniqueTexts([
+        ...(Array.isArray(raw?.teamIds) ? raw.teamIds : []),
+        ...(Array.isArray(playerSnapshot.teamIds) ? playerSnapshot.teamIds : []),
+        ...eventTeamIds
+      ]);
       return {
         id:attendanceId,
         attendanceId,
         sessionId,
         playerId:text(playerId),
-        teamId:text(event.teamId),
+        teamId:text(raw?.teamId || playerSnapshot.teamId || event.teamId),
+        teamIds,
+        sessionSnapshot,
+        playerSnapshot:{...playerSnapshot, teamIds},
         team:text(event.team),
         date:text(event.date),
         status:entry.status,
@@ -113,7 +168,7 @@
   }
   function collectionsForTeam(teamId){
     const target = text(teamId);
-    return collectionsFromEvents(readEvents().filter(event => !target || text(event.teamId) === target));
+    return collectionsFromEvents(readEvents().filter(event => !target || teamIdsFromEvent(event).includes(target)));
   }
   function collectionsForPlayer(playerIds=[]){
     const ids = new Set((Array.isArray(playerIds) ? playerIds : [playerIds]).map(text).filter(Boolean));
@@ -130,6 +185,7 @@
     STORAGE_KEY,
     readEvents,
     sessionFromEvent,
+    teamIdsFromEvent,
     attendanceRowsFromEvent,
     collectionsFromEvents,
     collectionsForTeam,

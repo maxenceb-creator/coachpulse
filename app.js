@@ -3689,13 +3689,21 @@ function presencePlainProcedure(value={}){
 }
 function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   const sessionId = String(session.sessionId || session.id || '').trim();
+  const teamIds = [...new Set([
+    session.teamId,
+    ...(Array.isArray(session.teamIds) ? session.teamIds : []),
+    ...(Array.isArray(session.teamSnapshot?.teamIds) ? session.teamSnapshot.teamIds : [])
+  ].map(value => String(value || '').trim()).filter(Boolean))];
   const attendance = {};
   attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId).forEach(row => {
     attendance[row.playerId] = {
       status:presenceUiStatusFromCode(row.status),
       minutes:Number(row.minutes ?? row.duration ?? 0) || 0,
       comment:row.comment || row.note || '',
-      attendanceId:row.attendanceId || row.id || ''
+      attendanceId:row.attendanceId || row.id || '',
+      teamId:row.teamId || session.teamId || '',
+      teamIds:row.teamIds || teamIds,
+      playerSnapshot:row.playerSnapshot || {}
     };
   });
   return {
@@ -3709,6 +3717,13 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
     type:session.type || 'entrainement',
     title:session.theme || session.title || 'Séance',
     teamId:session.teamId || '',
+    teamIds,
+    teamSnapshot:session.teamSnapshot || {
+      teamId:session.teamId || '',
+      teamIds,
+      name:session.team || '',
+      category:session.category || session.categorie || ''
+    },
     team:session.team || '',
     category:session.category || session.categorie || '',
     attendance,
@@ -3761,8 +3776,21 @@ async function presenceSaveEvent(event={}){
   const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
   const sessionId = session.sessionId || event.id;
   const now = new Date().toISOString();
+  const sessionTeamIds = [...new Set([
+    session.teamId,
+    ...(Array.isArray(session.teamIds) ? session.teamIds : []),
+    ...(Array.isArray(event.teamIds) ? event.teamIds : [])
+  ].map(value => String(value || '').trim()).filter(Boolean))];
   const sessionPayload = {
     ...session,
+    teamIds:sessionTeamIds,
+    teamSnapshot:{
+      ...(session.teamSnapshot || event.teamSnapshot || {}),
+      teamId:session.teamId || event.teamId || '',
+      teamIds:sessionTeamIds,
+      name:session.team || event.team || '',
+      category:session.category || event.category || event.categorie || ''
+    },
     procedure:presencePlainProcedure(session.procedure || event.procedure || event.sessionProcedure)
   };
   await firebaseFns.setDoc(firebaseFns.doc(db, 'sessions', sessionId), {
@@ -3777,7 +3805,27 @@ async function presenceSaveEvent(event={}){
     updatedByEmail:currentUser.email || '',
     createdAtIso:session.createdAt || event.createdAt || now
   }, {merge:true});
-  const attendanceRows = service?.attendanceRowsFromEvent ? service.attendanceRowsFromEvent(event) : [];
+  const attendanceRows = (service?.attendanceRowsFromEvent ? service.attendanceRowsFromEvent(event) : [])
+    .filter(row => row.playerId)
+    .map(row => ({
+      ...row,
+      teamId:row.teamId || session.teamId || event.teamId || '',
+      teamIds:[...new Set([...(Array.isArray(row.teamIds) ? row.teamIds : []), ...sessionTeamIds].filter(Boolean))],
+      sessionSnapshot:{
+        ...(row.sessionSnapshot || {}),
+        sessionId,
+        date:sessionPayload.date || '',
+        teamId:sessionPayload.teamId || '',
+        teamIds:sessionTeamIds
+      },
+      playerSnapshot:{
+        ...(row.playerSnapshot || {}),
+        playerId:row.playerId,
+        teamId:row.playerSnapshot?.teamId || row.teamId || session.teamId || event.teamId || '',
+        teamIds:[...new Set([...(Array.isArray(row.playerSnapshot?.teamIds) ? row.playerSnapshot.teamIds : []), ...(Array.isArray(row.teamIds) ? row.teamIds : []), ...sessionTeamIds].filter(Boolean))]
+      }
+    }))
+    .filter(row => !row.teamId || canAccessTeamId(row.teamId));
   const nextAttendanceIds = new Set(attendanceRows.map(row => row.attendanceId || row.id).filter(Boolean));
   const existingAttendanceSnap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)));
   const staleAttendanceDeletes = [];
