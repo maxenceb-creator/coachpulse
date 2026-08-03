@@ -1308,15 +1308,21 @@ async function playerProfileLoadData(options={}){
   });
 }
 function rowTeamIds(row={}){
-  return [
+  const ids = [
     row.teamId,
     row.team_id,
     row.team?.teamId,
     row.teamSnapshot?.teamId,
     row.playerSnapshot?.teamId,
     row.sessionSnapshot?.teamId,
-    row.matchSnapshot?.teamId
-  ].map(value => String(value || '').trim()).filter(Boolean);
+    row.matchSnapshot?.teamId,
+    ...(Array.isArray(row.teamIds) ? row.teamIds : []),
+    ...(Array.isArray(row.authorizedTeamIds) ? row.authorizedTeamIds : []),
+    ...(Array.isArray(row.playerSnapshot?.teamIds) ? row.playerSnapshot.teamIds : []),
+    ...(Array.isArray(row.sessionSnapshot?.teamIds) ? row.sessionSnapshot.teamIds : []),
+    ...(Array.isArray(row.matchSnapshot?.teamIds) ? row.matchSnapshot.teamIds : [])
+  ];
+  return [...new Set(ids.map(value => String(value || '').trim()).filter(Boolean))];
 }
 function rowMatchesTeamId(row={}, teamId=''){
   const target = String(teamId || '').trim();
@@ -1329,7 +1335,9 @@ function playerMatchesTeamIdForAnySeason(player={}, teamId=''){
   if(!teamId) return false;
   if(rowMatchesTeamId(player, teamId)) return true;
   const history = player.seasonHistory || player.seasons || {};
-  return Object.values(history || {}).some(snapshot => rowMatchesTeamId(snapshot, teamId));
+  if(Object.values(history || {}).some(snapshot => rowMatchesTeamId(snapshot, teamId))) return true;
+  const assignments = Array.isArray(player.teamAssignments) ? player.teamAssignments : [];
+  return assignments.some(assignment => rowMatchesTeamId(assignment, teamId));
 }
 async function teamProfileLoadData(options={}){
   return measureAsync('teamProfileLoadData', async () => {
@@ -1425,7 +1433,10 @@ async function teamProfileLoadData(options={}){
       'teamSnapshot.teamId',
       ...seasons.flatMap(season => [`seasonHistory.${season}.teamId`, `seasons.${season}.teamId`])
     ];
-    const settled = await Promise.allSettled(fieldNames.map(field => readWhere('players', field, '==', teamId)));
+    const fieldReads = fieldNames.map(field => readWhere('players', field, '==', teamId));
+    fieldReads.push(readWhere('players', 'teamIds', 'array-contains', teamId));
+    fieldReads.push(readWhere('players', 'teamSnapshot.teamIds', 'array-contains', teamId));
+    const settled = await Promise.allSettled(fieldReads);
     const rows = uniquePlayers(settled.flatMap(result => result.status === 'fulfilled' ? result.value : []));
     return filterAuthorizedPlayers(rows).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) || rowMatchesTeamId(player, teamId));
   }
@@ -1439,7 +1450,11 @@ async function teamProfileLoadData(options={}){
 	  }
 	  const playerIds = payload.collections.players.map(player => player.playerId || player.id).filter(Boolean);
 	  const directNames = ['matches','sessions','technicalTests','physicalTests','injuries','workloads','convocations','individualReports'];
-	  const directRows = await Promise.all(directNames.map(name => readWhere(name, 'teamId', '==', teamId)));
+	  const directRows = await Promise.all(directNames.map(async name => uniqueRows([
+	    ...(await readWhere(name, 'teamId', '==', teamId)),
+	    ...(await readWhere(name, 'teamIds', 'array-contains', teamId)),
+	    ...(await readWhere(name, 'teamSnapshot.teamIds', 'array-contains', teamId))
+	  ])));
 	  directNames.forEach((name, idx) => { payload.collections[name] = directRows[idx]; });
 	  const matchIds = payload.collections.matches.map(row => row.matchId || row.id).filter(Boolean);
 	  const sessionIds = payload.collections.sessions.map(row => row.sessionId || row.id).filter(Boolean);
@@ -1447,38 +1462,45 @@ async function teamProfileLoadData(options={}){
 	  const medicalLinkedNames = ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps'];
 	  const [
 	    matchEventsByTeam,
+	    matchEventsByTeamIds,
 	    matchEventsByMatch,
 	    attendanceByTeam,
+	    attendanceByTeamIds,
 	    attendanceBySession,
 	    attendanceByPlayer,
 	    playerLinkedRows,
 	    medicalLinkedRows
 	  ] = await Promise.all([
 	    readWhere('matchEvents', 'teamId', '==', teamId),
+	    readWhere('matchEvents', 'teamIds', 'array-contains', teamId),
 	    readWhereIn('matchEvents', 'matchId', matchIds),
 	    readWhere('attendance', 'teamId', '==', teamId),
+	    readWhere('attendance', 'teamIds', 'array-contains', teamId),
 	    readWhereIn('attendance', 'sessionId', sessionIds),
 	    readWhereIn('attendance', 'playerId', playerIds),
 	    Promise.all(playerLinkedNames.map(async name => {
-	      const [byPlayer, bySnapshotTeam] = await Promise.all([
-	        readWhereIn(name, 'playerId', playerIds),
-	        readWhere(name, 'playerSnapshot.teamId', '==', teamId)
-	      ]);
-	      return {name, rows:uniqueRows([...(payload.collections[name] || []), ...byPlayer, ...bySnapshotTeam])};
-	    })),
-	    Promise.all(medicalLinkedNames.map(async name => {
-	      const [byTeam, byPlayer, bySnapshotTeam] = await Promise.all([
-	        readWhere(name, 'teamId', '==', teamId),
-	        readWhereIn(name, 'playerId', playerIds),
-	        readWhere(name, 'playerSnapshot.teamId', '==', teamId)
-	      ]);
-	      return {name, rows:uniqueRows([...byTeam, ...byPlayer, ...bySnapshotTeam])};
-	    }))
+	      const [byPlayer, bySnapshotTeam, bySnapshotTeamIds] = await Promise.all([
+        readWhereIn(name, 'playerId', playerIds),
+        readWhere(name, 'playerSnapshot.teamId', '==', teamId),
+        readWhere(name, 'playerSnapshot.teamIds', 'array-contains', teamId)
+      ]);
+      return {name, rows:uniqueRows([...(payload.collections[name] || []), ...byPlayer, ...bySnapshotTeam, ...bySnapshotTeamIds])};
+    })),
+    Promise.all(medicalLinkedNames.map(async name => {
+      const [byTeam, byTeamIds, byPlayer, bySnapshotTeam, bySnapshotTeamIds] = await Promise.all([
+        readWhere(name, 'teamId', '==', teamId),
+        readWhere(name, 'teamIds', 'array-contains', teamId),
+        readWhereIn(name, 'playerId', playerIds),
+        readWhere(name, 'playerSnapshot.teamId', '==', teamId),
+        readWhere(name, 'playerSnapshot.teamIds', 'array-contains', teamId)
+      ]);
+      return {name, rows:uniqueRows([...byTeam, ...byTeamIds, ...byPlayer, ...bySnapshotTeam, ...bySnapshotTeamIds])};
+    }))
 	  ]);
-	  payload.collections.matchEvents = uniqueRows([...matchEventsByTeam, ...matchEventsByMatch]);
+	  payload.collections.matchEvents = uniqueRows([...matchEventsByTeam, ...matchEventsByTeamIds, ...matchEventsByMatch]);
 	  const localPresence = presenceEventsService()?.collectionsForTeam(teamId) || {sessions:[], attendance:[]};
 	  payload.collections.sessions = uniqueRows([...(payload.collections.sessions || []), ...(localPresence.sessions || [])]);
-	  payload.collections.attendance = uniqueRows([...attendanceByTeam, ...attendanceBySession, ...attendanceByPlayer, ...(localPresence.attendance || [])]);
+	  payload.collections.attendance = uniqueRows([...attendanceByTeam, ...attendanceByTeamIds, ...attendanceBySession, ...attendanceByPlayer, ...(localPresence.attendance || [])]);
 	  playerLinkedRows.forEach(item => { payload.collections[item.name] = item.rows; });
 	  medicalLinkedRows.forEach(item => { payload.collections[item.name] = item.rows; });
   if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
