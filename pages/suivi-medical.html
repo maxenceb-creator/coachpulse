@@ -98,7 +98,7 @@ const api=()=>window.parent?.CoachPulseCentralData;
 const APP_OPEN_DATE=new Date();
 const zones=[
 ['Tête',50,8],['Cou',50,15],['Épaule gauche',36,21],['Épaule droite',64,21],['Bras gauche',27,32],['Bras droit',73,32],['Coude gauche',22,43],['Coude droit',78,43],['Poignet gauche',19,55],['Poignet droit',81,55],['Main gauche',17,64],['Main droite',83,64],['Dos',50,31],['Lombaires',50,45],['Hanche gauche',42,52],['Hanche droite',58,52],['Cuisse gauche',42,65],['Cuisse droite',58,65],['Genou gauche',41,78],['Genou droit',59,78],['Mollet gauche',40,88],['Mollet droit',60,88],['Cheville gauche',39,96],['Cheville droite',61,96],['Pied gauche',35,99],['Pied droit',65,99]];
-let players=[], data={injuries:[],injuryUpdates:[],medicalAppointments:[],rehabRoutines:[]}, selectedZone='', filtered=[], caps={canRead:false,canWrite:false,canExport:false,role:'STAFF'};
+let players=[], data={injuries:[],injuryUpdates:[],medicalAppointments:[],rehabRoutines:[],medicalFollowUps:[]}, selectedZone='', filtered=[], caps={canRead:false,canWrite:false,canExport:false,role:'STAFF'};
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 function pid(p){return p.playerId||p.id}
 function upper(v){return String(v??'').trim().toUpperCase()}

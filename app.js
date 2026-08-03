@@ -3200,10 +3200,10 @@ function athleticCapabilities(){
   return {role:getCurrentUserRole(), canRead:canUseAthletic('read'), canWrite:canUseAthletic('write'), canExport:canUseAthletic('importExport')};
 }
 function localMedicalPayload(){
-  return parseStoredJson('coachpulse:medicalData', {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[]});
+  return parseStoredJson('coachpulse:medicalData', {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[]});
 }
 function saveLocalMedicalPayload(payload){
-  localStorage.setItem('coachpulse:medicalData', JSON.stringify(payload || {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[]}));
+  localStorage.setItem('coachpulse:medicalData', JSON.stringify(payload || {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[]}));
 }
 function medicalTeamIdsFromSources(...sources){
   return [...new Set(sources.flatMap(source => [
@@ -3538,7 +3538,7 @@ async function medicalListPlayers(){
 }
 async function medicalListData(){
   if(!guardMedical('read')) return localMedicalPayload();
-  const payload = {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[]};
+  const payload = {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[]};
   const enrichAndFilter = source => {
     const scopedInjuries = (source.injuries || []).map(scopedMedicalRow);
     const injuryById = new Map(scopedInjuries.map(injury => [injury.injuryId || injury.id, injury]).filter(([id]) => id));
@@ -3557,7 +3557,8 @@ async function medicalListData(){
       injuries:filterAuthorizedRecords(scopedInjuries),
       injuryUpdates:filterAuthorizedRecords((source.injuryUpdates || []).map(inheritScope)),
       medicalAppointments:filterAuthorizedRecords((source.medicalAppointments || []).map(inheritScope)),
-      rehabRoutines:filterAuthorizedRecords((source.rehabRoutines || []).map(inheritScope))
+      rehabRoutines:filterAuthorizedRecords((source.rehabRoutines || []).map(inheritScope)),
+      medicalFollowUps:filterAuthorizedRecords((source.medicalFollowUps || []).map(inheritScope))
     };
   };
   if(db && currentUser){
@@ -3591,7 +3592,7 @@ async function medicalListData(){
       const rows = reads.length ? (await Promise.all(reads.map(promise => promise.catch(() => [])))).flat() : [];
       return [...new Map(rows.map(row => [row.id, row])).values()];
     };
-    for(const [collection, key] of [['injuries','injuries'], ['injuryUpdates','injuryUpdates'], ['medicalAppointments','medicalAppointments'], ['rehabRoutines','rehabRoutines']]){
+    for(const [collection, key] of [['injuries','injuries'], ['injuryUpdates','injuryUpdates'], ['medicalAppointments','medicalAppointments'], ['rehabRoutines','rehabRoutines'], ['medicalFollowUps','medicalFollowUps']]){
       payload[key] = await readScopedMedicalRows(collection);
     }
     Object.assign(payload, enrichAndFilter(payload));

@@ -160,6 +160,10 @@ function testMedicalDataStayLinkedToPlayerAndTeamIds(){
   assert(appSource.includes('function medicalTeamIdsFromSources'), 'Le médical doit centraliser les teamIds.');
   assert(appSource.includes('const enrichAndFilter = source =>'), 'Les lectures médicales doivent hériter du périmètre des blessures parentes.');
   assert(appSource.includes('filterAuthorizedRecords(scopedInjuries)'), 'Les lectures médicales doivent être filtrées par autorisations.');
+  assert(appSource.includes("['medicalFollowUps','medicalFollowUps']"), 'Les suivis médicaux doivent être lus dans le périmètre playerId/teamId.');
+  assert(appSource.includes('medicalFollowUps:filterAuthorizedRecords'), 'Les suivis médicaux doivent être filtrés par autorisations.');
+  assert(appSource.includes("readWhere(collectionName, 'teamIds', 'array-contains-any', chunk)"), 'Les lectures médicales doivent interroger les teamIds.');
+  assert(appSource.includes("readWhere(collectionName, 'playerId', 'in', chunk)"), 'Les lectures médicales doivent interroger les playerId autorisés.');
   assert(appSource.includes("throw new Error('Accès non autorisé à cette joueuse.')"), 'Les écritures médicales doivent vérifier la joueuse.');
   assert(appSource.includes("throw new Error('Accès non autorisé à cette équipe.')"), 'Les écritures médicales doivent vérifier le teamId.');
   assert(medicalSource.includes('teamIds=[...new Set'), 'Le formulaire médical doit transmettre les teamIds.');
