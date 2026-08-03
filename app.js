@@ -3740,13 +3740,43 @@ async function athleticListData(filters={}){
   const bundled = await bundledAthleticPayload();
   bundled.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `bundled-${idx}`, row));
   local.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `local-${idx}`, row));
+  const players = await listPlayers({season:'all', includeArchived:true});
   if(db && currentUser){
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'physicalTests'));
-    snap.forEach(docSnap => rawById.set(docSnap.id, {id:docSnap.id, physicalTestId:docSnap.id, ...docSnap.data(), syncPending:false}));
+    const docsFromSnap = snap => {
+      const rows = [];
+      snap.forEach(docSnap => rows.push({id:docSnap.id, physicalTestId:docSnap.id, ...docSnap.data(), syncPending:false}));
+      return rows;
+    };
+    const readWhere = async (field, operator, value) => {
+      const q = firebaseFns.query(firebaseFns.collection(db, 'physicalTests'), firebaseFns.where(field, operator, value));
+      return docsFromSnap(await firebaseFns.getDocs(q));
+    };
+    const chunkValues = values => {
+      const clean = [...new Set((values || []).map(value => String(value || '').trim()).filter(Boolean))];
+      const out = [];
+      for(let i=0;i<clean.length;i+=10) out.push(clean.slice(i,i+10));
+      return out;
+    };
+    const readScopedPhysicalTests = async () => {
+      if(isAdmin()) return docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'physicalTests')));
+      const authorizedTeamIds = getAuthorizedTeamIds();
+      const playerIds = players.map(player => player.playerId || player.id).filter(Boolean);
+      const reads = [];
+      chunkValues(authorizedTeamIds).forEach(chunk => {
+        reads.push(readWhere('teamId', 'in', chunk));
+        reads.push(readWhere('teamIds', 'array-contains-any', chunk));
+        reads.push(readWhere('playerSnapshot.teamId', 'in', chunk));
+        reads.push(readWhere('playerSnapshot.teamIds', 'array-contains-any', chunk));
+      });
+      chunkValues(playerIds).forEach(chunk => reads.push(readWhere('playerId', 'in', chunk)));
+      const rows = reads.length ? (await Promise.all(reads.map(promise => promise.catch(() => [])))).flat() : [];
+      return [...new Map(rows.map(row => [row.id || row.physicalTestId || row.testId, row])).values()];
+    };
+    const scopedRows = await readScopedPhysicalTests();
+    scopedRows.forEach(row => rawById.set(row.physicalTestId || row.testId || row.id, row));
     saveLocalAthleticPayload([...rawById.values()]);
   }
   const rawRows = [...rawById.values()];
-  const players = await listPlayers({season:'all', includeArchived:true});
   const rows = filterAuthorizedRecords(normalizeAthleticRows(rawRows, players));
   appDataCache.athleticRows.rows = rows;
   appDataCache.athleticRows.loadedAt = now;
