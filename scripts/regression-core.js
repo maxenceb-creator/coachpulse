@@ -204,9 +204,22 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
           teamId:'team-u13-a',
           teamIds:['team-u13-a']
         }
+      },
+      'player-b':{
+        status:'excused',
+        minutes:0,
+        comment:'Sélection',
+        playerSnapshot:{
+          playerId:'player-b',
+          prenom:'Lina',
+          nom:'Martin',
+          teamId:'team-u13-a',
+          teamIds:['team-u13-a']
+        }
       }
     }
   }];
+  const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
   const window = loadBrowserScript('shared/services/presence-events-service.js', {
     localStorage:{
       getItem(key){ return key === 'coachpulse:presenceEvents:v1' ? JSON.stringify(events) : null; },
@@ -219,12 +232,15 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   const byPlayer = window.CoachPulsePresenceEventsService.collectionsForPlayer('player-a');
 
   assert.equal(byTeam.sessions.length, 1);
-  assert.equal(byTeam.attendance.length, 1);
+  assert.equal(byTeam.attendance.length, 2);
   assert.equal(byTeam.attendance[0].playerId, 'player-a');
   assert.equal(byTeam.attendance[0].teamId, 'team-u13-a');
   assert.equal(byTeam.attendance[0].teamIds.join(','), 'team-u13-a');
+  assert.equal(byTeam.attendance[1].status, 'AJ');
   assert.equal(byPlayer.sessions[0].teamId, 'team-u13-a');
   assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
+  assert(presencePageSource.includes('function normalizePresenceEventForStorage'), 'La page Présences doit normaliser les événements avant stockage.');
+  assert(presencePageSource.includes('return api.presenceSaveEvent(normalized);'), 'La synchronisation cloud doit envoyer un événement normalisé.');
 }
 
 function testPlayerProfileDataFallsBackToSelectedPlayerOnly(){

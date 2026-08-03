@@ -1877,6 +1877,56 @@
         const deduped = service?.dedupePlayers ? service.dedupePlayers(normalized) : normalized;
         return deduped.sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
       }
+      function normalizePresenceEventForStorage(event={}){
+        const id = event.id || event.sessionId || event.eventId || "";
+        if(!id) return null;
+        const date = isoDate(parseDate(event.date || event.startDate || event.day || event.start) || new Date());
+        const teamId = eventTeamId(event);
+        const team = teamById(teamId);
+        const teamIds = [...new Set([
+          teamId,
+          ...(Array.isArray(event.teamIds) ? event.teamIds : []),
+          ...(Array.isArray(event.teamSnapshot?.teamIds) ? event.teamSnapshot.teamIds : [])
+        ].map(value => String(value || "").trim()).filter(Boolean))];
+        const normalized = {
+          ...event,
+          id,
+          sessionId:event.sessionId || id,
+          date,
+          teamId,
+          teamIds,
+          teamSnapshot:{
+            ...(event.teamSnapshot || {}),
+            teamId,
+            teamIds,
+            name:team?.name || event.team || event.equipe || "",
+            category:team?.category || event.category || event.categorie || ""
+          },
+          team:team?.name || event.team || event.equipe || "",
+          category:team?.category || event.category || event.categorie || "",
+          attendance:{}
+        };
+        Object.entries(event.attendance || {}).forEach(([playerId, raw]) => {
+          const entry = attendanceEntry({attendance:{[playerId]:raw}, duration:normalized.duration}, playerId);
+          if(!entry.status && !Number(entry.minutes || 0) && !String(entry.comment || "").trim()) return;
+          const player = playerById(playerId, date);
+          const snapshot = {
+            ...playerSnapshotForAttendance(player, teamId, date),
+            ...(raw?.playerSnapshot || {}),
+            playerId,
+            teamId,
+            teamIds
+          };
+          normalized.attendance[playerId] = {
+            ...entry,
+            attendanceId:raw?.attendanceId || `local-attendance-${normalized.id}-${playerId}`,
+            teamId,
+            teamIds,
+            playerSnapshot:snapshot
+          };
+        });
+        return normalized;
+      }
       function eventTitle(event){
         return event.title || event.theme || event.label || event.type || event.text || "Événement";
       }
@@ -1929,10 +1979,11 @@
       }
       function loadPresenceEvents(){
         const events = readJson(PRESENCE_EVENTS_KEY, []);
-        return Array.isArray(events) ? events : [];
+        return Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
       }
       function savePresenceEvents(events){
-        localStorage.setItem(PRESENCE_EVENTS_KEY, JSON.stringify(events));
+        const normalized = (Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id);
+        localStorage.setItem(PRESENCE_EVENTS_KEY, JSON.stringify(normalized));
       }
       function eventSyncStamp(event={}){
         return Date.parse(event.updatedAt || event.createdAt || "") || 0;
@@ -1966,7 +2017,9 @@
       async function pushPresenceEventToCloud(event){
         const api = centralDataApi();
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
-        return api.presenceSaveEvent(event);
+        const normalized = normalizePresenceEventForStorage(event);
+        if(!normalized.teamId) throw new Error("teamId obligatoire pour synchroniser l'événement.");
+        return api.presenceSaveEvent(normalized);
       }
       async function syncPresenceEventsToCloud(cloudEvents=[]){
         const api = centralDataApi();
@@ -3006,11 +3059,17 @@
           delete attendance[playerId];
         }else{
           const player = playerById(playerId, current.date);
+          const playerSnapshot = playerSnapshotForAttendance(player, current.teamId, current.date);
           attendance[playerId] = {
             ...next,
             teamId:current.teamId || "",
             teamIds:current.teamIds || (current.teamId ? [current.teamId] : []),
-            playerSnapshot:next.playerSnapshot || playerSnapshotForAttendance(player, current.teamId, current.date)
+            playerSnapshot:{
+              ...(next.playerSnapshot || playerSnapshot),
+              playerId,
+              teamId:current.teamId || "",
+              teamIds:current.teamIds || (current.teamId ? [current.teamId] : [])
+            }
           };
         }
         events[index] = {
