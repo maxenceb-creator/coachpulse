@@ -271,7 +271,11 @@
       row?.sessionSnapshot?.teamId,
       row?.matchSnapshot?.teamId,
       ...(Array.isArray(row?.teamIds) ? row.teamIds : []),
-      ...(Array.isArray(row?.authorizedTeamIds) ? row.authorizedTeamIds : [])
+      ...(Array.isArray(row?.authorizedTeamIds) ? row.authorizedTeamIds : []),
+      ...(Array.isArray(row?.teamSnapshot?.teamIds) ? row.teamSnapshot.teamIds : []),
+      ...(Array.isArray(row?.playerSnapshot?.teamIds) ? row.playerSnapshot.teamIds : []),
+      ...(Array.isArray(row?.sessionSnapshot?.teamIds) ? row.sessionSnapshot.teamIds : []),
+      ...(Array.isArray(row?.matchSnapshot?.teamIds) ? row.matchSnapshot.teamIds : [])
     ].map(asText).filter(Boolean);
   }
 

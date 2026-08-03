@@ -94,6 +94,8 @@ function testPermissions(){
   assert.equal(permissions.canAccessTeam(scopedCoach, u16Id), false);
   assert.equal(permissions.canAccessPlayer(scopedCoach, {playerId:'p1', teamId:u13Id}), true);
   assert.equal(permissions.canAccessPlayer(scopedCoach, {playerId:'p2', teamId:u16Id}), false);
+  assert.equal(permissions.canAccessRecord(scopedCoach, {playerId:'p1', playerSnapshot:{teamIds:[u13Id]}}), true);
+  assert.equal(permissions.canAccessRecord(scopedCoach, {playerId:'p2', playerSnapshot:{teamIds:[u16Id]}}), false);
 
   const admin = permissions.defaultProfile({uid:'admin', email:'admin@club.test'}, 'DIRIGEANT', 'ADMIN');
   assert.equal(permissions.canAccessTeam(admin, u16Id), true);
@@ -146,6 +148,19 @@ function testAthleticTestsStayLinkedToPlayerAndTeamIds(){
   assert(appSource.includes("readWhere(name, 'teamIds', 'array-contains', teamId)"), 'La fiche équipe doit lire les tests via teamIds.');
   assert(athleticSource.includes('playerSnapshotForAthletic'), 'La page Tests athlétiques doit envoyer une snapshot joueuse.');
   assert(athleticSource.includes('teamIds:snapshot.teamIds'), 'La page Tests athlétiques doit envoyer les teamIds dans le payload.');
+}
+
+function testMedicalDataStayLinkedToPlayerAndTeamIds(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const medicalSource = fs.readFileSync('pages/suivi-medical.html', 'utf8');
+
+  assert(appSource.includes('function medicalTeamIdsFromSources'), 'Le médical doit centraliser les teamIds.');
+  assert(appSource.includes('const enrichAndFilter = source =>'), 'Les lectures médicales doivent hériter du périmètre des blessures parentes.');
+  assert(appSource.includes('filterAuthorizedRecords(scopedInjuries)'), 'Les lectures médicales doivent être filtrées par autorisations.');
+  assert(appSource.includes("throw new Error('Accès non autorisé à cette joueuse.')"), 'Les écritures médicales doivent vérifier la joueuse.');
+  assert(appSource.includes("throw new Error('Accès non autorisé à cette équipe.')"), 'Les écritures médicales doivent vérifier le teamId.');
+  assert(medicalSource.includes('teamIds=[...new Set'), 'Le formulaire médical doit transmettre les teamIds.');
+  assert(medicalSource.includes('teamId:injury.teamId||injury.playerSnapshot?.teamId'), 'Les évolutions médicales doivent reprendre le teamId de la blessure.');
 }
 
 function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
@@ -260,6 +275,7 @@ testPermissions();
 testPermissionsRespectTeamHistoryAndModuleScope();
 testModuleRegistry();
 testAthleticTestsStayLinkedToPlayerAndTeamIds();
+testMedicalDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
