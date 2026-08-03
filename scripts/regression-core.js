@@ -144,6 +144,9 @@ function testAthleticTestsStayLinkedToPlayerAndTeamIds(){
 
   assert(appSource.includes("vma:{type:'vma'"), 'La VMA doit rester normalisée dans les métriques athlétiques.');
   assert(playerProfileRenderSource.includes("vma:{label:'VMA'"), 'La fiche individuelle doit afficher la VMA athlétique.');
+  assert(appSource.includes('const readScopedPhysicalTests = async () =>'), 'Les tests athlétiques Firestore doivent être lus via une requête limitée au périmètre autorisé.');
+  assert(appSource.includes("readWhere('teamIds', 'array-contains-any', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par teamIds.');
+  assert(appSource.includes("readWhere('playerId', 'in', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par playerId.');
   assert(appSource.includes('filterAuthorizedRecords(normalizeAthleticRows'), 'Les tests athlétiques chargés doivent être filtrés par autorisations.');
   assert(appSource.includes("readWhere(name, 'teamIds', 'array-contains', teamId)"), 'La fiche équipe doit lire les tests via teamIds.');
   assert(athleticSource.includes('playerSnapshotForAthletic'), 'La page Tests athlétiques doit envoyer une snapshot joueuse.');
