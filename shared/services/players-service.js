@@ -97,11 +97,14 @@
     const explicitTeam = resolveClubTeam(fromHistory.team || player.team || player.equipe, subCategory || categorie);
     const team = explicitTeam || rule?.team || seasonTeam || asText(fromHistory.team || player.team || player.equipe || categorie);
     const teamId = asText(fromHistory.teamId) || canonicalTeamId(team || categorie);
-    const teamIds = [...new Set([
-      teamId,
-      ...teamCategoryRulesForSubCategory(subCategory).map(item => canonicalTeamId(item.team)),
+    const explicitTeamIds = [
       ...(Array.isArray(fromHistory.teamIds) ? fromHistory.teamIds : []),
       ...(Array.isArray(player.teamIds) ? player.teamIds : [])
+    ].map(asText).filter(Boolean);
+    const automaticTeamIds = teamCategoryRulesForSubCategory(subCategory).map(item => canonicalTeamId(item.team));
+    const teamIds = [...new Set([
+      teamId,
+      ...(explicitTeamIds.length ? explicitTeamIds : automaticTeamIds)
     ].map(asText).filter(Boolean))];
     return {season:selectedSeason, categorie, subCategory, team, teamId, teamIds};
   }
