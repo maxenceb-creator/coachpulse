@@ -94,8 +94,9 @@
     const rule = teamCategoryRuleForSubCategory(subCategory);
     const categorie = rule?.category || normalizeTeamFromCategory(subCategory || fromHistory.categorie || player.categorie || player.category);
     const seasonTeam = computedSub ? defaultClubTeamFromSubCategory(subCategory) : '';
-    const team = rule?.team || resolveClubTeam(fromHistory.team || seasonTeam || player.team || player.equipe, subCategory || categorie) || asText(fromHistory.team || seasonTeam || player.team || player.equipe || categorie);
-    const teamId = canonicalTeamId(team || categorie);
+    const explicitTeam = resolveClubTeam(fromHistory.team || player.team || player.equipe, subCategory || categorie);
+    const team = explicitTeam || rule?.team || seasonTeam || asText(fromHistory.team || player.team || player.equipe || categorie);
+    const teamId = asText(fromHistory.teamId) || canonicalTeamId(team || categorie);
     const teamIds = [...new Set([
       teamId,
       ...teamCategoryRulesForSubCategory(subCategory).map(item => canonicalTeamId(item.team)),
@@ -253,7 +254,8 @@
     const sourceCategory = sourceRule?.category || normalizeTeamFromCategory(sourceSubCategory || storedCategorie);
     const categorie = isOfficialCategory(storedCategorie) ? storedCategorie : sourceCategory;
     const subCategory = isOfficialSubCategory(sourceSubCategory) ? sourceSubCategory : storedSubCategory;
-    const team = sourceRule?.team || resolveClubTeam(raw.team || raw.equipe, subCategory || categorie) || asText(sourceCategory || normalizeTeamFromCategory(subCategory || categorie));
+    const explicitTeam = resolveClubTeam(raw.team || raw.equipe, subCategory || categorie);
+    const team = explicitTeam || sourceRule?.team || asText(sourceCategory || normalizeTeamFromCategory(subCategory || categorie));
     const importedId = raw.id && !String(raw.id).startsWith('manual-') ? asText(raw.id) : '';
     const lockedId = asText(raw.documentId || raw.lockPlayerId || raw.preservePlayerId);
     const previousId = asText(raw.playerId || importedId);
@@ -271,6 +273,12 @@
       categorie,
       subCategory,
       team,
+      teamId: asText(raw.teamId) || canonicalTeamId(team || categorie),
+      teamIds: [...new Set([
+        asText(raw.teamId),
+        ...(Array.isArray(raw.teamIds) ? raw.teamIds : []),
+        canonicalTeamId(team || categorie)
+      ].map(asText).filter(Boolean))],
       updatedAtIso: asText(raw.updatedAtIso || raw.createdAtIso || '')
     };
     const currentSnapshot = categorySnapshotForSeason({...raw, birth, categorie, subCategory, team, seasonHistory}, currentSeason);
