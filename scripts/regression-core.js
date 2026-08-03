@@ -148,6 +148,52 @@ function testAthleticTestsStayLinkedToPlayerAndTeamIds(){
   assert(athleticSource.includes('teamIds:snapshot.teamIds'), 'La page Tests athlétiques doit envoyer les teamIds dans le payload.');
 }
 
+function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
+  const events = [{
+    id:'presence-event-test',
+    date:'2026-08-03',
+    startTime:'18:00',
+    endTime:'19:30',
+    duration:90,
+    type:'entrainement',
+    teamId:'team-u13-a',
+    teamIds:['team-u13-a'],
+    team:'U13 A',
+    attendance:{
+      'player-a':{
+        status:'present',
+        minutes:90,
+        comment:'OK',
+        playerSnapshot:{
+          playerId:'player-a',
+          prenom:'Ava',
+          nom:'Dupont',
+          teamId:'team-u13-a',
+          teamIds:['team-u13-a']
+        }
+      }
+    }
+  }];
+  const window = loadBrowserScript('shared/services/presence-events-service.js', {
+    localStorage:{
+      getItem(key){ return key === 'coachpulse:presenceEvents:v1' ? JSON.stringify(events) : null; },
+      setItem(){},
+      removeItem(){}
+    }
+  });
+
+  const byTeam = window.CoachPulsePresenceEventsService.collectionsForTeam('team-u13-a');
+  const byPlayer = window.CoachPulsePresenceEventsService.collectionsForPlayer('player-a');
+
+  assert.equal(byTeam.sessions.length, 1);
+  assert.equal(byTeam.attendance.length, 1);
+  assert.equal(byTeam.attendance[0].playerId, 'player-a');
+  assert.equal(byTeam.attendance[0].teamId, 'team-u13-a');
+  assert.equal(byTeam.attendance[0].teamIds.join(','), 'team-u13-a');
+  assert.equal(byPlayer.sessions[0].teamId, 'team-u13-a');
+  assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
+}
+
 function testPlayerProfileDataFallsBackToSelectedPlayerOnly(){
   const window = loadBrowserScript('pages/player-profile/playerProfileData.js', {
     parent:{
@@ -214,6 +260,7 @@ testPermissions();
 testPermissionsRespectTeamHistoryAndModuleScope();
 testModuleRegistry();
 testAthleticTestsStayLinkedToPlayerAndTeamIds();
+testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
 Promise.resolve()
