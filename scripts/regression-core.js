@@ -192,6 +192,21 @@ function testDataHubImportsStayScoped(){
   assert(appSource.includes('teamIds:Array.isArray(linkedPlayer.teamIds)'), 'Les tests Data Hub doivent transmettre les teamIds dans la snapshot joueuse.');
 }
 
+function testFirestoreRulesProtectExistingAndIncomingScope(){
+  const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
+  const scopedCollections = ['players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps','workloads','convocations','individualReports'];
+
+  assert(!rulesSource.includes('allow create, update: if canWriteSportData()'), 'Les règles sportives ne doivent pas grouper create/update sans vérifier resource.data.');
+  assert(!rulesSource.includes('allow create, update: if canWriteMedicalData()'), 'Les règles médicales ne doivent pas grouper create/update sans vérifier resource.data.');
+  assert(!rulesSource.includes('allow create, update: if canWritePhysicalData()'), 'Les règles physiques ne doivent pas grouper create/update sans vérifier resource.data.');
+  scopedCollections.forEach(collection => {
+    assert(rulesSource.includes(`match /${collection}/`), `La collection ${collection} doit être déclarée dans firestore.rules.`);
+  });
+  assert(rulesSource.includes('canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data)'), 'Les updates doivent valider l’ancien et le nouveau périmètre teamId/playerId.');
+  assert(rulesSource.includes('match /{document=**}'), 'Les règles doivent conserver le bloc catch-all.');
+  assert(rulesSource.includes('allow read, write: if false;'), 'Le bloc catch-all doit refuser les accès non déclarés.');
+}
+
 function testMatchDataStayLinkedToPlayerAndTeamIds(){
   const appSource = fs.readFileSync('app.js', 'utf8');
 
@@ -341,6 +356,7 @@ testAthleticTestsStayLinkedToPlayerAndTeamIds();
 testMedicalDataStayLinkedToPlayerAndTeamIds();
 testGlobalExportsStayScoped();
 testDataHubImportsStayScoped();
+testFirestoreRulesProtectExistingAndIncomingScope();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
