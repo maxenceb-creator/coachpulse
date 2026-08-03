@@ -179,6 +179,32 @@ function testPermissionsRespectTeamHistoryAndModuleScope(){
   assert.equal(permissions.canViewModule(scopedCoach, {id:'database', active:true}), false);
 }
 
+function testModuleAllPlayersScopeStaysModuleSpecific(){
+  const u13Id = teams.canonicalTeamId('U13 A');
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const scopedCoach = permissions.defaultProfile({uid:'prep-u13', email:'prep@club.test'}, 'PREPARATEUR_PHYSIQUE', 'SAISIE');
+  scopedCoach.authorizedTeamIds = [u13Id];
+  scopedCoach.allowedModules = ['tests-athletiques', 'presences'];
+  scopedCoach.modulePermissions = {
+    'tests-athletiques':{read:true, write:true},
+    presences:{read:true, write:true}
+  };
+  scopedCoach.moduleScopes = {
+    'tests-athletiques':{allPlayers:true}
+  };
+  const u16Player = {playerId:'player-u16', teamId:u16Id, teamIds:[u16Id]};
+  const u16Record = {playerId:'player-u16', teamId:u16Id, playerSnapshot:u16Player};
+
+  assert.equal(permissions.canAccessPlayer(scopedCoach, u16Player), false);
+  assert.equal(permissions.canAccessAllPlayersForModule(scopedCoach, 'tests-athletiques'), true);
+  assert.equal(permissions.canAccessPlayerForModule(scopedCoach, u16Player, 'tests-athletiques'), true);
+  assert.equal(permissions.canAccessRecordForModule(scopedCoach, u16Record, 'tests-athletiques'), true);
+  assert.equal(permissions.filterAuthorizedPlayersForModule(scopedCoach, [u16Player], 'tests-athletiques').length, 1);
+  assert.equal(permissions.canAccessAllPlayersForModule(scopedCoach, 'presences'), false);
+  assert.equal(permissions.canAccessPlayerForModule(scopedCoach, u16Player, 'presences'), false);
+  assert.equal(permissions.filterAuthorizedPlayersForModule(scopedCoach, [u16Player], 'presences').length, 0);
+}
+
 function testModuleRegistry(){
   const catalog = modules.moduleRegistry();
   const ids = catalog.map(module => module.id);
@@ -302,6 +328,7 @@ function testAccessRegressionSurfaceStaysComplete(){
     'function canAccessRecord',
     'function filterAuthorizedTeams',
     'function filterAuthorizedPlayers',
+    'function filterAuthorizedPlayersForModule',
     'function filterAuthorizedRecords'
   ].forEach(functionName => {
     assert(permissionsSource.includes(functionName), `${functionName} doit rester centralisé dans permissions-service.`);
@@ -485,6 +512,7 @@ testEditedTeamIdsDoNotReAddRemovedEligibleTeam();
 testPlayerFilteringAndDedupe();
 testPermissions();
 testPermissionsRespectTeamHistoryAndModuleScope();
+testModuleAllPlayersScopeStaysModuleSpecific();
 testModuleRegistry();
 testAthleticTestsStayLinkedToPlayerAndTeamIds();
 testMedicalDataStayLinkedToPlayerAndTeamIds();

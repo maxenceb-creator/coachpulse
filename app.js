@@ -127,6 +127,14 @@ function canAccessPlayerRecord(player){
   const service = permissionsService();
   return service?.canAccessPlayer ? service.canAccessPlayer(accessProfile(), player) : true;
 }
+function canAccessAllPlayersForModule(moduleId){
+  const service = permissionsService();
+  return service?.canAccessAllPlayersForModule ? service.canAccessAllPlayersForModule(accessProfile(), moduleId) : false;
+}
+function canAccessPlayerForModule(player, moduleId){
+  const service = permissionsService();
+  return service?.canAccessPlayerForModule ? service.canAccessPlayerForModule(accessProfile(), player, moduleId) : canAccessPlayerRecord(player);
+}
 function getAuthorizedTeamIds(){
   const service = permissionsService();
   return service?.getAuthorizedTeamIds ? service.getAuthorizedTeamIds(accessProfile()) : [];
@@ -143,9 +151,17 @@ function filterAuthorizedPlayers(players=[]){
   const service = permissionsService();
   return service?.filterAuthorizedPlayers ? service.filterAuthorizedPlayers(accessProfile(), players) : players;
 }
+function filterAuthorizedPlayersForModule(players=[], moduleId=''){
+  const service = permissionsService();
+  return service?.filterAuthorizedPlayersForModule ? service.filterAuthorizedPlayersForModule(accessProfile(), players, moduleId) : filterAuthorizedPlayers(players);
+}
 function filterAuthorizedRecords(records=[]){
   const service = permissionsService();
   return service?.filterAuthorizedRecords ? service.filterAuthorizedRecords(accessProfile(), records) : records;
+}
+function filterAuthorizedRecordsForModule(records=[], moduleId=''){
+  const service = permissionsService();
+  return service?.filterAuthorizedRecordsForModule ? service.filterAuthorizedRecordsForModule(accessProfile(), records, moduleId) : filterAuthorizedRecords(records);
 }
 function normalizeProfileAccessFields(profile={}){
   const teams = [...new Set([
@@ -177,7 +193,8 @@ function accessContext(){
       teamIds:authorizedTeamIds,
       allowedTeamIds:authorizedTeamIds,
       allowedModules:profile.allowedModules || [],
-      modulePermissions:profile.modulePermissions || {}
+      modulePermissions:profile.modulePermissions || {},
+      moduleScopes:profile.moduleScopes || {}
     },
     modules:Object.fromEntries(moduleRegistry().map(module => [module.id, {read:hasModulePermission(module, 'read'), write:hasModulePermission(module, 'write'), delete:canDeleteData(module.id)}]))
   };
@@ -4177,7 +4194,7 @@ var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? ad
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
 window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticExport, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
-Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedRecords});
+Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   snapshotLocalData({fromCloud:true});
@@ -4267,6 +4284,7 @@ async function createMember(){
   const scope = $('#newStaffScope').value.trim();
   const teamIds = readCsvField('newStaffTeams');
   const allowedModules = readCsvField('newStaffModules');
+  const moduleScopes = readModuleScopesField('newStaffModuleScopes');
   const status = $('#newStaffStatus')?.value || 'ACTIVE';
   if(!email || !password || password.length < 6){ msg.textContent='Email et mot de passe de 6 caractères minimum obligatoires.'; msg.classList.add('bad'); return; }
 
@@ -4281,7 +4299,7 @@ async function createMember(){
     await firebaseFns.updateProfile(cred.user, {displayName:name || email});
 
     await firebaseFns.setDoc(firebaseFns.doc(db, 'staff_members', cred.user.uid), {
-      uid:cred.user.uid, name:name || email, email, role, roleLabel, permissionLevel, permissionLabel, scope:scope || teamIds.join(', ') || 'CoachPulse', authorizedTeamIds:teamIds, teamIds, allowedTeamIds:teamIds, allowedModules, modulePermissions:modulePermissionsFromSelection(allowedModules, permissionLevel), status,
+      uid:cred.user.uid, name:name || email, email, role, roleLabel, permissionLevel, permissionLabel, scope:scope || teamIds.join(', ') || 'CoachPulse', authorizedTeamIds:teamIds, teamIds, allowedTeamIds:teamIds, allowedModules, modulePermissions:modulePermissionsFromSelection(allowedModules, permissionLevel), moduleScopes, status,
       userType:'staff',
       createdBy:currentUser.uid, createdByEmail:currentUser.email, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp()
     }, {merge:true});
@@ -4305,7 +4323,7 @@ async function createMember(){
   }
 }
 function resetMemberForm(clearMsg=true){
-  ['newStaffName','newStaffEmail','newStaffPassword','newStaffScope','newStaffTeams','newStaffModules'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
+  ['newStaffName','newStaffEmail','newStaffPassword','newStaffScope','newStaffTeams','newStaffModules','newStaffModuleScopes'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
   $('#newStaffRole').value='ENTRAINEUR';
   if($('#newStaffPermission')) $('#newStaffPermission').value='LECTEUR';
   if($('#newStaffStatus')) $('#newStaffStatus').value='ACTIVE';
@@ -4334,6 +4352,17 @@ function modulePermissionsFromSelection(allowedModules=[], permissionLevel='LECT
   const level = String(permissionLevel || '').toUpperCase();
   const value = ['ADMIN','EDITEUR','SAISIE'].includes(level) ? 'edit' : 'read';
   return Object.fromEntries((allowedModules || []).map(moduleId => [moduleId, value]));
+}
+function moduleScopesFromSelection(allPlayersModules=[]){
+  return Object.fromEntries(parseAccessList(allPlayersModules).map(moduleId => [moduleId, {allPlayers:true}]));
+}
+function readModuleScopesField(id){
+  return moduleScopesFromSelection($('#'+id)?.value || '');
+}
+function moduleScopeSelection(moduleScopes={}){
+  return Object.entries(moduleScopes || {})
+    .filter(([,scope]) => permissionsService()?.scopeAllowsAllPlayers ? permissionsService().scopeAllowsAllPlayers(scope) : Boolean(scope?.allPlayers))
+    .map(([moduleId]) => moduleId);
 }
 function accessChoiceKey(value){
   return String(value || '').trim().toLowerCase();
@@ -4434,8 +4463,10 @@ async function refreshAdminAccessPickers(){
   const choices = await loadAdminAccessChoices();
   const teamsBox = $('#newStaffTeamsPicker');
   const modulesBox = $('#newStaffModulesPicker');
+  const moduleScopesBox = $('#newStaffModuleScopesPicker');
   if(teamsBox) teamsBox.innerHTML = renderAccessPicker('teams', readCsvField('newStaffTeams'), choices.teams, 'id="newStaffTeams"');
   if(modulesBox) modulesBox.innerHTML = renderAccessPicker('modules', readCsvField('newStaffModules'), choices.modules, 'id="newStaffModules"');
+  if(moduleScopesBox) moduleScopesBox.innerHTML = renderAccessPicker('module-scopes', readCsvField('newStaffModuleScopes'), choices.modules, 'id="newStaffModuleScopes"');
 }
 function ensureUserAdminFields(){
   ensureAccessPickerStyles();
@@ -4449,11 +4480,11 @@ function ensureUserAdminFields(){
   }
   const scope = $('#newStaffScope');
   if(scope && !$('#newStaffTeams')){
-    scope.closest('.field')?.insertAdjacentHTML('afterend', `<div class="form-grid"><div class="field"><label>Équipes autorisées</label><div id="newStaffTeamsPicker" class="admin-note">Chargement des équipes...</div></div><div class="field"><label>Modules autorisés</label><div id="newStaffModulesPicker" class="admin-note">Chargement des modules...</div></div></div><div class="field"><label>Statut</label><select id="newStaffStatus"><option value="ACTIVE">Actif</option><option value="INACTIVE">Inactif</option><option value="ARCHIVED">Archivé</option></select></div>`);
+    scope.closest('.field')?.insertAdjacentHTML('afterend', `<div class="form-grid"><div class="field"><label>Équipes autorisées</label><div id="newStaffTeamsPicker" class="admin-note">Chargement des équipes...</div></div><div class="field"><label>Modules autorisés</label><div id="newStaffModulesPicker" class="admin-note">Chargement des modules...</div></div></div><div class="field"><label>Portée spéciale par module</label><div id="newStaffModuleScopesPicker" class="admin-note">Chargement des portées...</div><small class="admin-note">Cocher un module ici donne accès à toutes les joueuses uniquement dans ce module.</small></div><div class="field"><label>Statut</label><select id="newStaffStatus"><option value="ACTIVE">Actif</option><option value="INACTIVE">Inactif</option><option value="ARCHIVED">Archivé</option></select></div>`);
   }
   const roleList = document.querySelector('.role-list');
   if(roleList && !roleList.dataset.extendedRoles){
-    roleList.innerHTML = `<div><b>Rôle métier</b><span>Fonction dans le club : responsable de pôle, entraîneur, adjoint, préparateur, kiné, médecin ou dirigeant.</span></div><div><b>Équipes</b><span>Périmètre sportif accessible. Plusieurs équipes peuvent être sélectionnées.</span></div><div><b>Modules</b><span>Périmètre fonctionnel visible dans CoachPulse.</span></div><div><b>Lecteur</b><span>Consultation uniquement sur les modules autorisés.</span></div><div><b>Saisie</b><span>Consultation et ajout/modification courante sur les modules autorisés.</span></div><div><b>Éditeur</b><span>Droits avancés sur les modules autorisés, avec accès aux actions d’administration si le module est autorisé.</span></div><div><b>Admin</b><span>Tous les droits, toutes les équipes et tous les modules.</span></div>`;
+    roleList.innerHTML = `<div><b>Rôle métier</b><span>Fonction dans le club : responsable de pôle, entraîneur, adjoint, préparateur, kiné, médecin ou dirigeant.</span></div><div><b>Équipes</b><span>Périmètre sportif accessible. Plusieurs équipes peuvent être sélectionnées.</span></div><div><b>Modules</b><span>Périmètre fonctionnel visible dans CoachPulse.</span></div><div><b>Portée spéciale</b><span>Permet d’ouvrir toutes les joueuses uniquement dans un module précis, sans droit admin global.</span></div><div><b>Lecteur</b><span>Consultation uniquement sur les modules autorisés.</span></div><div><b>Saisie</b><span>Consultation et ajout/modification courante sur les modules autorisés.</span></div><div><b>Éditeur</b><span>Droits avancés sur les modules autorisés, avec accès aux actions d’administration si le module est autorisé.</span></div><div><b>Admin</b><span>Tous les droits, toutes les équipes et tous les modules.</span></div>`;
     roleList.dataset.extendedRoles = '1';
   }
 }
@@ -4473,9 +4504,11 @@ async function loadMembers(){
       const tr = document.createElement('tr');
       const teams = [...new Set([...(m.authorizedTeamIds || []), ...(m.teamIds || []), ...(m.allowedTeamIds || [])])].filter(Boolean);
       const modules = m.allowedModules || [];
+      const moduleScopeModules = moduleScopeSelection(m.moduleScopes || {});
       const teamPicker = renderAccessPicker('teams', teams, choices.teams, `data-teams="${escapeHtml(m.uid)}"`);
       const modulePicker = renderAccessPicker('modules', modules, choices.modules, `data-modules="${escapeHtml(m.uid)}"`);
-      tr.innerHTML = `<td><b>${escapeHtml(m.name||'-')}</b></td><td>${escapeHtml(m.email||'-')}</td><td><label class="admin-note">Rôle métier</label><select data-role="${m.uid}">${roleOptions(m.role)}</select><label class="admin-note" style="display:block;margin-top:8px">Permission</label><select data-permission="${m.uid}">${permissionOptions(m.permissionLevel || m.permission || m.role)}</select></td><td><label class="admin-note">Équipes</label>${teamPicker}<label class="admin-note" style="display:block;margin-top:8px">Modules</label>${modulePicker}</td><td><select data-status="${m.uid}"><option value="ACTIVE" ${String(m.status||'ACTIVE').toUpperCase()==='ACTIVE'?'selected':''}>Actif</option><option value="INACTIVE" ${String(m.status||'').toUpperCase()==='INACTIVE'?'selected':''}>Inactif</option><option value="ARCHIVED" ${String(m.status||'').toUpperCase()==='ARCHIVED'?'selected':''}>Archivé</option></select></td><td><div class="staff-actions"><button data-reset="${m.email||''}">Reset MDP</button><button data-save="${m.uid}">Sauver accès</button><button class="danger" data-archive="${m.uid}">${String(m.status||'ACTIVE').toUpperCase()==='ARCHIVED'?'Réactiver':'Archiver'}</button></div></td>`;
+      const moduleScopePicker = renderAccessPicker('module-scopes', moduleScopeModules, choices.modules, `data-module-scopes="${escapeHtml(m.uid)}"`);
+      tr.innerHTML = `<td><b>${escapeHtml(m.name||'-')}</b></td><td>${escapeHtml(m.email||'-')}</td><td><label class="admin-note">Rôle métier</label><select data-role="${m.uid}">${roleOptions(m.role)}</select><label class="admin-note" style="display:block;margin-top:8px">Permission</label><select data-permission="${m.uid}">${permissionOptions(m.permissionLevel || m.permission || m.role)}</select></td><td><label class="admin-note">Équipes</label>${teamPicker}<label class="admin-note" style="display:block;margin-top:8px">Modules</label>${modulePicker}<label class="admin-note" style="display:block;margin-top:8px">Toutes joueuses par module</label>${moduleScopePicker}</td><td><select data-status="${m.uid}"><option value="ACTIVE" ${String(m.status||'ACTIVE').toUpperCase()==='ACTIVE'?'selected':''}>Actif</option><option value="INACTIVE" ${String(m.status||'').toUpperCase()==='INACTIVE'?'selected':''}>Inactif</option><option value="ARCHIVED" ${String(m.status||'').toUpperCase()==='ARCHIVED'?'selected':''}>Archivé</option></select></td><td><div class="staff-actions"><button data-reset="${m.email||''}">Reset MDP</button><button data-save="${m.uid}">Sauver accès</button><button class="danger" data-archive="${m.uid}">${String(m.status||'ACTIVE').toUpperCase()==='ARCHIVED'?'Réactiver':'Archiver'}</button></div></td>`;
       tbody.appendChild(tr);
     });
   }catch(e){ tbody.innerHTML = `<tr><td colspan="6">Erreur : ${escapeHtml(cleanError(e))}</td></tr>`; }
@@ -4618,6 +4651,7 @@ async function adminTableClick(e){
       const permissionLevel = service?.normalizePermission ? service.normalizePermission(document.querySelector(`[data-permission="${saveUid}"]`)?.value || 'LECTEUR') : (document.querySelector(`[data-permission="${saveUid}"]`)?.value || 'LECTEUR');
       const teamIds = parseAccessList(document.querySelector(`[data-teams="${saveUid}"]`)?.value || '');
       const allowedModules = parseAccessList(document.querySelector(`[data-modules="${saveUid}"]`)?.value || '');
+      const moduleScopes = moduleScopesFromSelection(document.querySelector(`[data-module-scopes="${saveUid}"]`)?.value || '');
       const status = String(document.querySelector(`[data-status="${saveUid}"]`)?.value || 'ACTIVE').toUpperCase();
       await firebaseFns.setDoc(firebaseFns.doc(db,'staff_members',saveUid), {
         role,
@@ -4629,6 +4663,7 @@ async function adminTableClick(e){
         allowedTeamIds:teamIds,
         allowedModules,
         modulePermissions:modulePermissionsFromSelection(allowedModules, permissionLevel),
+        moduleScopes,
         status,
         userType:'staff',
         updatedAt:firebaseFns.serverTimestamp(),
