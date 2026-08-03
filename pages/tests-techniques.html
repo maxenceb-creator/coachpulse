@@ -50,7 +50,11 @@ function trendClass(v){return v>0?'up':v<0?'down':'flat'}
 function escAttr(s){return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 	function uniqueTextList(values){return [...new Set(values.map(v=>String(v||'').trim()).filter(Boolean))];}
 	function teamIdsFromSources(...sources){return uniqueTextList(sources.flatMap(source=>[source?.teamId,source?.team_id,source?.teamSnapshot?.teamId,source?.playerSnapshot?.teamId,...(Array.isArray(source?.teamIds)?source.teamIds:[]),...(Array.isArray(source?.teamSnapshot?.teamIds)?source.teamSnapshot.teamIds:[]),...(Array.isArray(source?.playerSnapshot?.teamIds)?source.playerSnapshot.teamIds:[])]));}
-	function playerFromTechnicalRow(row={}){if(row.playerId)return playerById(row.playerId)||null;const target=normPlayer(row.joueuse||row.playerName);if(!target)return null;return DATA.players.find(p=>playerAliases(p.id).includes(target))||null;}
+	let technicalPlayerIndexCache=null;
+	function resetTechnicalPlayerIndexes(){technicalPlayerIndexCache=null;}
+	function playerIdentityValues(p={}){return [p.id,p.playerId,p.key,p.label,`${p.nom||''} ${p.prenom||''}`,`${p.prenom||''} ${p.nom||''}`].filter(Boolean);}
+	function technicalPlayerIndexes(){const signature=DATA.players.map(p=>[p.id,p.playerId,p.key,p.label,p.nom,p.prenom].join('|')).join('§');if(technicalPlayerIndexCache?.signature===signature)return technicalPlayerIndexCache;const idMap=new Map(),aliasMap=new Map();DATA.players.forEach(p=>{playerIdentityValues(p).forEach(value=>{const raw=String(value||'').trim();if(raw&&!idMap.has(raw))idMap.set(raw,p);const alias=normPlayer(raw);if(alias&&!aliasMap.has(alias))aliasMap.set(alias,p);});});technicalPlayerIndexCache={signature,idMap,aliasMap};return technicalPlayerIndexCache;}
+	function playerFromTechnicalRow(row={}){const indexes=technicalPlayerIndexes();if(row.playerId)return indexes.idMap.get(String(row.playerId||'').trim())||indexes.aliasMap.get(normPlayer(row.playerId))||null;const target=normPlayer(row.joueuse||row.playerName);return target?indexes.aliasMap.get(target)||null:null;}
 	function sanitizeRow(row){const tests={};TESTS.forEach(([k])=>{const v=row?.tests?.[k];tests[k]=hasValue(v)?Number(v):'';});const player=playerFromTechnicalRow(row);const season=row?.saison||seasonFromDate(row?.date)||appCurrentSeason();const seasonPlayer=player?playerForSeasonView(player,season):{};const teamIds=teamIdsFromSources(row,row?.playerSnapshot,player,seasonPlayer);const teamId=String(row?.teamId||row?.playerSnapshot?.teamId||seasonPlayer?.teamId||player?.teamId||teamIds[0]||'').trim();const playerId=String(row?.playerId||player?.playerId||player?.id||'').trim();return {...row,playerId,teamId,teamIds,tests};}
 function allRows(){return [...DATA.hist.map(sanitizeRow),...localRows().map(sanitizeRow)].sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));}
 function opt(value,label){const o=document.createElement('option');o.value=value;o.textContent=label;return o;}
@@ -127,9 +131,9 @@ function updateCompare(rows){const cat=currentAnalysisCategory(rows),season=curr
 function updateTable(rows){const tb=$('hist').querySelector('tbody');tb.innerHTML='';rows.slice().reverse().forEach(r=>{const tr=document.createElement('tr');tr.innerHTML=`<td><b>${r.joueuse}</b></td><td><span class="badge">${r.categorie}</span></td><td>${r.date}</td><td>${r.saison}</td>`+TESTS.map(([k])=>`<td>${r.tests?.[k]??''}</td>`).join('');tb.appendChild(tr);});}
 function chart(id,type,labels,datasets){if(typeof Chart==='undefined')return;if(charts[id])charts[id].destroy();charts[id]=new Chart($(id),{type,data:{labels,datasets},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{position:'bottom'}},scales:type==='radar'?{r:{beginAtZero:true}}:{y:{beginAtZero:true}}}});}
 function normPlayer(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
-function playerById(id){return DATA.players.find(p=>p.id===id||p.playerId===id||p.key===id);}
+function playerById(id){const indexes=technicalPlayerIndexes();return indexes.idMap.get(String(id||'').trim())||indexes.aliasMap.get(normPlayer(id))||null;}
 function playerLabelById(id){return playerById(id)?.label||id||'Joueuse';}
-function playerAliases(id){const p=playerById(id),out=new Set([id]);if(p){[p.id,p.playerId,p.key,p.label,`${p.nom||''} ${p.prenom||''}`,`${p.prenom||''} ${p.nom||''}`].forEach(v=>{if(v)out.add(v);});}return [...out].map(normPlayer).filter(Boolean);}
+function playerAliases(id){const p=playerById(id),out=new Set([id]);if(p)playerIdentityValues(p).forEach(v=>{if(v)out.add(v);});return [...out].map(normPlayer).filter(Boolean);}
 function rowMatchesPlayer(row,playerId){if(!playerId)return true;const aliases=playerAliases(playerId);if(row?.playerId)return aliases.includes(normPlayer(row.playerId));const target=normPlayer(row?.joueuse||row?.playerName);return !!target&&aliases.includes(target);}
 function selectedRadarTests(){const type=$('bRadarType')?.value||'max';return type==='all'?TESTS:(GROUPS[type]||GROUPS.max);}
 function radarRowsFor(playerId,season){const sea=season==='__current'?appCurrentSeason():season;return allRows().filter(r=>rowMatchesPlayer(r,playerId)&&seasonMatches(r.saison,sea));}
@@ -257,8 +261,9 @@ document.addEventListener('DOMContentLoaded',init);
       seen.add(key);
     });
     try{localStorage.setItem('coachpulse:technicalPlayerFootHints',JSON.stringify(footHints));window.parent?.CoachPulseCentralData?.mergeTechnicalPlayerFootHints?.(footHints);}catch(_){}
-    DATA.players.splice(0,DATA.players.length,...next);
-    const cats=[...new Set(next.map(p=>p.categorie).filter(Boolean))].sort((a,b)=>catRank(a)-catRank(b)||String(a).localeCompare(String(b),'fr',{numeric:true}));
+	    DATA.players.splice(0,DATA.players.length,...next);
+	    try{resetTechnicalPlayerIndexes();}catch(_){}
+	    const cats=[...new Set(next.map(p=>p.categorie).filter(Boolean))].sort((a,b)=>catRank(a)-catRank(b)||String(a).localeCompare(String(b),'fr',{numeric:true}));
     DATA.cats.splice(0,DATA.cats.length,...cats);
     DATA.cats.forEach(cat=>{if(cat&&DATA.obj&&!DATA.obj[cat])DATA.obj[cat]={};});
     bindSeasonReload();
