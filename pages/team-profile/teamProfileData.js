@@ -7,7 +7,7 @@
     {teamId:'team-u13-a', name:'U13 A', category:'U13', subCategories:['U12','U13','U14'], source:'Aperçu local'},
     {teamId:'team-u13-b', name:'U13 B', category:'U13', subCategories:['U12','U13'], source:'Aperçu local'},
     {teamId:'team-u16-a', name:'U16 A', category:'U16', subCategories:['U15','U16'], source:'Aperçu local'},
-    {teamId:'team-u19', name:'U19', category:'U19', subCategories:['U17','U18','U19'], source:'Aperçu local'},
+    {teamId:'team-u19', name:'U19', category:'U19', subCategories:['U16','U17','U18','U19'], source:'Aperçu local'},
     {teamId:'team-r1', name:'R1', category:'SENIORS', subCategories:['SENIORS'], source:'Aperçu local'}
   ];
   function text(value){ return String(value ?? '').trim(); }
@@ -46,7 +46,8 @@
   async function loadTeamData(teamId, options={}){
     if(api().teamProfileLoadData) return api().teamProfileLoadData({teamId, ...options});
     const teams = await listTeams();
-    return {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), teamId, collections:{teams:teams.filter(team => !teamId || teamIdOf(team) === teamId), players:[], matches:[], matchEvents:[], sessions:[], attendance:[], technicalTests:[], physicalTests:[], injuries:[], workloads:[]}};
+    const localPresence = global.CoachPulsePresenceEventsService?.collectionsForTeam(teamId) || {sessions:[], attendance:[]};
+    return {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), teamId, collections:{teams:teams.filter(team => !teamId || teamIdOf(team) === teamId), players:[], matches:[], matchEvents:[], sessions:localPresence.sessions || [], attendance:localPresence.attendance || [], technicalTests:[], physicalTests:[], injuries:[], workloads:[]}};
   }
   function normalizeCollections(payload={}){
     const c = payload.collections || {};

@@ -152,6 +152,62 @@
     });
     return zones;
   }
+  function avg(values=[]){
+    const numbers = values.map(value => Number(value || 0)).filter(Number.isFinite);
+    return numbers.length ? numbers.reduce((total, value) => total + value, 0) / numbers.length : 0;
+  }
+  function attendanceStatus(row={}){
+    const code = String(row.status || row.statut || row.presence || row.etat || '').trim().toLowerCase();
+    if(['p','present','présent','presente','présente'].includes(code)) return 'present';
+    if(['r','late','retard','en retard'].includes(code)) return 'late';
+    if(['a','absent','absence'].includes(code)) return 'absent';
+    if(['m','sick','malade'].includes(code)) return 'sick';
+    if(['b','injured','blessé','blesse','blessée','blessee'].includes(code)) return 'injured';
+    return code || 'absent';
+  }
+  function attendanceEventKey(row={}){
+    return row.sessionId || row.eventId || row.id || `${row.date || ''}:${row.teamId || ''}`;
+  }
+  function attendanceAverages(attendance=[]){
+    const rows = Array.isArray(attendance) ? attendance : [];
+    const playerIds = new Set(rows.map(row => row.playerId).filter(Boolean));
+    const eventMap = new Map();
+    rows.forEach(row => {
+      const key = attendanceEventKey(row);
+      if(!key) return;
+      const eventRows = eventMap.get(key) || [];
+      eventRows.push(row);
+      eventMap.set(key, eventRows);
+    });
+    const eventStats = [...eventMap.values()].map(eventRows => {
+      const present = eventRows.filter(row => ['present','late'].includes(attendanceStatus(row))).length;
+      const absent = eventRows.filter(row => attendanceStatus(row) === 'absent').length;
+      const late = eventRows.filter(row => attendanceStatus(row) === 'late').length;
+      const injured = eventRows.filter(row => attendanceStatus(row) === 'injured').length;
+      const unavailable = eventRows.filter(row => ['sick','injured'].includes(attendanceStatus(row))).length;
+      return {
+        present,
+        absent,
+        late,
+        injured,
+        unavailable,
+        total:eventRows.length,
+        rate:eventRows.length ? present / eventRows.length : 0
+      };
+    });
+    const totalMinutes = sum(rows, row => row.minutes || row.duration);
+    return {
+      events:eventMap.size,
+      playerCount:playerIds.size,
+      presenceAvgRate:Math.round(avg(eventStats.map(stat => stat.rate)) * 100),
+      minutesAvgPerPlayer:playerIds.size ? Math.round(totalMinutes / playerIds.size) : 0,
+      presentAvgPerEvent:Math.round(avg(eventStats.map(stat => stat.present))),
+      absentAvgPerEvent:Math.round(avg(eventStats.map(stat => stat.absent))),
+      lateAvgPerEvent:Math.round(avg(eventStats.map(stat => stat.late))),
+      unavailableAvgPerEvent:Math.round(avg(eventStats.map(stat => stat.unavailable))),
+      injuredAvgPerEvent:Math.round(avg(eventStats.map(stat => stat.injured)))
+    };
+  }
   function squad(players=[], attendance=[], events=[]){
     return players.map(player => {
       const playerId = player.playerId || player.id;
@@ -186,15 +242,29 @@
     const matchIds = new Set(periodMatches.map(match => match.matchId || match.id).filter(Boolean));
     const players = (collections.players || []).map(player => Data.playerForSeason(player, period.season || Data.currentSeason())).filter(player => !team?.teamId || Data.rowMatchesTeam(player, team.teamId));
     const events = Filters.filterRows(collections.matchEvents || [], state).filter(row => !matchIds.size || matchIds.has(row.matchId) || Data.rowMatchesTeam(row, team?.teamId));
+    const sessions = Filters.filterRows(collections.sessions || [], state);
     const attendance = Filters.filterRows(collections.attendance || [], state);
     const technicalTests = Filters.filterRows(collections.technicalTests || [], state);
     const physicalTests = Filters.filterRows(collections.physicalTests || [], state);
     const injuries = Filters.filterRows(collections.injuries || [], state);
     const stats = collectiveStats(events);
-    const kpis = computeKpis(periodMatches);
+    const attendanceStats = attendanceAverages(attendance);
+    const kpis = {
+      ...computeKpis(periodMatches),
+      sessions:sessions.length,
+      attendance:attendance.length,
+      attendanceEvents:attendanceStats.events,
+      presenceAvgRate:attendanceStats.presenceAvgRate,
+      attendanceAvgMinutesPerPlayer:attendanceStats.minutesAvgPerPlayer,
+      presentAvgPerEvent:attendanceStats.presentAvgPerEvent,
+      absentAvgPerEvent:attendanceStats.absentAvgPerEvent,
+      lateAvgPerEvent:attendanceStats.lateAvgPerEvent,
+      unavailableAvgPerEvent:attendanceStats.unavailableAvgPerEvent,
+      injuredAvgPerEvent:attendanceStats.injuredAvgPerEvent
+    };
     const xg = xgStats(periodMatches, events);
     return {
-      team, period, matches:periodMatches, events, players, attendance, technicalTests, physicalTests, injuries,
+      team, period, matches:periodMatches, events, players, sessions, attendance, technicalTests, physicalTests, injuries,
       kpis, stats, xg,
       squad:squad(players, attendance, events),
       heatmaps:{
@@ -213,5 +283,5 @@
       }
     };
   }
-  global.TeamProfileMetrics = {n, pct, normalizeMatch, computeKpis, collectiveStats, xgStats, heatmap, summarize};
+  global.TeamProfileMetrics = {n, pct, normalizeMatch, computeKpis, collectiveStats, xgStats, heatmap, attendanceAverages, summarize};
 })(window);
