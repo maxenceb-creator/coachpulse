@@ -4,6 +4,7 @@ const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
 const swPath = path.join(root, 'sw.js');
+const appPath = path.join(root, 'app.js');
 const errors = [];
 
 function read(relativePath) {
@@ -105,11 +106,23 @@ function assertCacheName(cacheName) {
 }
 
 const {source, meta} = loadServiceWorkerMetadata();
+const appSource = fs.readFileSync(appPath, 'utf8');
 
 assertCacheName(meta.CACHE_NAME);
 assertExistingPrecacheAssets(meta.CORE_ASSETS);
 assertCriticalAssets(meta.CORE_ASSETS);
 assertShellStrategy(source, meta.NETWORK_FIRST_ASSETS);
+[
+  'const APP_SHELL_CACHE_PREFIX',
+  'async function clearAppShellCacheOnLaunch',
+  "if(!navigator.onLine || !('caches' in window)) return;",
+  'keys.filter(key => key.startsWith(APP_SHELL_CACHE_PREFIX)).map(key => caches.delete(key))',
+  "navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'})"
+].forEach(snippet => {
+  if(!appSource.includes(snippet)) fail(`Garde-fou cache au lancement manquant: ${snippet}`);
+});
+if(appSource.includes('localStorage.clear()')) fail('Le nettoyage du cache ne doit pas vider localStorage.');
+if(appSource.includes('indexedDB.deleteDatabase')) fail('Le nettoyage du cache ne doit pas supprimer IndexedDB.');
 
 if(errors.length) {
   console.error(errors.join('\n'));

@@ -29,6 +29,7 @@ let applyingCloud = false;
 let lastCloudItemsHash = '';
 let adminAccessChoiceCache = null;
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
+const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
 const appDataCache = {
   athleticRows:{rows:null, loadedAt:0},
   playerProfiles:new Map(),
@@ -4722,7 +4723,25 @@ setInterval(snapshotLocalData, 15000);
 window.addEventListener('pagehide', snapshotLocalData);
 window.addEventListener('storage', snapshotLocalData);
 
-if('serviceWorker' in navigator){ window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.error)); }
+async function clearAppShellCacheOnLaunch(){
+  if(!navigator.onLine || !('caches' in window)) return;
+  try{
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(key => key.startsWith(APP_SHELL_CACHE_PREFIX)).map(key => caches.delete(key)));
+  }catch(error){
+    console.warn('Nettoyage cache application indisponible', error);
+  }
+}
+async function registerServiceWorker(){
+  if(!('serviceWorker' in navigator)) return;
+  try{
+    const registration = await navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'});
+    registration.update?.().catch(() => {});
+  }catch(error){
+    console.error(error);
+  }
+}
+window.addEventListener('load', () => clearAppShellCacheOnLaunch().finally(registerServiceWorker));
 window.addEventListener('load', () => {
   localStorage.setItem('coachpulse:firebaseConfig', JSON.stringify(FIREBASE_CONFIG));
   setLocked(true);
