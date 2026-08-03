@@ -32,6 +32,7 @@ const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
 const appDataCache = {
   athleticRows:{rows:null, loadedAt:0},
+  presenceEvents:{rows:null, loadedAt:0, key:''},
   playerProfiles:new Map(),
   teamProfiles:new Map()
 };
@@ -53,6 +54,11 @@ function invalidateAppDataCaches(scope='all'){
   if(scope === 'all' || scope === 'athletic'){
     appDataCache.athleticRows.rows = null;
     appDataCache.athleticRows.loadedAt = 0;
+  }
+  if(scope === 'all' || scope === 'presence' || scope === 'presences'){
+    appDataCache.presenceEvents.rows = null;
+    appDataCache.presenceEvents.loadedAt = 0;
+    appDataCache.presenceEvents.key = '';
   }
   if(scope === 'all' || scope === 'players' || scope === 'playerProfiles') appDataCache.playerProfiles.clear();
   if(scope === 'all' || scope === 'players' || scope === 'teams' || scope === 'teamProfiles') appDataCache.teamProfiles.clear();
@@ -4050,6 +4056,20 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
 async function presenceListEvents(){
   if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const authorizedTeamIds = getAuthorizedTeamIds();
+  const cacheKey = [
+    currentUser.uid,
+    isAdmin() ? 'admin' : 'staff',
+    canAccessAllPlayersForModule('presences') ? 'allPlayers' : 'teamScope',
+    authorizedTeamIds.slice().sort().join(',')
+  ].join(':');
+  if(
+    appDataCache.presenceEvents.rows
+    && appDataCache.presenceEvents.key === cacheKey
+    && Date.now() - appDataCache.presenceEvents.loadedAt < DATA_CACHE_TTL_MS
+  ){
+    return cloneData(appDataCache.presenceEvents.rows);
+  }
   const docsFromSnap = snap => {
     const rows = [];
     snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
@@ -4072,40 +4092,38 @@ async function presenceListEvents(){
     }
   };
   const uniqueRows = rows => [...new Map(rows.map(row => [row.sessionId || row.id || JSON.stringify(row), row])).values()];
-  const readPresenceSessionsForAllPlayersScope = async () => uniqueRows([
-    ...(await readWhereSafe('sessions', [{field:'createdFromPresenceModule', operator:'==', value:true}])),
-    ...(await readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}]))
-  ]);
-  const readPresenceSessionsForTeams = async chunks => {
-    const reads = [];
-    chunks.forEach(chunk => {
-      reads.push(readWhereSafe('sessions', [
-        {field:'createdFromPresenceModule', operator:'==', value:true},
-        {field:'teamId', operator:'in', value:chunk}
-      ]));
-      reads.push(readWhereSafe('sessions', [
-        {field:'createdFromPresenceModule', operator:'==', value:true},
-        {field:'teamIds', operator:'array-contains-any', value:chunk}
-      ]));
-      reads.push(readWhereSafe('sessions', [
-        {field:'source', operator:'==', value:'Présences'},
-        {field:'teamId', operator:'in', value:chunk}
-      ]));
-      reads.push(readWhereSafe('sessions', [
-        {field:'source', operator:'==', value:'Présences'},
-        {field:'teamIds', operator:'array-contains-any', value:chunk}
-      ]));
-    });
-    const targetedRows = uniqueRows((await Promise.all(reads)).flat());
-    if(targetedRows.length) return targetedRows;
-    const fallbackReads = [];
-    chunks.forEach(chunk => {
-      fallbackReads.push(readWhereSafe('sessions', [{field:'teamId', operator:'in', value:chunk}]));
-      fallbackReads.push(readWhereSafe('sessions', [{field:'teamIds', operator:'array-contains-any', value:chunk}]));
-    });
-    return uniqueRows((await Promise.all(fallbackReads)).flat());
+  const readPresenceSessionsForAllPlayersScope = async () => {
+    const modernRows = uniqueRows(await readWhereSafe('sessions', [{field:'createdFromPresenceModule', operator:'==', value:true}]));
+    if(modernRows.length) return modernRows;
+    return uniqueRows(await readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}]));
   };
-  const authorizedTeamIds = getAuthorizedTeamIds();
+  const readPresenceSessionsForTeams = async chunks => {
+    const modernReads = [];
+    chunks.forEach(chunk => {
+      modernReads.push(readWhereSafe('sessions', [
+        {field:'createdFromPresenceModule', operator:'==', value:true},
+        {field:'teamId', operator:'in', value:chunk}
+      ]));
+      modernReads.push(readWhereSafe('sessions', [
+        {field:'createdFromPresenceModule', operator:'==', value:true},
+        {field:'teamIds', operator:'array-contains-any', value:chunk}
+      ]));
+    });
+    const modernRows = uniqueRows((await Promise.all(modernReads)).flat());
+    if(modernRows.length) return modernRows;
+    const legacyReads = [];
+    chunks.forEach(chunk => {
+      legacyReads.push(readWhereSafe('sessions', [
+        {field:'source', operator:'==', value:'Présences'},
+        {field:'teamId', operator:'in', value:chunk}
+      ]));
+      legacyReads.push(readWhereSafe('sessions', [
+        {field:'source', operator:'==', value:'Présences'},
+        {field:'teamIds', operator:'array-contains-any', value:chunk}
+      ]));
+    });
+    return uniqueRows((await Promise.all(legacyReads)).flat());
+  };
   if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return [];
   const teamChunks = [];
   for(let i=0;i<authorizedTeamIds.length;i+=10) teamChunks.push(authorizedTeamIds.slice(i,i+10));
@@ -4124,10 +4142,12 @@ async function presenceListEvents(){
     ? (await Promise.all(sessionChunks.map(chunk => readWhere('attendance', 'sessionId', 'in', chunk)))).flat()
     : [];
   const attendance = scopedRecordsForModuleAccess(attendanceRows, 'presences');
-  return sessions
+  const events = sessions
     .map(session => presenceCloudEventFromSession(session, attendance))
     .filter(event => event.id && event.date)
     .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+  appDataCache.presenceEvents = {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey};
+  return events;
 }
 async function presenceSaveEvent(event={}){
   if(!canEditModule('presences')) throw new Error('Modification Présences non autorisée.');
@@ -4205,6 +4225,7 @@ async function presenceSaveEvent(event={}){
       updatedByEmail:currentUser.email || ''
     }, {merge:true}))
   ]);
+  invalidateAppDataCaches('presences');
   invalidateAppDataCaches('teamProfiles');
   return {sessionId, attendance:attendanceRows.length};
 }
@@ -4219,6 +4240,7 @@ async function presenceDeleteEvent(event={}){
   attendanceSnap.forEach(docSnap => deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'attendance', docSnap.id))));
   deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'sessions', sessionId)));
   await Promise.all(deletes);
+  invalidateAppDataCaches('presences');
   invalidateAppDataCaches('teamProfiles');
   return {sessionId, deleted:deletes.length};
 }
