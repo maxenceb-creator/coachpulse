@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate CoachPulse
+        run: npm run check
+      - name: Build public assets
+        run: npm run build:public
       - name: Prepare Firebase credentials
         run: |
           cat > "$HOME/firebase-service-account.json" <<'SERVICE_ACCOUNT'
@@ -28,6 +32,10 @@ jobs:
           fi
           if grep -q "is the current active version" "$RUNNER_TEMP/firebase-pr-deploy.log"; then
             echo "Firebase PR channel is already on this version. Treating as success."
+            exit 0
+          fi
+          if grep -qi "channel quota reached" "$RUNNER_TEMP/firebase-pr-deploy.log"; then
+            echo "::warning::Firebase Hosting preview channel quota reached. Validation and build passed, preview deploy skipped. Delete old preview channels in Firebase Hosting."
             exit 0
           fi
           exit "$status"
