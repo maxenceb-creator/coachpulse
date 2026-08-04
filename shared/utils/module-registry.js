@@ -32,6 +32,8 @@
   ];
 
   function parseModuleOverrides(){
+    const storage = global.CoachPulseStorage;
+    if(storage?.getJson) return storage.getJson('coachpulse:moduleSettings', {});
     try{ return JSON.parse(global.localStorage?.getItem('coachpulse:moduleSettings') || '{}') || {}; }catch(_e){ return {}; }
   }
 
