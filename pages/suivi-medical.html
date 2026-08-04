@@ -119,9 +119,12 @@ main{overflow-x:clip!important}
   </section>
 </main>
 <div id="tooltip" class="tooltip"></div>
+<script src="../shared/utils/storage-service.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const api=()=>window.parent?.CoachPulseCentralData;
+const storage=(()=>{try{return window.CoachPulseStorage||window.parent?.CoachPulseStorage||null}catch(_){return window.CoachPulseStorage||null}})();
+const medicalProfileMemory={};
 const APP_OPEN_DATE=new Date();
 const zones=[
 ['Tête',50,8],['Cou',50,15],['Épaule gauche',36,21],['Épaule droite',64,21],['Bras gauche',27,32],['Bras droit',73,32],['Coude gauche',22,43],['Coude droit',78,43],['Poignet gauche',19,55],['Poignet droit',81,55],['Main gauche',17,64],['Main droite',83,64],['Dos',50,31],['Lombaires',50,45],['Hanche gauche',42,52],['Hanche droite',58,52],['Cuisse gauche',42,65],['Cuisse droite',58,65],['Genou gauche',41,78],['Genou droit',59,78],['Mollet gauche',40,88],['Mollet droit',60,88],['Cheville gauche',39,96],['Cheville droite',61,96],['Pied gauche',35,99],['Pied droit',65,99]];
@@ -140,9 +143,9 @@ function playerName(p){const direct=[p?.prenom||p?.firstName,p?.nom||p?.lastName
 function playerById(id,snapshot={}){const direct=players.find(p=>pid(p)===id);if(direct)return direct;const key=personKey(snapshot);return (key&&players.find(p=>personKey(p)===key))||normalizeMedicalPlayer(snapshot||{})||{}}
 function painBand(v){v=Number(v||0);return v>=7?'high':v>=4?'mid':'low'}
 function pill(v){const band=painBand(v);return `<span class="pill ${band==='high'?'bad':band==='mid'?'warn':''}">${esc(v||'-')}/10</span>`}
-function profileStore(){try{return JSON.parse(localStorage.getItem('coachpulse:medicalProfiles')||'{}')||{}}catch(e){return {}}}
+function profileStore(){return storage?.getJson?storage.getJson('coachpulse:medicalProfiles',{})||{}:{...medicalProfileMemory}}
 function getProfile(playerId){return profileStore()[playerId]||{}}
-function saveProfile(playerId,profile){const all=profileStore();all[playerId]={...(all[playerId]||{}),...profile,updatedAt:new Date().toISOString()};localStorage.setItem('coachpulse:medicalProfiles',JSON.stringify(all))}
+function saveProfile(playerId,profile){const all=profileStore();all[playerId]={...(all[playerId]||{}),...profile,updatedAt:new Date().toISOString()};if(storage?.setJson)return storage.setJson('coachpulse:medicalProfiles',all,{recover:true});Object.keys(medicalProfileMemory).forEach(key=>delete medicalProfileMemory[key]);Object.assign(medicalProfileMemory,all);return false}
 function calculateBmi(heightCm,weightKg){const h=Number(heightCm||0)/100,w=Number(weightKg||0);return h&&w?Number((w/(h*h)).toFixed(2)):null}
 function bmiInfo(v){if(!v)return{label:'À compléter',cls:'',pct:0};if(v<18.5)return{label:'Insuffisance pondérale',cls:'bmi-blue',pct:Math.max(4,Math.min(24,(v/18.5)*24))};if(v<25)return{label:'Corpulence normale',cls:'bmi-green',pct:25+((v-18.5)/6.5)*30};if(v<30)return{label:'Surpoids',cls:'bmi-orange',pct:55+((v-25)/5)*23};return{label:'Obésité',cls:'bmi-red',pct:Math.min(96,78+((v-30)/12)*18)}}
 function validDate(y,m,d){const date=new Date(Number(y),Number(m)-1,Number(d));return date.getFullYear()===Number(y)&&date.getMonth()===Number(m)-1&&date.getDate()===Number(d)?date:null}
