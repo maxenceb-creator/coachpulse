@@ -228,7 +228,8 @@ function testAthleticTestsStayLinkedToPlayerAndTeamIds(){
   assert(appSource.includes('const readScopedPhysicalTests = async () =>'), 'Les tests athlétiques Firestore doivent être lus via une requête limitée au périmètre autorisé.');
   assert(appSource.includes("readWhere('teamIds', 'array-contains-any', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par teamIds.');
   assert(appSource.includes("readWhere('playerId', 'in', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par playerId.');
-  assert(appSource.includes("scopedRecordsForModuleAccess(normalizeAthleticRows(rawRows, players), 'tests-athletiques')"), 'Les tests athlétiques chargés doivent être filtrés par autorisations et scopes module.');
+  assert(appSource.includes('normalizeAthleticRows(rawRows, players)'), 'Les tests athlétiques chargés doivent être normalisés avant affichage.');
+  assert(appSource.includes("scopedRecordsForModuleAccess(") && appSource.includes("'tests-athletiques'"), 'Les tests athlétiques chargés doivent être filtrés par autorisations et scopes module.');
   assert(appSource.includes('function firestoreSafeData'), 'Les écritures Firestore doivent nettoyer les objets non sérialisables.');
   assert(appSource.includes('const tests = athleticTestsFromRow(test);'), 'La sauvegarde athlétique doit reconstruire des tests plats avant Firestore.');
   assert(appSource.includes('...firestoreSafeData(clean)'), 'La sauvegarde athlétique doit envoyer un payload compatible Firestore.');
@@ -278,7 +279,7 @@ function testDataHubImportsStayScoped(){
 
 function testFirestoreRulesProtectExistingAndIncomingScope(){
   const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
-  const scopedCollections = ['players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps','workloads','convocations','individualReports'];
+  const scopedCollections = ['players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','physicalTestDeletions','injuries','injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps','workloads','convocations','individualReports'];
 
   assert(!rulesSource.includes('allow create, update: if canWriteSportData()'), 'Les règles sportives ne doivent pas grouper create/update sans vérifier resource.data.');
   assert(!rulesSource.includes('allow create, update: if canWriteMedicalData()'), 'Les règles médicales ne doivent pas grouper create/update sans vérifier resource.data.');
@@ -350,9 +351,20 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(fs.readFileSync('pages/tests-techniques.html', 'utf8').includes('moduleId:"tests"'), 'Les Tests techniques doivent demander les joueuses dans leur scope module.');
   assert(appSource.includes('async function athleticDeleteTest'), 'Les Tests athlétiques doivent exposer une suppression centralisée.');
   assert(appSource.includes('athleticSaveTest, athleticDeleteTest, athleticExport'), 'Le service central doit publier athleticDeleteTest au module.');
+  assert(appSource.includes('function setLocalStorageWithQuotaRecovery'), 'Les sauvegardes locales critiques doivent rester tolérantes au quota navigateur.');
+  assert(appSource.includes("return setLocalStorageWithQuotaRecovery('coachpulse:athleticTests'"), 'Les Tests athlétiques ne doivent pas être bloqués par un quota localStorage saturé.');
+  assert(appSource.includes('function markAthleticTestDeleted'), 'Les Tests athlétiques supprimés doivent conserver une trace locale pour ne pas réapparaître depuis le fichier intégré.');
+  assert(appSource.includes('async function cloudDeletedAthleticTestIds'), 'Les suppressions de Tests athlétiques doivent être lues depuis Firestore pour être partagées entre utilisateurs.');
+  assert(appSource.includes("firebaseFns.collection(db, 'physicalTestDeletions')"), 'Les suppressions de Tests athlétiques doivent utiliser une collection Firestore dédiée.');
+  assert(appSource.includes("parseStoredJson('coachpulse:athleticTests:deletedIds'"), 'La liste des tests athlétiques supprimés doit être persistée localement.');
+  assert(appSource.includes('normalizeAthleticRows(rawRows, players).filter(row => !deletedIds.has(athleticRowStorageId(row)))'), 'Le chargement des Tests athlétiques doit masquer les tests supprimés après normalisation.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-edit-athletic-test'), 'L’historique des Tests athlétiques doit permettre la modification.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-delete-athletic-test'), 'L’historique des Tests athlétiques doit permettre la suppression.');
+  assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('id="historyCounter"'), 'L’historique des Tests athlétiques doit afficher un compteur de tests en attente.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-finalize-athletic-test'), 'Les Tests athlétiques doivent garder une action d’enregistrement définitif par ligne.');
+  assert(appSource.includes("finalized:true") || appSource.includes('finalized,'), 'La finalisation des Tests athlétiques doit être persistée dans les documents physicalTests.');
+  assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('rowFinalized'), 'L’historique des Tests athlétiques doit filtrer les lignes finalisées depuis la donnée partagée.');
+  assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('function historyRows(){return rows.filter(r=>!rowFinalized(r))}'), 'L’historique des Tests athlétiques doit rester global et ne pas dépendre de la joueuse/catégorie sélectionnée.');
   assert(rulesSource.includes("allow delete: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests'))"), 'Les suppressions physicalTests doivent rester contrôlées par droits module et teamId/playerId.');
 
   [
