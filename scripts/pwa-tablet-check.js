@@ -94,6 +94,7 @@ function assertCriticalAssets(assets) {
     './shared/services/teams-service.js',
     './shared/services/permissions-service.js',
     './shared/utils/storage-service.js',
+    './shared/utils/notifications-service.js',
     './shared/utils/module-registry.js'
   ].forEach(asset => {
     if(!assets.includes(asset)) fail(`Asset critique non precache: ${asset}`);
