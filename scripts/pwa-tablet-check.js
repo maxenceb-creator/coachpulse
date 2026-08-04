@@ -90,6 +90,8 @@ function assertCriticalAssets(assets) {
     './pages/player-profile.html',
     './pages/team-profile.html',
     './pages/presences.html',
+    './pages/presences/presence-config.js',
+    './pages/presences/presence-utils.js',
     './shared/services/players-service.js',
     './shared/services/teams-service.js',
     './shared/services/permissions-service.js',

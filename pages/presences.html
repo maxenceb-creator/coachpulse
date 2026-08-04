@@ -1640,46 +1640,35 @@
   <script src="../shared/services/teams-service.js"></script>
   <script src="../shared/services/players-service.js"></script>
   <script src="../shared/services/presence-events-service.js"></script>
+  <script src="presences/presence-config.js"></script>
+  <script src="presences/presence-utils.js"></script>
   <script>
     (function(){
-      const PRESENCE_EVENTS_KEY = "coachpulse:presenceEvents:v1";
-      const PRESENCE_SETTINGS_KEY = "coachpulse:presenceSettings:v1";
-      const EVENT_KEY = "methodo_events_v24";
-      const LEGACY_PRESENCE_KEY = "presenceSeanceV3_6_Excel";
-      const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
-      const FALLBACK_TEAMS = [
-        {teamId:"team-u7-a", name:"U7 A", category:"U7"},
-        {teamId:"team-u9-a", name:"U9 A", category:"U9"},
-        {teamId:"team-u11-a", name:"U11 A", category:"U11"},
-        {teamId:"team-u13-a", name:"U13 A", category:"U13"},
-        {teamId:"team-u13-b", name:"U13 B", category:"U13"},
-        {teamId:"team-u16-a", name:"U16 A", category:"U16"},
-        {teamId:"team-u19", name:"U19", category:"U19"},
-        {teamId:"team-r1", name:"R1", category:"SENIORS"}
-      ];
-      const TEAM_COLORS = ["#1d995b","#0f766e","#2563eb","#7c3aed","#c2410c","#be123c","#b45309","#047857"];
-      const DEFAULT_ATTENDANCE_CODES = [
-        {id:"present", label:"Présente", short:"P", tone:"green"},
-        {id:"late", label:"Retard", short:"R", tone:"gold"},
-        {id:"absent", label:"Absence non justifiée", short:"ANJ", tone:"red"},
-        {id:"excused", label:"Absence justifiée", short:"AJ", tone:"orange"},
-        {id:"sick", label:"Malade", short:"M", tone:"gray"},
-        {id:"injured", label:"Blessée", short:"B", tone:"navy"},
-        {id:"pole", label:"Pôle Espoir", short:"PO", tone:"purple"},
-        {id:"district", label:"District", short:"D", tone:"blue"},
-        {id:"d2", label:"Entraînement groupe pro", short:"D2", tone:"dark", teamIds:["team-u19"]}
-      ];
-      const ATTENDANCE_CODE_TONES = {
-        green:{bg:"#dcfce7", color:"#118048"},
-        gold:{bg:"#f7e4aa", color:"#8a6500"},
-        red:{bg:"#ffe1e1", color:"#dc2626"},
-        orange:{bg:"#ffedd5", color:"#ea580c"},
-        gray:{bg:"#e5e7eb", color:"#374151"},
-        navy:{bg:"#111827", color:"#ffffff"},
-        purple:{bg:"#ede9fe", color:"#6d28d9"},
-        blue:{bg:"#dbeafe", color:"#2563eb"},
-        dark:{bg:"#062016", color:"#f3dc8c"}
-      };
+      const presenceConfig = window.CoachPulsePresencesConfig || {};
+      const presenceUtils = window.CoachPulsePresencesUtils || {};
+      const {
+        storageKeys = {},
+        monthNames = [],
+        fallbackTeams:FALLBACK_TEAMS = [],
+        teamColors:TEAM_COLORS = [],
+        defaultAttendanceCodes:DEFAULT_ATTENDANCE_CODES = [],
+        attendanceCodeTones:ATTENDANCE_CODE_TONES = {},
+        defaultPresenceSettings:DEFAULT_PRESENCE_SETTINGS = {}
+      } = presenceConfig;
+      const {
+        addDays,
+        addMonths,
+        esc,
+        hexToRgb,
+        isoDate,
+        parseDate,
+        readJson,
+        sameDay
+      } = presenceUtils;
+      const PRESENCE_EVENTS_KEY = storageKeys.presenceEvents || "coachpulse:presenceEvents:v1";
+      const PRESENCE_SETTINGS_KEY = storageKeys.presenceSettings || "coachpulse:presenceSettings:v1";
+      const EVENT_KEY = storageKeys.methodologieEvents || "methodo_events_v24";
+      const LEGACY_PRESENCE_KEY = storageKeys.legacyPresence || "presenceSeanceV3_6_Excel";
       let calendarPageMonth = new Date();
       let selectedCalendarDate = isoDate(new Date());
       let selectedAttendanceEventId = "";
@@ -1689,29 +1678,6 @@
       let reportPlayerFilterIds = new Set();
       let preventionPlayerFilterIds = new Set();
       let cloudReady = false;
-      const DEFAULT_PRESENCE_SETTINGS = {
-        defaultTeamId:"",
-        defaultType:"entrainement",
-        defaultStartTime:"18:00",
-        defaultEndTime:"19:30",
-        defaultRecurrence:"none",
-        preventionKeywords:"douleur, fatigue, blessure, reprise, gêne, gene, alerte, soin, kiné",
-        attendanceCodes:DEFAULT_ATTENDANCE_CODES
-      };
-
-      function esc(value){
-        return String(value ?? "").replace(/[&<>"']/g, char => ({
-          "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-        }[char]));
-      }
-      function readJson(key, fallback){
-        try{
-          const value = localStorage.getItem(key);
-          return value ? JSON.parse(value) : fallback;
-        }catch(_error){
-          return fallback;
-        }
-      }
       function presenceSettings(){
         const saved = readJson(PRESENCE_SETTINGS_KEY, {});
         return {
@@ -1772,35 +1738,6 @@
         });
         return [...byId.values()];
       }
-      function parseDate(value){
-        if(!value) return null;
-        const text = String(value).slice(0,10);
-        const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if(match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-        const parsed = new Date(value);
-        return Number.isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-      }
-      function isoDate(date){
-        const y = date.getFullYear();
-        const m = String(date.getMonth() + 1).padStart(2, "0");
-        const d = String(date.getDate()).padStart(2, "0");
-        return `${y}-${m}-${d}`;
-      }
-      function addDays(date, days){
-        const next = new Date(date);
-        next.setDate(next.getDate() + days);
-        return next;
-      }
-      function addMonths(date, months){
-        const originalDay = date.getDate();
-        const next = new Date(date.getFullYear(), date.getMonth() + months, 1);
-        const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-        next.setDate(Math.min(originalDay, lastDay));
-        return next;
-      }
-      function sameDay(a,b){
-        return a && b && isoDate(a) === isoDate(b);
-      }
       function teamsService(){
         try{
           return window.CoachPulseTeamsService || window.parent?.CoachPulseTeamsService || null;
@@ -1827,11 +1764,6 @@
         const index = teams.findIndex(team => String(team.teamId) === String(teamId));
         if(index >= 0) return index % TEAM_COLORS.length;
         return Math.abs(String(teamId || "sans-equipe").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0)) % TEAM_COLORS.length;
-      }
-      function hexToRgb(hex){
-        const clean = String(hex || "").replace("#", "");
-        const value = parseInt(clean.length === 3 ? clean.split("").map(char => char + char).join("") : clean, 16);
-        return Number.isFinite(value) ? `${(value >> 16) & 255},${(value >> 8) & 255},${value & 255}` : "29,153,91";
       }
       function eventStyle(event){
         const color = TEAM_COLORS[teamColorIndex(event?.teamId)];

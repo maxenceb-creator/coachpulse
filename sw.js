@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-68-20260803-launch-cache-refresh';
+const CACHE_NAME = 'coachpulse-v6-4-69-20260804-presences-modules';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
@@ -12,6 +12,7 @@ const CORE_ASSETS = [
   './pages/coach-stats.html', './pages/methodologie.html', './pages/presences.html', './pages/tests-techniques.html', './pages/tests-athletiques.html', './pages/data-hub.html', './pages/admin-database.html', './pages/suivi-medical.html', './pages/player-profile.html', './pages/team-profile.html',
   './pages/coach-stats/heatmap-tooltips.css', './pages/coach-stats/heatmap-tooltips.js',
   './pages/methodologie/embedded-colors.css', './pages/methodologie/embedded-colors.js',
+  './pages/presences/presence-config.js', './pages/presences/presence-utils.js',
   './pages/player-profile/playerProfile.css', './pages/player-profile/playerProfileData.js', './pages/player-profile/playerProfileFilters.js', './pages/player-profile/playerProfileStats.js', './pages/player-profile/playerProfileCompare.js', './pages/player-profile/playerProfileRender.js', './pages/player-profile/playerProfile.js',
   './pages/team-profile/teamProfile.css', './pages/team-profile/teamProfileData.js', './pages/team-profile/teamProfileFilters.js', './pages/team-profile/teamProfileMetrics.js', './pages/team-profile/teamProfileCharts.js', './pages/team-profile/teamProfileUI.js', './pages/team-profile/teamProfile.js',
   './connectors/fichesJoueusesConnector.js', './connectors/presencesConnector.js',
