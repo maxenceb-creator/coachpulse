@@ -666,8 +666,8 @@ function updateDashboard(){
 function snapshotLocalData(options={}){
   const payload = buildPayload();
   try{
-    localStorage.setItem('coachpulse:autoBackup:v6', JSON.stringify(payload));
-    localStorage.setItem('coachpulse:lastAutoSave', payload.savedAt);
+    setLocalStorageWithQuotaRecovery('coachpulse:autoBackup:v6', JSON.stringify(payload));
+    setLocalStorageWithQuotaRecovery('coachpulse:lastAutoSave', payload.savedAt);
   }catch(e){
     console.warn('Sauvegarde locale indisponible', e);
     updateSyncState('Stockage local saturé · cloud prioritaire');
@@ -682,6 +682,41 @@ function snapshotLocalData(options={}){
   updateCloudKpis();
   updateDashboard();
   if(lastSave) lastSave.textContent = new Date(payload.savedAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+}
+
+function isLocalStorageQuotaError(error){
+  return !!error && (
+    error.name === 'QuotaExceededError'
+    || error.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+    || error.code === 22
+    || error.code === 1014
+    || /quota/i.test(String(error.message || ''))
+  );
+}
+function clearNonEssentialLocalBackups(){
+  Object.keys(localStorage)
+    .filter(key => key.startsWith('coachpulse:autoBackup') || key === 'coachpulse:lastAutoSave')
+    .forEach(key => {
+      try{ localStorage.removeItem(key); }catch(_e){}
+    });
+}
+function setLocalStorageWithQuotaRecovery(key, value){
+  try{
+    localStorage.setItem(key, value);
+    return true;
+  }catch(error){
+    if(!isLocalStorageQuotaError(error)) throw error;
+    clearNonEssentialLocalBackups();
+    try{
+      localStorage.setItem(key, value);
+      return true;
+    }catch(secondError){
+      if(!isLocalStorageQuotaError(secondError)) throw secondError;
+      console.warn('Stockage local saturé, cache ignoré pour', key, secondError);
+      updateSyncState('Stockage local saturé · cloud prioritaire');
+      return false;
+    }
+  }
 }
 
 function hashItems(items){
@@ -3372,7 +3407,7 @@ function localAthleticPayload(){
   return parseStoredJson('coachpulse:athleticTests', []);
 }
 function saveLocalAthleticPayload(payload){
-  localStorage.setItem('coachpulse:athleticTests', JSON.stringify(Array.isArray(payload) ? payload : []));
+  return setLocalStorageWithQuotaRecovery('coachpulse:athleticTests', JSON.stringify(Array.isArray(payload) ? payload : []));
 }
 async function bundledAthleticPayload(){
   try{

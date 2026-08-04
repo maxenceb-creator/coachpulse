@@ -350,6 +350,8 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(fs.readFileSync('pages/tests-techniques.html', 'utf8').includes('moduleId:"tests"'), 'Les Tests techniques doivent demander les joueuses dans leur scope module.');
   assert(appSource.includes('async function athleticDeleteTest'), 'Les Tests athlétiques doivent exposer une suppression centralisée.');
   assert(appSource.includes('athleticSaveTest, athleticDeleteTest, athleticExport'), 'Le service central doit publier athleticDeleteTest au module.');
+  assert(appSource.includes('function setLocalStorageWithQuotaRecovery'), 'Les sauvegardes locales critiques doivent rester tolérantes au quota navigateur.');
+  assert(appSource.includes("return setLocalStorageWithQuotaRecovery('coachpulse:athleticTests'"), 'Les Tests athlétiques ne doivent pas être bloqués par un quota localStorage saturé.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-edit-athletic-test'), 'L’historique des Tests athlétiques doit permettre la modification.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-delete-athletic-test'), 'L’historique des Tests athlétiques doit permettre la suppression.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-finalize-athletic-test'), 'Les Tests athlétiques doivent garder une action d’enregistrement définitif par ligne.');
