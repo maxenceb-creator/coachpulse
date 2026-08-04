@@ -826,7 +826,7 @@ function downloadText(content, filename, type='text/plain;charset=utf-8'){
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
-const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','staff_members','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
+const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','physicalTestDeletions','staff_members','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
 function parseStoredJson(key, fallback){
   try{ return JSON.parse(localStorage.getItem(key) || ''); }catch(_e){ return fallback; }
 }
@@ -3431,6 +3431,41 @@ function unmarkAthleticTestDeleted(testId){
   const ids = localDeletedAthleticTestIds();
   if(ids.delete(id)) saveDeletedAthleticTestIds(ids);
 }
+async function cloudDeletedAthleticTestIds(players=[]){
+  if(!db || !currentUser) return new Set();
+  const docsFromSnap = snap => {
+    const rows = [];
+    snap.forEach(docSnap => rows.push({id:docSnap.id, physicalTestId:docSnap.id, ...docSnap.data()}));
+    return rows;
+  };
+  const readWhere = async (field, operator, value) => {
+    const q = firebaseFns.query(firebaseFns.collection(db, 'physicalTestDeletions'), firebaseFns.where(field, operator, value));
+    return docsFromSnap(await firebaseFns.getDocs(q));
+  };
+  const chunkValues = values => {
+    const clean = [...new Set((values || []).map(value => String(value || '').trim()).filter(Boolean))];
+    const out = [];
+    for(let i=0;i<clean.length;i+=10) out.push(clean.slice(i,i+10));
+    return out;
+  };
+  const readRows = async () => {
+    if(isAdmin() || canAccessAllPlayersForModule('tests-athletiques')){
+      return docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'physicalTestDeletions')));
+    }
+    const reads = [];
+    chunkValues(getAuthorizedTeamIds()).forEach(chunk => {
+      reads.push(readWhere('teamId', 'in', chunk));
+      reads.push(readWhere('teamIds', 'array-contains-any', chunk));
+      reads.push(readWhere('playerSnapshot.teamId', 'in', chunk));
+      reads.push(readWhere('playerSnapshot.teamIds', 'array-contains-any', chunk));
+    });
+    chunkValues(players.map(player => player.playerId || player.id).filter(Boolean)).forEach(chunk => reads.push(readWhere('playerId', 'in', chunk)));
+    const rows = reads.length ? (await Promise.all(reads.map(promise => promise.catch(() => [])))).flat() : [];
+    return [...new Map(rows.map(row => [row.id || row.physicalTestId || row.testId, row])).values()];
+  };
+  const rows = scopedRecordsForModuleAccess(await readRows(), 'tests-athletiques');
+  return new Set(rows.map(row => athleticRowStorageId(row)).filter(Boolean));
+}
 async function bundledAthleticPayload(){
   try{
     const response = await fetch('data/tests-athletiques-2025-2026.json', {cache:'no-store'});
@@ -3927,7 +3962,17 @@ async function athleticListData(filters={}){
     return filterRows(appDataCache.athleticRows.rows);
   }
   const local = localAthleticPayload();
+  const players = await listPlayers({season:'all', includeArchived:true, moduleId:'tests-athletiques'});
   const deletedIds = localDeletedAthleticTestIds();
+  if(db && currentUser){
+    try{
+      const cloudDeletedIds = await cloudDeletedAthleticTestIds(players);
+      cloudDeletedIds.forEach(id => deletedIds.add(id));
+      if(cloudDeletedIds.size) saveDeletedAthleticTestIds(deletedIds);
+    }catch(error){
+      console.warn('CoachPulse athletic deletion markers unavailable', error);
+    }
+  }
   const rawById = new Map();
   const bundled = await bundledAthleticPayload();
   bundled.forEach((row, idx) => {
@@ -3938,7 +3983,6 @@ async function athleticListData(filters={}){
     const id = athleticRowStorageId(row, `local-${idx}`);
     if(!deletedIds.has(id)) rawById.set(id, row);
   });
-  const players = await listPlayers({season:'all', includeArchived:true, moduleId:'tests-athletiques'});
   if(db && currentUser){
     const docsFromSnap = snap => {
       const rows = [];
@@ -4067,7 +4111,8 @@ async function athleticSaveTest(test={}){
       updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined
     };
     const firestoreWrite = firebaseFns.setDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId), payload, {merge:true})
-      .then(() => {
+      .then(async () => {
+        await firebaseFns.deleteDoc(firebaseFns.doc(db, 'physicalTestDeletions', physicalTestId)).catch(error => console.warn('CoachPulse athletic deletion marker cleanup skipped', error));
         const refreshed = localAthleticPayload();
         const localIdx = refreshed.findIndex(row => (row.physicalTestId || row.testId || row.id) === physicalTestId);
         if(localIdx >= 0){
@@ -4088,13 +4133,39 @@ async function athleticSaveTest(test={}){
 }
 async function athleticDeleteTest(testId){
   if(!guardAthletic('write')) return null;
-  const physicalTestId = String(testId || '').trim();
+  const incoming = testId && typeof testId === 'object' ? testId : {};
+  const physicalTestId = incoming && typeof incoming === 'object' ? athleticRowStorageId(incoming) : String(testId || '').trim();
   if(!physicalTestId) throw new Error('Test athlétique introuvable.');
   const local = localAthleticPayload();
-  const target = local.find(row => athleticRowStorageId(row) === physicalTestId) || {};
+  const target = local.find(row => athleticRowStorageId(row) === physicalTestId)
+    || (appDataCache.athleticRows.rows || []).find(row => athleticRowStorageId(row) === physicalTestId)
+    || incoming
+    || {};
   if(target.teamId && !canAccessTeamId(target.teamId)) throw new Error('Accès non autorisé à cette équipe.');
   if(db && currentUser){
-    await firebaseFns.deleteDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId));
+    const now = new Date().toISOString();
+    const teamIds = athleticTeamIdsFromSources(target, target.playerSnapshot);
+    const teamId = target.teamId || target.playerSnapshot?.teamId || teamIds[0] || '';
+    const deletionPayload = firestoreSafeData({
+      id:physicalTestId,
+      physicalTestId,
+      testId:physicalTestId,
+      deleted:true,
+      deletedAtIso:now,
+      deletedBy:currentUser.uid,
+      deletedByEmail:currentUser.email || '',
+      playerId:target.playerId || target.playerSnapshot?.playerId || '',
+      playerName:target.playerName || target.playerSnapshot?.displayName || '',
+      playerSnapshot:target.playerSnapshot || {},
+      teamId,
+      teamIds,
+      season:target.season || '',
+      date:target.date || '',
+      type:'athleticTestDeletion',
+      source:'Tests athlétiques'
+    });
+    await firebaseFns.setDoc(firebaseFns.doc(db, 'physicalTestDeletions', physicalTestId), {...deletionPayload, updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined}, {merge:true});
+    await firebaseFns.deleteDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId)).catch(error => console.warn('CoachPulse athletic physicalTest already absent or delete skipped', error));
   }
   markAthleticTestDeleted(physicalTestId);
   saveLocalAthleticPayload(local.filter(row => athleticRowStorageId(row) !== physicalTestId));
