@@ -3587,14 +3587,24 @@ function normalizeAthleticRows(rawRows=[], players=[]){
       teamIds,
       tests:{},
       metrics:[],
+      finalized:raw.finalized === true || raw.status === 'finalized',
+      finalizedAtIso:raw.finalizedAtIso || '',
+      finalizedBy:raw.finalizedBy || '',
+      finalizedByEmail:raw.finalizedByEmail || '',
       comment:raw.comment || raw.commentaire || raw.note || '',
       source:raw.source || 'Tests athlétiques'
     };
     const nextTests = {...previous.tests, ...tests};
+    const finalized = previous.finalized || raw.finalized === true || raw.status === 'finalized';
     grouped.set(groupId, {
       ...previous,
       originalIds:[...(previous.originalIds || []), raw.physicalTestId || raw.testId || raw.id || `row-${idx}`],
       tests:nextTests,
+      finalized,
+      status:finalized ? 'finalized' : (previous.status || raw.status || ''),
+      finalizedAtIso:previous.finalizedAtIso || raw.finalizedAtIso || '',
+      finalizedBy:previous.finalizedBy || raw.finalizedBy || '',
+      finalizedByEmail:previous.finalizedByEmail || raw.finalizedByEmail || '',
       metrics:athleticMetricsFromTests(nextTests, previous.comment || raw.comment || raw.commentaire || raw.note || '')
     });
   });
@@ -3923,6 +3933,7 @@ async function athleticSaveTest(test={}){
   const comment = test.comment || test.commentaire || test.note || '';
   const tests = athleticTestsFromRow(test);
   const metrics = athleticMetricsFromTests(tests, comment);
+  const finalized = test.finalized === true || test.status === 'finalized';
   const teamIds = athleticTeamIdsFromSources(test, canonicalPlayer, seasonPlayer);
   const teamId = seasonPlayer.teamId || canonicalPlayer.teamId || test.teamId || teamIds[0] || '';
   if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
@@ -3957,6 +3968,11 @@ async function athleticSaveTest(test={}){
     metrics,
     testTypes:metrics.map(metric => metric.type),
     type:'athleticTest',
+    finalized,
+    status:finalized ? 'finalized' : (test.status && test.status !== 'finalized' ? test.status : ''),
+    finalizedAtIso:finalized ? (test.finalizedAtIso || now) : (test.finalizedAtIso || ''),
+    finalizedBy:finalized ? (test.finalizedBy || currentUser?.uid || '') : (test.finalizedBy || ''),
+    finalizedByEmail:finalized ? (test.finalizedByEmail || currentUser?.email || '') : (test.finalizedByEmail || ''),
     comment,
     source:test.source || 'Tests athlétiques',
     syncPending:!!(db && currentUser),
@@ -3987,12 +4003,15 @@ async function athleticSaveTest(test={}){
           refreshed[localIdx] = {...refreshed[localIdx], syncPending:false};
           saveLocalAthleticPayload(refreshed);
         }
-      })
-      .catch(error => console.warn('CoachPulse athletic Firestore sync pending', error));
-    await Promise.race([
-      firestoreWrite,
-      new Promise(resolve => setTimeout(resolve, 1800))
-    ]);
+      });
+    if(finalized){
+      await firestoreWrite;
+    }else{
+      await Promise.race([
+        firestoreWrite.catch(error => console.warn('CoachPulse athletic Firestore sync pending', error)),
+        new Promise(resolve => setTimeout(resolve, 1800))
+      ]);
+    }
   }
   return clean;
 }

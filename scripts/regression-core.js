@@ -353,6 +353,8 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-edit-athletic-test'), 'L’historique des Tests athlétiques doit permettre la modification.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-delete-athletic-test'), 'L’historique des Tests athlétiques doit permettre la suppression.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-finalize-athletic-test'), 'Les Tests athlétiques doivent garder une action d’enregistrement définitif par ligne.');
+  assert(appSource.includes("finalized:true") || appSource.includes('finalized,'), 'La finalisation des Tests athlétiques doit être persistée dans les documents physicalTests.');
+  assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('rowFinalized'), 'L’historique des Tests athlétiques doit filtrer les lignes finalisées depuis la donnée partagée.');
   assert(rulesSource.includes("allow delete: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests'))"), 'Les suppressions physicalTests doivent rester contrôlées par droits module et teamId/playerId.');
 
   [
