@@ -398,7 +398,7 @@ service cloud.firestore {
       allow read: if (canReadData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques')) || canReadPlayerProfileData(resource.data);
       allow create: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(request.resource.data, 'tests-athletiques');
       allow update: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques') && canAccessScopedDataForModule(request.resource.data, 'tests-athletiques');
-      allow delete: if canDeleteCoreData(resource.data);
+      allow delete: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques');
     }
 
     match /injuries/{injuryId} {
