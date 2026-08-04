@@ -401,6 +401,13 @@ service cloud.firestore {
       allow delete: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques');
     }
 
+    match /physicalTestDeletions/{testId} {
+      allow read: if canReadData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques');
+      allow create: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(request.resource.data, 'tests-athletiques');
+      allow update: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques') && canAccessScopedDataForModule(request.resource.data, 'tests-athletiques');
+      allow delete: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques');
+    }
+
     match /injuries/{injuryId} {
       allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
