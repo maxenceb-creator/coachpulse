@@ -3409,6 +3409,28 @@ function localAthleticPayload(){
 function saveLocalAthleticPayload(payload){
   return setLocalStorageWithQuotaRecovery('coachpulse:athleticTests', JSON.stringify(Array.isArray(payload) ? payload : []));
 }
+function athleticRowStorageId(row={}, fallback=''){
+  return String(row.physicalTestId || row.testId || row.id || fallback || '').trim();
+}
+function localDeletedAthleticTestIds(){
+  return new Set(parseStoredJson('coachpulse:athleticTests:deletedIds', []).map(id => String(id || '').trim()).filter(Boolean));
+}
+function saveDeletedAthleticTestIds(ids){
+  return setLocalStorageWithQuotaRecovery('coachpulse:athleticTests:deletedIds', JSON.stringify([...new Set(ids)].filter(Boolean)));
+}
+function markAthleticTestDeleted(testId){
+  const id = String(testId || '').trim();
+  if(!id) return;
+  const ids = localDeletedAthleticTestIds();
+  ids.add(id);
+  saveDeletedAthleticTestIds(ids);
+}
+function unmarkAthleticTestDeleted(testId){
+  const id = String(testId || '').trim();
+  if(!id) return;
+  const ids = localDeletedAthleticTestIds();
+  if(ids.delete(id)) saveDeletedAthleticTestIds(ids);
+}
 async function bundledAthleticPayload(){
   try{
     const response = await fetch('data/tests-athletiques-2025-2026.json', {cache:'no-store'});
@@ -3905,10 +3927,17 @@ async function athleticListData(filters={}){
     return filterRows(appDataCache.athleticRows.rows);
   }
   const local = localAthleticPayload();
+  const deletedIds = localDeletedAthleticTestIds();
   const rawById = new Map();
   const bundled = await bundledAthleticPayload();
-  bundled.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `bundled-${idx}`, row));
-  local.forEach((row, idx) => rawById.set(row.physicalTestId || row.testId || row.id || `local-${idx}`, row));
+  bundled.forEach((row, idx) => {
+    const id = athleticRowStorageId(row, `bundled-${idx}`);
+    if(!deletedIds.has(id)) rawById.set(id, row);
+  });
+  local.forEach((row, idx) => {
+    const id = athleticRowStorageId(row, `local-${idx}`);
+    if(!deletedIds.has(id)) rawById.set(id, row);
+  });
   const players = await listPlayers({season:'all', includeArchived:true, moduleId:'tests-athletiques'});
   if(db && currentUser){
     const docsFromSnap = snap => {
@@ -3942,11 +3971,17 @@ async function athleticListData(filters={}){
       return [...new Map(rows.map(row => [row.id || row.physicalTestId || row.testId, row])).values()];
     };
     const scopedRows = await readScopedPhysicalTests();
-    scopedRows.forEach(row => rawById.set(row.physicalTestId || row.testId || row.id, row));
-    saveLocalAthleticPayload([...rawById.values()]);
+    scopedRows.forEach(row => {
+      const id = athleticRowStorageId(row);
+      if(id && !deletedIds.has(id)) rawById.set(id, row);
+    });
+    saveLocalAthleticPayload([...rawById.values()].filter(row => !deletedIds.has(athleticRowStorageId(row))));
   }
   const rawRows = [...rawById.values()];
-  const rows = scopedRecordsForModuleAccess(normalizeAthleticRows(rawRows, players), 'tests-athletiques');
+  const rows = scopedRecordsForModuleAccess(
+    normalizeAthleticRows(rawRows, players).filter(row => !deletedIds.has(athleticRowStorageId(row))),
+    'tests-athletiques'
+  );
   appDataCache.athleticRows.rows = rows;
   appDataCache.athleticRows.loadedAt = now;
   return filterRows(rows);
@@ -3985,6 +4020,7 @@ async function athleticSaveTest(test={}){
     photo:seasonPlayer.photo || ''
   };
   const physicalTestId = test.physicalTestId || test.testId || stableFirestoreId('physicalTest', canonicalPlayerId, date, season);
+  unmarkAthleticTestDeleted(physicalTestId);
   const clean = {
     id:physicalTestId,
     physicalTestId,
@@ -4055,12 +4091,13 @@ async function athleticDeleteTest(testId){
   const physicalTestId = String(testId || '').trim();
   if(!physicalTestId) throw new Error('Test athlétique introuvable.');
   const local = localAthleticPayload();
-  const target = local.find(row => (row.physicalTestId || row.testId || row.id) === physicalTestId) || {};
+  const target = local.find(row => athleticRowStorageId(row) === physicalTestId) || {};
   if(target.teamId && !canAccessTeamId(target.teamId)) throw new Error('Accès non autorisé à cette équipe.');
   if(db && currentUser){
     await firebaseFns.deleteDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId));
   }
-  saveLocalAthleticPayload(local.filter(row => (row.physicalTestId || row.testId || row.id) !== physicalTestId));
+  markAthleticTestDeleted(physicalTestId);
+  saveLocalAthleticPayload(local.filter(row => athleticRowStorageId(row) !== physicalTestId));
   invalidateAppDataCaches('athletic');
   invalidateAppDataCaches('playerProfiles');
   invalidateAppDataCaches('teamProfiles');
