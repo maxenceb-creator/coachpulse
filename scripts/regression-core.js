@@ -6,6 +6,7 @@ const players = require('../shared/services/players-service.js');
 const teams = require('../shared/services/teams-service.js');
 const permissions = require('../shared/services/permissions-service.js');
 const modules = require('../shared/utils/module-registry.js');
+const playerDataAudit = require('./audit-player-data.js');
 
 function loadBrowserScript(filePath, windowOverrides={}){
   const window = {
@@ -483,6 +484,26 @@ function testPresenceD2CodeStaysScopedToU19(){
   assert(appSource.includes("'D2'"), 'Les imports Présences doivent reconnaître le code D2.');
 }
 
+function testPlayerDataAuditDetectsDuplicatesAndBrokenLinks(){
+  const report = playerDataAudit.auditPlayers(playerDataAudit.collectionsFromExport({
+    collections:{
+      players:[
+        {playerId:'player-a', nom:'DUPONT', prenom:'AVA', birth:'2013-01-01', status:'active'},
+        {playerId:'player-b', nom:'DUPONT', prenom:'AVA', birth:'2013-01-01', status:'active'},
+        {playerId:'player-old', nom:'MARTIN', prenom:'LINA', birth:'2010-05-10', status:'archived'}
+      ],
+      technicalTests:[
+        {testId:'t1', playerId:'player-missing'},
+        {testId:'t2', playerId:'player-old'}
+      ]
+    }
+  }));
+
+  assert(report.errors.some(issue => issue.type === 'duplicate-active-identity'), 'L’audit doit détecter les doublons actifs.');
+  assert(report.warnings.some(issue => issue.type === 'unknown-linked-player'), 'L’audit doit détecter les historiques liés à un playerId absent.');
+  assert(report.warnings.some(issue => issue.type === 'archived-player-not-merged'), 'L’audit doit signaler une joueuse archivée avec historique non fusionné.');
+}
+
 function testPlayerProfileDataFallsBackToSelectedPlayerOnly(){
   const window = loadBrowserScript('pages/player-profile/playerProfileData.js', {
     parent:{
@@ -560,6 +581,7 @@ testAccessRegressionSurfaceStaysComplete();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPresenceD2CodeStaysScopedToU19();
+testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
 Promise.resolve()
