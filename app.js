@@ -10,6 +10,8 @@ const FIREBASE_CONFIG = {
   appId: "1:147021875262:web:dd0a52857a7b252295e96f"
 };
 
+const storage = window.CoachPulseStorage;
+if(!storage) throw new Error('CoachPulseStorage doit être chargé avant app.js');
 const moduleRegistryService = window.CoachPulseModuleRegistry;
 if(!moduleRegistryService) throw new Error('CoachPulseModuleRegistry doit être chargé avant app.js');
 const moduleRegistry = moduleRegistryService.moduleRegistry;
@@ -56,7 +58,7 @@ function firestoreSafeData(data={}){
   return firestoreSafeValue(data) || {};
 }
 function debugPerfEnabled(){
-  try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; }
+  return storage.get('coachpulse:debugPerf') === '1';
 }
 async function measureAsync(label, work){
   if(!debugPerfEnabled()) return work();
@@ -79,8 +81,8 @@ function invalidateAppDataCaches(scope='all'){
   if(scope === 'all' || scope === 'players' || scope === 'teams' || scope === 'teamProfiles') appDataCache.teamProfiles.clear();
 }
 const CLIENT_ID = (() => {
-  let id = localStorage.getItem('coachpulse:clientId');
-  if(!id){ id = 'cp-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36); localStorage.setItem('coachpulse:clientId', id); }
+  let id = storage.get('coachpulse:clientId', '');
+  if(!id){ id = 'cp-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36); storage.set('coachpulse:clientId', id, {recover:true}); }
   return id;
 })();
 
@@ -403,7 +405,7 @@ function routeTo(key){
   }
   let item = tools[key];
   if(!item){ key = 'home'; item = tools.home; }
-  localStorage.setItem('coachpulse:lastTool', key);
+  storage.set('coachpulse:lastTool', key, {recover:true});
   $('#currentEmoji').textContent = item.emoji;
   $('#currentTitle').textContent = item.title;
   $$('.nav-link,.quick-card').forEach(el => el.classList.toggle('active', el.dataset.tool === key));
@@ -536,7 +538,7 @@ async function initFirebase(){
         await syncCloud(false).catch(e => console.warn('Cloud sync unavailable after login', e));
         await pullCentralPlayersToLocal(false).catch(e => console.warn('Central players pull unavailable after login', e));
         try{ purgeUnauthorizedLocalData(); }catch(e){ console.warn('Local data purge unavailable after login', e); }
-        const last = localStorage.getItem('coachpulse:lastTool') || 'home';
+        const last = storage.get('coachpulse:lastTool', 'home');
         routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
       } else {
         currentProfile = null;
@@ -589,14 +591,9 @@ function cleanError(e){
 }
 
 function collectLocalStorage(){
-  const data = {};
-  for(let i=0;i<localStorage.length;i++){
-    const key = localStorage.key(i);
-    if(!key) continue;
-    if(key.startsWith('coachpulse:autoBackup') || key === 'coachpulse:firebaseConfig') continue;
-    data[key] = localStorage.getItem(key);
-  }
-  return data;
+  return Object.fromEntries(storage.entries({
+    exclude:key => key.startsWith('coachpulse:autoBackup') || key === 'coachpulse:firebaseConfig'
+  }));
 }
 function purgeUnauthorizedLocalData(){
   const filterPlayers = rows => {
@@ -605,16 +602,16 @@ function purgeUnauthorizedLocalData(){
   };
   const scrubJsonArray = key => {
     try{
-      const next = filterPlayers(JSON.parse(localStorage.getItem(key) || '[]'));
-      localStorage.setItem(key, JSON.stringify(next));
-    }catch(_e){ localStorage.removeItem(key); }
+      const next = filterPlayers(storage.getJson(key, []));
+      storage.setJson(key, next, {recover:true});
+    }catch(_e){ storage.remove(key); }
   };
   scrubJsonArray('coachpulse:centralPlayers');
   scrubJsonArray('coachpulse:customPlayers');
-  const selectedPlayerId = localStorage.getItem('coachpulse:playerProfile:selectedPlayerId');
+  const selectedPlayerId = storage.get('coachpulse:playerProfile:selectedPlayerId', '');
   if(selectedPlayerId){
     const players = parseStoredJson('coachpulse:centralPlayers', []).concat(parseStoredJson('coachpulse:customPlayers', []));
-    if(!players.some(player => (player.playerId || player.id) === selectedPlayerId)) localStorage.removeItem('coachpulse:playerProfile:selectedPlayerId');
+    if(!players.some(player => (player.playerId || player.id) === selectedPlayerId)) storage.remove('coachpulse:playerProfile:selectedPlayerId');
   }
 }
 function clearSensitiveLocalData(){
@@ -627,8 +624,8 @@ function clearSensitiveLocalData(){
     'coachStatsV170',
     'presenceSeanceV3_6_Excel',
     'methodo_events_v24'
-  ].forEach(key => localStorage.removeItem(key));
-  Object.keys(localStorage).filter(key => key.startsWith('coachpulse:autoBackup')).forEach(key => localStorage.removeItem(key));
+  ].forEach(key => storage.remove(key));
+  storage.removeWhere(key => key.startsWith('coachpulse:autoBackup'));
 }
 function buildPayload(){
   return {
@@ -640,18 +637,13 @@ function buildPayload(){
   };
 }
 function countLocalDataItems(){
-  let count = 0;
-  for(let i=0;i<localStorage.length;i++){
-    const key = localStorage.key(i);
-    if(key && key.startsWith('coachpulse:')) count++;
-  }
-  return count;
+  return storage.keys().filter(key => key.startsWith('coachpulse:')).length;
 }
 function updateDashboard(){
   const centralPlayers = parseStoredJson('coachpulse:centralPlayers', []);
   const customPlayers = parseStoredJson('coachpulse:customPlayers', []);
-  const lastSync = localStorage.getItem('coachpulse:lastCloudSync');
-  const pending = localStorage.getItem('coachpulse:pendingSync') === '1';
+  const lastSync = storage.get('coachpulse:lastCloudSync', '');
+  const pending = storage.isPendingSync();
   const localCount = countLocalDataItems();
   const playerCount = [...centralPlayers, ...customPlayers].filter(Boolean).length;
   const setText = (id, value) => { const el = $('#'+id); if(el) el.textContent = value; };
@@ -673,9 +665,9 @@ function snapshotLocalData(options={}){
     updateSyncState('Stockage local saturé · cloud prioritaire');
   }
   if(!options.fromCloud && currentUser){
-    const lastCloud = localStorage.getItem('coachpulse:lastCloudSync');
+    const lastCloud = storage.get('coachpulse:lastCloudSync', '');
     if(!lastCloud || new Date(payload.savedAt) > new Date(lastCloud)){
-      try{ localStorage.setItem('coachpulse:pendingSync','1'); }catch(e){ console.warn('Marqueur de synchronisation indisponible', e); }
+      storage.markPendingSync();
     }
     scheduleCloudSync();
   }
@@ -685,38 +677,15 @@ function snapshotLocalData(options={}){
 }
 
 function isLocalStorageQuotaError(error){
-  return !!error && (
-    error.name === 'QuotaExceededError'
-    || error.name === 'NS_ERROR_DOM_QUOTA_REACHED'
-    || error.code === 22
-    || error.code === 1014
-    || /quota/i.test(String(error.message || ''))
-  );
+  return storage.isQuotaError(error);
 }
 function clearNonEssentialLocalBackups(){
-  Object.keys(localStorage)
-    .filter(key => key.startsWith('coachpulse:autoBackup') || key === 'coachpulse:lastAutoSave')
-    .forEach(key => {
-      try{ localStorage.removeItem(key); }catch(_e){}
-    });
+  storage.clearNonEssentialBackups();
 }
 function setLocalStorageWithQuotaRecovery(key, value){
-  try{
-    localStorage.setItem(key, value);
-    return true;
-  }catch(error){
-    if(!isLocalStorageQuotaError(error)) throw error;
-    clearNonEssentialLocalBackups();
-    try{
-      localStorage.setItem(key, value);
-      return true;
-    }catch(secondError){
-      if(!isLocalStorageQuotaError(secondError)) throw secondError;
-      console.warn('Stockage local saturé, cache ignoré pour', key, secondError);
-      updateSyncState('Stockage local saturé · cloud prioritaire');
-      return false;
-    }
-  }
+  const ok = storage.set(key, value, {recover:true});
+  if(!ok) updateSyncState('Stockage local saturé · cloud prioritaire');
+  return ok;
 }
 
 function hashItems(items){
@@ -725,7 +694,7 @@ function hashItems(items){
 }
 function scheduleCloudSync(delay=900){
   if(applyingCloud || !currentUser) return;
-  try{ localStorage.setItem('coachpulse:pendingSync','1'); }catch(e){ console.warn('Marqueur de synchronisation indisponible', e); }
+  storage.markPendingSync();
   updateSyncState('🔄 Synchronisation en attente...');
   clearTimeout(cloudWriteTimer);
   cloudWriteTimer = setTimeout(() => syncCloud(false), delay);
@@ -752,8 +721,8 @@ function startRealtimeSync(){
     if(incomingHash === lastCloudItemsHash){ updateSyncState('Cloud synchronisé'); return; }
     if(updatedByClient === CLIENT_ID){
       lastCloudItemsHash = incomingHash;
-      localStorage.setItem('coachpulse:lastCloudSync', new Date().toISOString());
-      localStorage.removeItem('coachpulse:pendingSync');
+      storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
+      storage.clearPendingSync();
       updateCloudKpis();
       updateSyncState('Cloud synchronisé');
       return;
@@ -761,11 +730,11 @@ function startRealtimeSync(){
     applyingCloud = true;
     try{
       Object.entries(items).forEach(([k,v]) => {
-        if(k !== 'coachpulse:clientId') localStorage.setItem(k,v);
+        if(k !== 'coachpulse:clientId') storage.set(k, v, {recover:true});
       });
       lastCloudItemsHash = incomingHash;
-      localStorage.setItem('coachpulse:lastCloudSync', new Date().toISOString());
-      localStorage.removeItem('coachpulse:pendingSync');
+      storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
+      storage.clearPendingSync();
       snapshotLocalData({fromCloud:true});
       updateSyncState('Données cloud récupérées');
       notifyFramesCloudUpdated();
@@ -828,7 +797,7 @@ function downloadText(content, filename, type='text/plain;charset=utf-8'){
 }
 const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','physicalTestDeletions','staff_members','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
 function parseStoredJson(key, fallback){
-  try{ return JSON.parse(localStorage.getItem(key) || ''); }catch(_e){ return fallback; }
+  return storage.getJson(key, fallback);
 }
 function stableFirestoreId(){
   return slugify([].slice.call(arguments).filter(Boolean).join('-')).slice(0,120);
@@ -959,7 +928,7 @@ function mergeTechnicalPlayerFootHints(hints=[]){
     });
   });
   const merged = [...new Set(byId.values())];
-  try{ localStorage.setItem(TECHNICAL_PLAYER_HINTS_KEY, JSON.stringify(merged)); }catch(_e){}
+  storage.setJson(TECHNICAL_PLAYER_HINTS_KEY, merged, {recover:true});
   return merged;
 }
 function extractTechnicalDataFromHtml(html=''){
@@ -1315,7 +1284,7 @@ async function migrateLocalDataToCentralFirestore(manual=true){
     const docs = collectCentralFirestoreDocs();
     const count = await pushCentralDocsToFirestore(docs);
     await pullCentralPlayersToLocal(false);
-    localStorage.setItem('coachpulse:lastCentralMigration', new Date().toISOString());
+    storage.set('coachpulse:lastCentralMigration', new Date().toISOString(), {recover:true});
     updateSyncState('Base centrale Firestore à jour');
     if(manual) alert(`Migration Firestore terminée : ${count} documents préparés/actualisés.`);
   }catch(e){
@@ -1333,7 +1302,7 @@ async function pullCentralPlayersToLocal(manual=true){
   }else{
     const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
     snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
-    localStorage.setItem('coachpulse:centralPlayers', JSON.stringify(players));
+    storage.setJson('coachpulse:centralPlayers', players, {recover:true});
   }
   notifyFramesPlayersUpdated();
   updateCloudKpis();
@@ -2712,7 +2681,7 @@ function purgeDeletedPlayerFromLocalCaches(playerId=''){
       const rows = parseStoredJson(key, []);
       if(!Array.isArray(rows)) return;
       const cleaned = rows.filter(player => String(player?.playerId || player?.id || '') !== id);
-      if(cleaned.length !== rows.length) localStorage.setItem(key, JSON.stringify(cleaned));
+      if(cleaned.length !== rows.length) storage.setJson(key, cleaned, {recover:true});
     }catch(_e){}
   });
 }
@@ -3358,7 +3327,7 @@ function localMedicalPayload(){
   return parseStoredJson('coachpulse:medicalData', {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[]});
 }
 function saveLocalMedicalPayload(payload){
-  localStorage.setItem('coachpulse:medicalData', JSON.stringify(payload || {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[]}));
+  storage.setJson('coachpulse:medicalData', payload || {injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[]}, {recover:true});
 }
 function medicalTeamIdsFromSources(...sources){
   return [...new Set(sources.flatMap(source => [
@@ -4451,7 +4420,7 @@ async function adminSaveModuleSettings(moduleId, updates={}){
   if(!module) throw new Error('Module introuvable.');
   const overrides = parseModuleOverrides();
   overrides[moduleId] = {...(overrides[moduleId] || {}), ...updates, settings:{...((overrides[moduleId] || {}).settings || {}), ...(updates.settings || {})}};
-  localStorage.setItem('coachpulse:moduleSettings', JSON.stringify(overrides));
+  storage.setJson('coachpulse:moduleSettings', overrides, {recover:true});
   if(db && currentUser){
     await firebaseFns.setDoc(firebaseFns.doc(db, 'settings', `module-${moduleId}`), {
       settingsId:`module-${moduleId}`,
@@ -4480,7 +4449,7 @@ Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   snapshotLocalData({fromCloud:true});
-  if(!navigator.onLine){ localStorage.setItem('coachpulse:pendingSync','1'); return updateSyncState('Hors ligne · local OK'); }
+  if(!navigator.onLine){ storage.markPendingSync(); return updateSyncState('Hors ligne · local OK'); }
   if(!db || !currentUser) return updateSyncState('Connexion staff requise');
   try{
     updateSyncState('🔄 Synchronisation...');
@@ -4497,13 +4466,13 @@ async function syncCloud(manual=false){
       itemsHash
     }, {merge:true});
     lastCloudItemsHash = itemsHash;
-    localStorage.setItem('coachpulse:lastCloudSync', new Date().toISOString());
-    localStorage.removeItem('coachpulse:pendingSync');
+    storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
+    storage.clearPendingSync();
     updateCloudKpis();
     updateSyncState('Cloud synchronisé');
     if(manual) alert('Synchronisation cloud OK.');
   }catch(e){
-    try{ localStorage.setItem('coachpulse:pendingSync','1'); }catch(_e){}
+    storage.markPendingSync();
     updateSyncState('Erreur cloud · local OK');
     if(manual) alert('Sync cloud impossible : '+cleanError(e));
   }
@@ -4514,10 +4483,10 @@ async function pullCloud(){
   if(snap.exists()){
     applyingCloud = true;
     try{
-      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId') localStorage.setItem(k,v); });
+      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId') storage.set(k, v, {recover:true}); });
       lastCloudItemsHash = hashItems(snap.data().items || {});
-      localStorage.removeItem('coachpulse:pendingSync');
-      localStorage.setItem('coachpulse:lastCloudSync', new Date().toISOString());
+      storage.clearPendingSync();
+      storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
       snapshotLocalData({fromCloud:true}); updateCloudKpis(); updateSyncState('Cloud récupéré'); notifyFramesCloudUpdated();
     }finally{ applyingCloud = false; }
   }
@@ -4525,9 +4494,9 @@ async function pullCloud(){
 function updateSyncState(forced){
   updateCloudKpis();
   let txt = forced || 'Connexion staff requise'; let state='warn';
-  const pending = localStorage.getItem('coachpulse:pendingSync') === '1';
+  const pending = storage.isPendingSync();
   if(db && currentUser && navigator.onLine){
-    const last = localStorage.getItem('coachpulse:lastCloudSync');
+    const last = storage.get('coachpulse:lastCloudSync', '');
     if(pending){ txt = 'Sync en attente · local OK'; state='pending'; }
     else { txt = last ? 'Cloud OK '+new Date(last).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : 'Cloud prêt'; state='ok'; }
   } else if(!navigator.onLine) txt='Hors ligne · local actif';
@@ -4538,8 +4507,8 @@ function updateCloudKpis(){
   const localEl = $('#localCount'), pendingEl=$('#pendingCount'), lastEl=$('#lastCloudSyncLabel');
   if(!localEl) return;
   localEl.textContent = Object.keys(collectLocalStorage()).length;
-  pendingEl.textContent = localStorage.getItem('coachpulse:pendingSync') === '1' ? '1' : '0';
-  const last = localStorage.getItem('coachpulse:lastCloudSync');
+  pendingEl.textContent = storage.isPendingSync() ? '1' : '0';
+  const last = storage.get('coachpulse:lastCloudSync', '');
   lastEl.textContent = last ? new Date(last).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : 'Jamais';
 }
 async function logout(){
@@ -4547,7 +4516,7 @@ async function logout(){
   stopRealtimeSync();
   currentUser = null; currentProfile = null;
   clearSensitiveLocalData();
-  localStorage.removeItem('coachpulse:pendingSync');
+  storage.clearPendingSync();
   setLocked(true);
   updateSyncState('Compte déconnecté');
 }
@@ -4796,12 +4765,11 @@ async function loadMembers(){
   }catch(e){ tbody.innerHTML = `<tr><td colspan="6">Erreur : ${escapeHtml(cleanError(e))}</td></tr>`; }
 }
 function customPlayers(){
-  try{ return JSON.parse(localStorage.getItem('coachpulse:customPlayers') || '[]').filter(Boolean); }
-  catch(_e){ return []; }
+  return storage.getJson('coachpulse:customPlayers', []).filter(Boolean);
 }
 function setCustomPlayers(players){
-  localStorage.setItem('coachpulse:customPlayers', JSON.stringify(players || []));
-  localStorage.setItem('coachpulse:pendingSync','1');
+  storage.setJson('coachpulse:customPlayers', players || [], {recover:true});
+  storage.markPendingSync();
   renderCustomPlayers();
   snapshotLocalData();
   notifyFramesPlayersUpdated();
@@ -5003,7 +4971,7 @@ $('#exportGlobal').addEventListener('click', () => { if(guardGlobalDataExportAct
 $('#importBackupInput').addEventListener('change', async e => {
   if(!guardAdminAction()) { e.target.value=''; return; }
   const file = e.target.files?.[0]; if(!file) return;
-  try{ const payload=JSON.parse(await file.text()); Object.entries(payload.items||{}).forEach(([k,v])=>localStorage.setItem(k,v)); snapshotLocalData(); alert('Sauvegarde restaurée. Recharge la page si besoin.'); }
+  try{ const payload=JSON.parse(await file.text()); Object.entries(payload.items||{}).forEach(([k,v])=>storage.set(k, v, {recover:true})); snapshotLocalData(); alert('Sauvegarde restaurée. Recharge la page si besoin.'); }
   catch(err){ alert('Fichier de sauvegarde invalide.'); }
   e.target.value='';
 });
@@ -5030,12 +4998,12 @@ window.addEventListener('resize', () => { if(window.matchMedia('(max-width:1180p
 window.addEventListener('message', e => {
   if(e.data?.type === 'coachpulse-local-change') snapshotLocalData();
   if(e.data?.type === 'coachpulse-open-module' && e.data.moduleId){
-    if(e.data.playerId) localStorage.setItem('coachpulse:playerProfile:selectedPlayerId', e.data.playerId);
+    if(e.data.playerId) storage.set('coachpulse:playerProfile:selectedPlayerId', e.data.playerId, {recover:true});
     routeTo(e.data.moduleId);
   }
 });
 frame.addEventListener('load', installFrameLocalStorageWatcher);
-setInterval(() => { snapshotLocalData(); if(currentUser && localStorage.getItem('coachpulse:pendingSync') === '1') scheduleCloudSync(500); }, 5000);
+setInterval(() => { snapshotLocalData(); if(currentUser && storage.isPendingSync()) scheduleCloudSync(500); }, 5000);
 setInterval(snapshotLocalData, 15000);
 window.addEventListener('pagehide', snapshotLocalData);
 window.addEventListener('storage', snapshotLocalData);
@@ -5060,11 +5028,11 @@ async function registerServiceWorker(){
 }
 window.addEventListener('load', () => clearAppShellCacheOnLaunch().finally(registerServiceWorker));
 window.addEventListener('load', () => {
-  localStorage.setItem('coachpulse:firebaseConfig', JSON.stringify(FIREBASE_CONFIG));
+  storage.setJson('coachpulse:firebaseConfig', FIREBASE_CONFIG, {recover:true});
   setLocked(true);
   setTimeout(() => $('#splash').classList.add('hide'), 950);
   initFirebase();
   snapshotLocalData();
   renderCustomPlayers();
-  syncTimer = setInterval(() => { if(localStorage.getItem('coachpulse:pendingSync') === '1') syncCloud(false); }, 15000);
+  syncTimer = setInterval(() => { if(storage.isPendingSync()) syncCloud(false); }, 15000);
 });
