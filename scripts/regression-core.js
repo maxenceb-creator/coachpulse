@@ -484,6 +484,18 @@ function testPresenceD2CodeStaysScopedToU19(){
   assert(appSource.includes("'D2'"), 'Les imports Présences doivent reconnaître le code D2.');
 }
 
+function testHomeDashboardStaysScopedToAuthorizedTeams(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(appSource.includes('const HOME_TEAM_SELECTION_KEY'), 'L’accueil doit conserver l’équipe sélectionnée localement.');
+  assert(appSource.includes('async function homeAuthorizedTeams'), 'L’accueil doit charger les équipes via un helper dédié.');
+  assert(appSource.includes('filterAuthorizedTeams(teams)'), 'L’accueil doit réutiliser le filtrage central des équipes autorisées.');
+  assert(appSource.includes('canAccessTeamId(teamId)'), 'L’accueil doit vérifier le teamId avant affichage.');
+  assert(appSource.includes('teamProfileLoadData({teamId:selectedTeamId, homeDashboard:true})'), 'L’accueil doit charger les données par teamId via la fiche équipe centralisée.');
+  assert(appSource.includes('const allowHomeDashboard'), 'L’accueil doit réutiliser le chargeur fiche équipe sans exiger le module fiche équipe complet.');
+  assert(appSource.includes('homeView.classList.contains'), 'L’accueil doit éviter les chargements quand la page n’est pas visible.');
+}
+
 function testPlayerDataAuditDetectsDuplicatesAndBrokenLinks(){
   const report = playerDataAudit.auditPlayers(playerDataAudit.collectionsFromExport({
     collections:{
@@ -581,6 +593,7 @@ testAccessRegressionSurfaceStaysComplete();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPresenceD2CodeStaysScopedToU19();
+testHomeDashboardStaysScopedToAuthorizedTeams();
 testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
