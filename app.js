@@ -40,6 +40,21 @@ function cloneData(value){
   if(typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
 }
+function firestoreSafeValue(value){
+  if(value === undefined || typeof value === 'function' || typeof value === 'symbol') return undefined;
+  if(value === null || typeof value !== 'object') return value;
+  if(value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toISOString();
+  if(Array.isArray(value)) return value.map(firestoreSafeValue).filter(item => item !== undefined);
+  const out = {};
+  Object.entries(value).forEach(([key, item]) => {
+    const safe = firestoreSafeValue(item);
+    if(safe !== undefined) out[key] = safe;
+  });
+  return out;
+}
+function firestoreSafeData(data={}){
+  return firestoreSafeValue(data) || {};
+}
 function debugPerfEnabled(){
   try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; }
 }
@@ -3906,7 +3921,7 @@ async function athleticSaveTest(test={}){
   const canonicalPlayerId = seasonPlayer.playerId || seasonPlayer.id || test.playerId;
   const playerName = seasonPlayer.displayName || `${seasonPlayer.prenom || ''} ${seasonPlayer.nom || ''}`.trim();
   const comment = test.comment || test.commentaire || test.note || '';
-  const tests = test.tests || {};
+  const tests = athleticTestsFromRow(test);
   const metrics = athleticMetricsFromTests(tests, comment);
   const teamIds = athleticTeamIdsFromSources(test, canonicalPlayer, seasonPlayer);
   const teamId = seasonPlayer.teamId || canonicalPlayer.teamId || test.teamId || teamIds[0] || '';
@@ -3925,7 +3940,6 @@ async function athleticSaveTest(test={}){
   };
   const physicalTestId = test.physicalTestId || test.testId || stableFirestoreId('physicalTest', canonicalPlayerId, date, season);
   const clean = {
-    ...test,
     id:physicalTestId,
     physicalTestId,
     testId:physicalTestId,
@@ -3962,7 +3976,7 @@ async function athleticSaveTest(test={}){
   snapshotLocalData();
   if(db && currentUser){
     const payload = {
-      ...clean,
+      ...firestoreSafeData(clean),
       updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined
     };
     const firestoreWrite = firebaseFns.setDoc(firebaseFns.doc(db, 'physicalTests', physicalTestId), payload, {merge:true})

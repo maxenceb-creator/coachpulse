@@ -229,6 +229,9 @@ function testAthleticTestsStayLinkedToPlayerAndTeamIds(){
   assert(appSource.includes("readWhere('teamIds', 'array-contains-any', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par teamIds.');
   assert(appSource.includes("readWhere('playerId', 'in', chunk)"), 'Les tests athlétiques doivent pouvoir être récupérés par playerId.');
   assert(appSource.includes("scopedRecordsForModuleAccess(normalizeAthleticRows(rawRows, players), 'tests-athletiques')"), 'Les tests athlétiques chargés doivent être filtrés par autorisations et scopes module.');
+  assert(appSource.includes('function firestoreSafeData'), 'Les écritures Firestore doivent nettoyer les objets non sérialisables.');
+  assert(appSource.includes('const tests = athleticTestsFromRow(test);'), 'La sauvegarde athlétique doit reconstruire des tests plats avant Firestore.');
+  assert(appSource.includes('...firestoreSafeData(clean)'), 'La sauvegarde athlétique doit envoyer un payload compatible Firestore.');
   assert(appSource.includes("readWhere(name, 'teamIds', 'array-contains', teamId)"), 'La fiche équipe doit lire les tests via teamIds.');
   assert(athleticSource.includes('playerSnapshotForAthletic'), 'La page Tests athlétiques doit envoyer une snapshot joueuse.');
   assert(athleticSource.includes('teamIds:snapshot.teamIds'), 'La page Tests athlétiques doit envoyer les teamIds dans le payload.');
