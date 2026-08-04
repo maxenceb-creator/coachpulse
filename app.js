@@ -348,29 +348,44 @@ function ensureHomeTeamDashboardStyles(){
   const style = document.createElement('style');
   style.id = 'homeTeamDashboardStyles';
   style.textContent = `
-    .home-team-dashboard{margin-top:0;background:#fff;border:1px solid var(--line);border-radius:26px;padding:18px;box-shadow:0 14px 34px rgba(6,23,13,.08)}
-    .home-team-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
-    .home-team-head h2{margin:2px 0 4px;color:#06351f;font-size:clamp(24px,3vw,38px);line-height:1.02}
-    .home-team-head p{margin:0;color:var(--muted);font-weight:780}
+    .home-team-dashboard{margin-top:0;background:linear-gradient(135deg,#fff,#f7fbf9);border:1px solid var(--line);border-radius:28px;padding:18px;box-shadow:0 18px 44px rgba(6,23,13,.10)}
+    .home-team-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,320px);align-items:end;gap:14px;margin-bottom:14px}
+    .home-team-head h2{margin:4px 0;color:#06351f;font-size:clamp(34px,5vw,58px);line-height:.95}
+    .home-team-head p{margin:0;color:var(--muted);font-weight:820;font-size:clamp(15px,1.5vw,18px)}
     .home-team-eyebrow{display:inline-flex;border:1px solid rgba(29,153,91,.18);background:#eefaf3;color:#006936;border-radius:999px;padding:5px 10px;font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.08em}
-    .home-team-select{min-width:min(320px,100%);display:grid;gap:6px;color:var(--muted);font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.08em}
-    .home-team-select select{width:100%;min-height:44px;border:1px solid var(--line);border-radius:14px;background:#fff;color:#06351f;padding:10px 12px;font:inherit;font-size:14px;font-weight:950;text-transform:none;letter-spacing:0}
-    .home-team-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
-    .home-team-card{border:1px solid var(--line);border-radius:20px;background:linear-gradient(135deg,#fff,#f7fbf9);padding:14px;min-height:168px;display:flex;flex-direction:column;justify-content:space-between;gap:12px}
-    .home-team-card h3{margin:0;color:#06351f;font-size:18px}
-    .home-team-card .meta{display:grid;gap:5px;color:var(--muted);font-weight:780;font-size:14px}
-    .home-team-card .value{color:#006936;font-size:clamp(24px,3vw,34px);font-weight:1000;line-height:1}
-    .home-team-card button{align-self:flex-start;background:#f8fafc;border:1px solid var(--line);color:#06351f;padding:9px 12px;min-height:42px}
+    .home-team-select{display:grid;gap:6px;color:var(--muted);font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.08em}
+    .home-team-select select{width:100%;min-height:46px;border:1px solid var(--line);border-radius:16px;background:#fff;color:#06351f;padding:10px 12px;font:inherit;font-size:16px;font-weight:1000;text-transform:none;letter-spacing:0}
+    .home-team-layout{display:grid;grid-template-columns:minmax(320px,1.08fr) minmax(320px,.92fr);gap:14px;align-items:stretch}
+    .home-team-feature{position:relative;overflow:hidden;border:1px solid rgba(205,183,137,.55);border-radius:24px;background:radial-gradient(circle at 86% 8%,rgba(40,183,109,.45),transparent 32%),linear-gradient(135deg,#06351f,#008243);color:#fff;padding:22px;min-height:302px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 18px 36px rgba(6,23,13,.16)}
+    .home-team-feature::after{content:'';position:absolute;inset:auto -40px -70px auto;width:210px;height:210px;border-radius:999px;border:28px solid rgba(205,183,137,.12)}
+    .home-team-feature h3,.home-team-feature p{position:relative;margin:0}
+    .home-team-feature h3{font-size:clamp(22px,2.5vw,30px);line-height:1.05}
+    .home-team-feature .value{position:relative;color:#fff;font-size:clamp(42px,6vw,72px);font-weight:1000;line-height:.92;margin:12px 0 6px}
+    .home-team-feature .meta{position:relative;display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .home-team-pill{display:inline-flex;align-items:center;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.12);border-radius:999px;padding:7px 10px;color:#fff;font-size:14px;font-weight:950}
+    .home-team-feature button{position:relative;align-self:flex-start;background:#fff;color:#06351f;border:1px solid rgba(205,183,137,.65);box-shadow:0 10px 24px rgba(6,23,13,.16);padding:11px 15px;min-height:44px}
+    .home-team-side{display:grid;grid-template-columns:1fr;gap:12px}
+    .home-team-card{border:1px solid var(--line);border-radius:22px;background:#fff;padding:15px;min-height:146px;display:flex;flex-direction:column;justify-content:space-between;gap:10px;box-shadow:0 12px 26px rgba(6,23,13,.06)}
+    .home-team-card h3{margin:0;color:#06351f;font-size:16px;line-height:1.1}
+    .home-team-card .meta{display:grid;gap:4px;color:var(--muted);font-weight:790;font-size:13px;line-height:1.2}
+    .home-team-card .value{color:#006936;font-size:clamp(24px,3vw,36px);font-weight:1000;line-height:1}
+    .home-team-card button{align-self:flex-start;background:#f8fafc;border:1px solid var(--line);color:#06351f;padding:8px 11px;min-height:40px;font-size:13px}
     .home-team-card button:hover{border-color:rgba(29,153,91,.45)}
-    .home-team-alerts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px}
-    .home-team-alert{border:1px dashed rgba(205,183,137,.72);background:#fffbf0;border-radius:18px;padding:12px;color:#06351f;font-weight:850}
+    .home-team-watch{margin-top:14px;border:1px solid rgba(205,183,137,.45);border-radius:22px;background:#fffaf0;padding:14px}
+    .home-team-watch h3{margin:0 0 10px;color:#06351f;font-size:20px}
+    .home-team-alerts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+    .home-team-alert{border:1px solid rgba(205,183,137,.45);background:#fff;border-radius:16px;padding:12px;color:#06351f;font-weight:900}
     .home-team-alert span{display:block;color:var(--muted);font-size:13px;font-weight:760;margin-top:3px}
     .home-team-empty{border:1px dashed rgba(29,153,91,.24);background:#f8fafc;border-radius:18px;padding:20px;color:var(--muted);font-weight:850;text-align:center}
     .home-team-loading{min-height:160px;display:grid;place-items:center;color:var(--muted);font-weight:900}
+    @media(max-width:1180px){
+      .home-team-layout{grid-template-columns:1fr}
+      .home-team-feature{min-height:240px}
+    }
     @media(max-width:760px){
       .home-team-dashboard{padding:14px;border-radius:20px}
       .home-team-head{display:grid}
-      .home-team-grid,.home-team-alerts{grid-template-columns:1fr}
+      .home-team-side,.home-team-alerts{grid-template-columns:1fr}
     }
   `;
   document.head.appendChild(style);
@@ -426,6 +441,29 @@ function homeFormatTime(row={}){
   return row.startTime || row.heureDebut || row.time || row.endTime || row.heureFin ? `${row.startTime || row.heureDebut || row.time || '-'}${row.endTime || row.heureFin ? `-${row.endTime || row.heureFin}` : ''}` : '-';
 }
 
+function homeReadableLabel(value='', fallback='-'){
+  const raw = String(value || '').trim();
+  if(!raw) return fallback;
+  const normalized = raw.toLowerCase();
+  const labels = {
+    athletictest:'Tests athlétiques',
+    physicaltest:'Tests athlétiques',
+    technicaltest:'Tests techniques',
+    entrainement:'Entraînement',
+    entraînement:'Entraînement',
+    match:'Match',
+    tournoi:'Tournoi',
+    futsal:'Futsal',
+    test:'Test'
+  };
+  if(labels[normalized]) return labels[normalized];
+  return raw
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^./, char => char.toUpperCase());
+}
+
 function homeEmptyCard(title, text, moduleId){
   return `<article class="home-team-card"><div><h3>${escapeHtml(title)}</h3><div class="meta"><span>${escapeHtml(text)}</span></div></div>${moduleId && canAccessTool(moduleId) ? `<button type="button" data-home-open="${escapeHtml(moduleId)}">Ouvrir</button>` : ''}</article>`;
 }
@@ -477,7 +515,7 @@ function homeTestName(row={}, family='Test'){
 function homeLatestTest(technicalTests=[], physicalTests=[]){
   const rows = [
     ...technicalTests.map(row => ({...row, family:'Technique', moduleId:'tests'})),
-    ...physicalTests.map(row => ({...row, family:'Athletique', moduleId:'tests-athletiques'}))
+    ...physicalTests.map(row => ({...row, family:'Athlétique', moduleId:'tests-athletiques'}))
   ].map(row => ({...row, dateObj:homeDateValue(row)})).filter(row => row.dateObj);
   if(!rows.length) return null;
   rows.sort((a,b) => b.dateObj - a.dateObj);
@@ -510,7 +548,7 @@ function homeMatchResult(row={}){
   const a = Number(score[1]);
   const b = Number(score[2]);
   if(a > b) return 'Victoire';
-  if(a < b) return 'Defaite';
+  if(a < b) return 'Défaite';
   return 'Nul';
 }
 
@@ -588,36 +626,43 @@ function renderHomeTeamDashboard(team, teams, data){
   const selector = teams.length > 1
     ? `<label class="home-team-select">Equipe<select id="homeTeamSelect">${teams.map(item => `<option value="${escapeHtml(homeTeamId(item))}" ${homeTeamId(item) === teamId ? 'selected' : ''}>${escapeHtml(homeTeamName(item))}</option>`).join('')}</select></label>`
     : `<div class="home-team-select"><span>Equipe</span><select disabled><option>${escapeHtml(homeTeamName(team))}</option></select></div>`;
-  const cards = [
-    nextSession
-      ? `<article class="home-team-card"><div><h3>Prochaine séance</h3><div class="value">${homeFormatDate(nextSession.dateObj)}</div><div class="meta"><span>${escapeHtml(homeFormatTime(nextSession))}</span><span>${escapeHtml(nextSession.type || nextSession.eventType || 'Séance')}</span><span>${escapeHtml(nextSession.location || nextSession.lieu || 'Lieu non renseigné')}</span></div></div>${canAccessTool('presences') ? '<button type="button" data-home-open="presences">Ouvrir</button>' : ''}</article>`
-      : homeEmptyCard('Prochaine séance', 'Aucune séance enregistrée pour cette équipe.', 'presences'),
+  const nextSessionCard = nextSession
+    ? `<article class="home-team-feature"><div><span class="home-team-eyebrow">Aujourd'hui / prochain événement</span><h3>Prochaine séance</h3><div class="value">${homeFormatDate(nextSession.dateObj)}</div><div class="meta"><span class="home-team-pill">${escapeHtml(homeFormatTime(nextSession))}</span><span class="home-team-pill">${escapeHtml(homeReadableLabel(nextSession.type || nextSession.eventType, 'Séance'))}</span><span class="home-team-pill">${escapeHtml(nextSession.location || nextSession.lieu || 'Lieu à compléter')}</span></div></div>${canAccessTool('presences') ? '<button type="button" data-home-open="presences">Ouvrir la séance</button>' : ''}</article>`
+    : `<article class="home-team-feature"><div><span class="home-team-eyebrow">Aujourd'hui / prochain événement</span><h3>Aucune séance planifiée</h3><div class="value">-</div><div class="meta"><span class="home-team-pill">Planning à compléter</span><span class="home-team-pill">${escapeHtml(homeTeamName(team))}</span></div></div>${canAccessTool('presences') ? '<button type="button" data-home-open="presences">Créer une séance</button>' : ''}</article>`;
+  const sideCards = [
     lastSession
-      ? `<article class="home-team-card"><div><h3>Dernière séance</h3><div class="value">${lastSummary?.rate ?? '-'}%</div><div class="meta"><span>${homeFormatDate(lastSession.dateObj)}</span><span>${lastSummary?.present ?? 0} présentes · ${lastSummary?.absent ?? 0} absentes</span><span>${lastSummary?.averageMinutes ? `${lastSummary.averageMinutes} min moy.` : 'Charge moyenne non disponible'}</span></div></div>${canAccessTool('presences') ? '<button type="button" data-home-open="presences">Voir les présences</button>' : ''}</article>`
-      : homeEmptyCard('Dernière séance', 'Aucune séance passée pour cette équipe.', 'presences'),
+      ? `<article class="home-team-card"><div><h3>Dernière séance</h3><div class="value">${lastSummary?.rate ?? '-'}%</div><div class="meta"><span>${homeFormatDate(lastSession.dateObj)}</span><span>${lastSummary?.present ?? 0} présentes · ${lastSummary?.absent ?? 0} absentes</span><span>${lastSummary?.averageMinutes ? `${lastSummary.averageMinutes} min en moyenne` : 'Durée non disponible'}</span></div></div>${canAccessTool('presences') ? '<button type="button" data-home-open="presences">Détail</button>' : ''}</article>`
+      : homeEmptyCard('Dernière séance', 'Aucune séance passée.', 'presences'),
     latestTest
-      ? `<article class="home-team-card"><div><h3>Dernier test</h3><div class="value">${latestTest.average ?? '-'}</div><div class="meta"><span>${escapeHtml(latestTest.name)} · ${escapeHtml(latestTest.family)}</span><span>${homeFormatDate(latestTest.date)} · ${latestTest.playerCount} joueuse(s)</span><span>${latestTest.progression === null ? 'Evolution non calculable' : `${latestTest.progression > 0 ? '+' : ''}${latestTest.progression} vs précédent`}</span></div></div>${canAccessTool(latestTest.moduleId) ? `<button type="button" data-home-open="${escapeHtml(latestTest.moduleId)}">Ouvrir le module</button>` : ''}</article>`
-      : homeEmptyCard('Dernier test', 'Aucun test technique ou athlétique disponible.', 'tests'),
+      ? `<article class="home-team-card"><div><h3>Dernier test</h3><div class="value">${latestTest.average ?? '-'}</div><div class="meta"><span>${escapeHtml(homeReadableLabel(latestTest.name, latestTest.family))}</span><span>${homeFormatDate(latestTest.date)} · ${latestTest.playerCount} joueuse(s)</span><span>${latestTest.progression === null ? 'Évolution à compléter' : `${latestTest.progression > 0 ? '+' : ''}${latestTest.progression} vs précédent`}</span></div></div>${canAccessTool(latestTest.moduleId) ? `<button type="button" data-home-open="${escapeHtml(latestTest.moduleId)}">Ouvrir</button>` : ''}</article>`
+      : homeEmptyCard('Dernier test', 'Aucun test disponible.', 'tests'),
     latestMatch
-      ? `<article class="home-team-card"><div><h3>Dernier match</h3><div class="value">${escapeHtml(homeMatchScore(latestMatch.row))}</div><div class="meta"><span>${escapeHtml(homeMatchResult(latestMatch.row))} · ${homeFormatDate(latestMatch.row.dateObj)}</span><span>vs ${escapeHtml(latestMatch.row.opponent || latestMatch.row.adversaire || 'Adversaire non renseigné')}</span><span>${latestMatch.stats.shots ? `${latestMatch.stats.shots} tirs` : `${latestMatch.stats.events} action(s)`}${latestMatch.stats.xg !== null ? ` · xG ${latestMatch.stats.xg}` : ''}</span></div></div>${canAccessTool('stats') ? '<button type="button" data-home-open="stats">Voir le match</button>' : ''}</article>`
-      : homeEmptyCard('Dernier match', 'Aucun match enregistré pour cette équipe.', 'stats')
+      ? `<article class="home-team-card"><div><h3>Dernier match</h3><div class="value">${escapeHtml(homeMatchScore(latestMatch.row))}</div><div class="meta"><span>${escapeHtml(homeMatchResult(latestMatch.row))} · ${homeFormatDate(latestMatch.row.dateObj)}</span><span>vs ${escapeHtml(latestMatch.row.opponent || latestMatch.row.adversaire || 'Adversaire non renseigné')}</span><span>${latestMatch.stats.shots ? `${latestMatch.stats.shots} tirs` : `${latestMatch.stats.events} action(s)`}${latestMatch.stats.xg !== null ? ` · xG ${latestMatch.stats.xg}` : ''}</span></div></div>${canAccessTool('stats') ? '<button type="button" data-home-open="stats">Détail</button>' : ''}</article>`
+      : homeEmptyCard('Dernier match', 'Aucun match enregistré.', 'stats')
   ].join('');
   const alerts = [
-    medical ? `<div class="home-team-alert">Suivi médical<span>${medical.injuries} blessure(s) active(s) · ${medical.followUps} suivi(s)</span></div>` : '',
-    collections.attendance?.length ? `<div class="home-team-alert">Présences<span>${collections.attendance.length} ligne(s) rattachée(s) au teamId.</span></div>` : '',
-    !latestTest ? '<div class="home-team-alert">Tests à compléter<span>Aucun test disponible sur cette équipe.</span></div>' : ''
+    medical ? `<div class="home-team-alert">Suivi médical<span>${medical.injuries} blessure(s) active(s) · ${medical.followUps} suivi(s) en cours</span></div>` : '',
+    lastSummary && lastSummary.absent ? `<div class="home-team-alert">Assiduité<span>${lastSummary.absent} absence(s) sur la dernière séance</span></div>` : '',
+    latestMatch ? `<div class="home-team-alert">Matchs<span>Dernier résultat : ${escapeHtml(homeMatchResult(latestMatch.row))}</span></div>` : '<div class="home-team-alert">Matchs<span>Aucun match enregistré pour le moment</span></div>',
+    latestTest ? `<div class="home-team-alert">Tests récents<span>${escapeHtml(homeReadableLabel(latestTest.name, latestTest.family))} réalisé le ${homeFormatDate(latestTest.date)}</span></div>` : '<div class="home-team-alert">Tests à compléter<span>Aucun test disponible pour cette équipe</span></div>'
   ].filter(Boolean).join('');
   section.innerHTML = `
     <div class="home-team-head">
       <div>
-        <span class="home-team-eyebrow">Synthèse équipes autorisées</span>
+        <span class="home-team-eyebrow">Synthèse équipe</span>
         <h2>${escapeHtml(homeTeamName(team))}</h2>
-        <p>Données filtrées par teamId, selon les autorisations du compte connecté.</p>
+        <p>Vue rapide de l’équipe selon vos accès.</p>
       </div>
       ${selector}
     </div>
-    <div class="home-team-grid">${cards}</div>
-    <div class="home-team-alerts">${alerts || '<div class="home-team-alert">Aucune alerte prioritaire<span>Les données disponibles ne signalent rien à surveiller.</span></div>'}</div>
+    <div class="home-team-layout">
+      ${nextSessionCard}
+      <div class="home-team-side">${sideCards}</div>
+    </div>
+    <div class="home-team-watch">
+      <h3>À surveiller</h3>
+      <div class="home-team-alerts">${alerts || '<div class="home-team-alert">Aucune alerte prioritaire<span>Les données disponibles ne signalent rien à surveiller.</span></div>'}</div>
+    </div>
   `;
   const select = document.getElementById('homeTeamSelect');
   if(select){
