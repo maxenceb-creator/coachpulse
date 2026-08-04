@@ -12,6 +12,16 @@ const FIREBASE_CONFIG = {
 
 const storage = window.CoachPulseStorage;
 if(!storage) throw new Error('CoachPulseStorage doit être chargé avant app.js');
+const notifier = window.CoachPulseNotify;
+function notifyUser(message, type='info', options={}){
+  if(notifier?.show) return notifier.show(message, {...options, type});
+  const method = type === 'error' ? 'error' : type === 'warn' ? 'warn' : 'info';
+  console[method](message);
+  return null;
+}
+function notifySuccess(message, options={}){ return notifyUser(message, 'success', options); }
+function notifyWarning(message, options={}){ return notifyUser(message, 'warn', options); }
+function notifyError(message, options={}){ return notifyUser(message, 'error', options); }
 const moduleRegistryService = window.CoachPulseModuleRegistry;
 if(!moduleRegistryService) throw new Error('CoachPulseModuleRegistry doit être chargé avant app.js');
 const moduleRegistry = moduleRegistryService.moduleRegistry;
@@ -227,7 +237,7 @@ function notifyFramesAccessUpdated(){
 }
 function guardAdminAction(label='Action réservée aux éditeurs autorisés'){
   if(isAdmin()) return true;
-  alert(label);
+  notifyWarning(label);
   return false;
 }
 function hasGlobalDataAccess(){
@@ -236,7 +246,7 @@ function hasGlobalDataAccess(){
 }
 function guardGlobalDataExportAction(label='Export global réservé aux administrateurs complets'){
   if(hasGlobalDataAccess()) return true;
-  alert(label);
+  notifyWarning(label);
   return false;
 }
 function scopedPlayersForAccess(players=[]){
@@ -373,7 +383,7 @@ function showHome(){
   if(adminView) adminView.classList.add('hidden');
 }
 function showAdmin(){
-  if(!isSuperAdmin()) { alert('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.'); return showHome(); }
+  if(!isSuperAdmin()) { notifyWarning('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.'); return showHome(); }
   ensureUserAdminFields();
   refreshAdminAccessPickers();
   frame.classList.add('hidden');
@@ -400,7 +410,7 @@ function openCloudPanel(){
 function routeTo(key){
   if(!requireAuth()) { setLocked(true); return; }
   if(!canAccessTool(key)){
-    alert('Accès non autorisé.');
+    notifyWarning('Accès non autorisé.');
     key = 'home';
   }
   let item = tools[key];
@@ -1286,10 +1296,10 @@ async function migrateLocalDataToCentralFirestore(manual=true){
     await pullCentralPlayersToLocal(false);
     storage.set('coachpulse:lastCentralMigration', new Date().toISOString(), {recover:true});
     updateSyncState('Base centrale Firestore à jour');
-    if(manual) alert(`Migration Firestore terminée : ${count} documents préparés/actualisés.`);
+    if(manual) notifySuccess(`Migration Firestore terminée : ${count} documents préparés/actualisés.`);
   }catch(e){
     updateSyncState('Migration Firestore impossible · local OK');
-    if(manual) alert('Migration impossible : '+cleanError(e));
+    if(manual) notifyError('Migration impossible : '+cleanError(e));
   }
 }
 async function pullCentralPlayersToLocal(manual=true){
@@ -1306,7 +1316,7 @@ async function pullCentralPlayersToLocal(manual=true){
   }
   notifyFramesPlayersUpdated();
   updateCloudKpis();
-  if(manual) alert(`${players.length} joueuses récupérées depuis Firebase.`);
+  if(manual) notifySuccess(`${players.length} joueuses récupérées depuis Firebase.`);
   return players;
 }
 async function readCentralFirestoreExport(){
@@ -1672,7 +1682,7 @@ async function exportCentralFirestore(format){
     const payload = await readCentralFirestoreExport();
     if(format === 'csv') downloadText(centralPayloadToCsv(payload), 'coachpulse_firebase_centralise.csv', 'text/csv;charset=utf-8');
     else exportJson(payload, 'coachpulse_firebase_centralise.json');
-  }catch(e){ alert('Export Firebase impossible : '+cleanError(e)); }
+  }catch(e){ notifyError('Export Firebase impossible : '+cleanError(e)); }
 }
 const IMPORT_STATUS_CODES = new Set(['P','R','ANJ','AJ','M','B','PO','D','D2']);
 const IMPORT_FIELD_ALIASES = {
@@ -2151,23 +2161,23 @@ async function handleImportFileSelected(e){
     importUiState.plan = buildImportPlan(importUiState.rows, {source:file.name});
     $('#importSourceName').textContent = `${file.name} · ${importUiState.rows.length} lignes détectées`;
     renderImportSummary();
-  }catch(err){ alert('Lecture impossible : '+cleanError(err)); }
+  }catch(err){ notifyError('Lecture impossible : '+cleanError(err)); }
 }
 async function simulateImport(){
-  if(!importUiState.plan) return alert('Choisis d’abord un fichier.');
+  if(!importUiState.plan) return notifyWarning('Choisis d’abord un fichier.');
   try{ importUiState.report = await analyzeImportAgainstFirestore(importUiState.plan); renderImportSummary(); }
-  catch(e){ alert('Simulation impossible : '+cleanError(e)); }
+  catch(e){ notifyError('Simulation impossible : '+cleanError(e)); }
 }
 async function commitImport(){
-  if(!importUiState.plan) return alert('Choisis d’abord un fichier.');
-  if(!importUiState.report) return alert('Lance d’abord la simulation.');
+  if(!importUiState.plan) return notifyWarning('Choisis d’abord un fichier.');
+  if(!importUiState.report) return notifyWarning('Lance d’abord la simulation.');
   if(!confirm(`Importer dans Firebase ?\nCréations prévues : ${importUiState.report.created}\nMises à jour prévues : ${importUiState.report.updated}\nLignes ignorées : ${importUiState.report.ignored}\n\nAucune suppression automatique ne sera faite.`)) return;
   try{
     if(hasGlobalDataAccess()) await exportCentralFirestore('json');
     const count = await commitImportPlan(importUiState.plan);
-    alert(`Import terminé : ${count} documents préparés/actualisés dans Firebase.`);
+    notifySuccess(`Import terminé : ${count} documents préparés/actualisés dans Firebase.`);
     await simulateImport();
-  }catch(e){ alert('Import impossible : '+cleanError(e)); }
+  }catch(e){ notifyError('Import impossible : '+cleanError(e)); }
 }
 function normalizeDataHubPlayer(item, meta={}){
   const p = normalizePlayer({
@@ -3306,7 +3316,7 @@ function canUseMedical(action='read'){
 }
 function guardMedical(action='read'){
   if(canUseMedical(action)) return true;
-  alert(action === 'importExport' ? 'Export médical réservé aux éditeurs autorisés.' : 'Accès médical non autorisé.');
+  notifyWarning(action === 'importExport' ? 'Export médical réservé aux éditeurs autorisés.' : 'Accès médical non autorisé.');
   return false;
 }
 function medicalCapabilities(){
@@ -3317,7 +3327,7 @@ function canUseAthletic(action='read'){
 }
 function guardAthletic(action='read'){
   if(canUseAthletic(action)) return true;
-  alert(action === 'importExport' ? 'Export tests athlétiques réservé aux administrateurs / responsables.' : 'Accès tests athlétiques non autorisé pour ce rôle.');
+  notifyWarning(action === 'importExport' ? 'Export tests athlétiques réservé aux administrateurs / responsables.' : 'Accès tests athlétiques non autorisé pour ce rôle.');
   return false;
 }
 function athleticCapabilities(){
@@ -4470,11 +4480,11 @@ async function syncCloud(manual=false){
     storage.clearPendingSync();
     updateCloudKpis();
     updateSyncState('Cloud synchronisé');
-    if(manual) alert('Synchronisation cloud OK.');
+    if(manual) notifySuccess('Synchronisation cloud OK.');
   }catch(e){
     storage.markPendingSync();
     updateSyncState('Erreur cloud · local OK');
-    if(manual) alert('Sync cloud impossible : '+cleanError(e));
+    if(manual) notifyError('Sync cloud impossible : '+cleanError(e));
   }
 }
 async function pullCloud(){
@@ -4512,7 +4522,7 @@ function updateCloudKpis(){
   lastEl.textContent = last ? new Date(last).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : 'Jamais';
 }
 async function logout(){
-  try{ if(auth) await firebaseFns.signOut(auth); }catch(e){ alert('Déconnexion impossible : '+cleanError(e)); }
+  try{ if(auth) await firebaseFns.signOut(auth); }catch(e){ notifyError('Déconnexion impossible : '+cleanError(e)); }
   stopRealtimeSync();
   currentUser = null; currentProfile = null;
   clearSensitiveLocalData();
@@ -4890,11 +4900,11 @@ async function adminTableClick(e){
   const saveUid = e.target?.dataset?.save;
   const archiveUid = e.target?.dataset?.archive;
   if((resetEmail || saveUid || archiveUid) && !isSuperAdmin()){
-    alert('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.');
+    notifyWarning('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.');
     return;
   }
   try{
-    if(resetEmail){ await firebaseFns.sendPasswordResetEmail(auth, resetEmail); alert('Email de réinitialisation envoyé à '+resetEmail); }
+    if(resetEmail){ await firebaseFns.sendPasswordResetEmail(auth, resetEmail); notifySuccess('Email de réinitialisation envoyé à '+resetEmail); }
     if(saveUid){
       const service = permissionsService();
       const role = service?.normalizeRole ? service.normalizeRole(document.querySelector(`[data-role="${saveUid}"]`)?.value || 'ENTRAINEUR') : (document.querySelector(`[data-role="${saveUid}"]`)?.value || 'ENTRAINEUR');
@@ -4921,7 +4931,7 @@ async function adminTableClick(e){
         updatedBy:currentUser.uid,
         updatedByEmail:currentUser.email || ''
       }, {merge:true});
-      alert('Accès utilisateur mis à jour.');
+      notifySuccess('Accès utilisateur mis à jour.');
       await loadMembers();
     }
     if(archiveUid){
@@ -4931,7 +4941,7 @@ async function adminTableClick(e){
       await firebaseFns.setDoc(ref,{status:current==='ARCHIVED'?'ACTIVE':'ARCHIVED', updatedAt:firebaseFns.serverTimestamp(), updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''},{merge:true});
       await loadMembers();
     }
-  }catch(err){ alert('Action impossible : '+cleanError(err)); }
+  }catch(err){ notifyError('Action impossible : '+cleanError(err)); }
 }
 function adminAccessPickerChange(e){
   if(e.target?.matches?.('[data-access-choice]')) syncAccessPicker(e.target.closest('.access-picker'));
@@ -4971,19 +4981,19 @@ $('#exportGlobal').addEventListener('click', () => { if(guardGlobalDataExportAct
 $('#importBackupInput').addEventListener('change', async e => {
   if(!guardAdminAction()) { e.target.value=''; return; }
   const file = e.target.files?.[0]; if(!file) return;
-  try{ const payload=JSON.parse(await file.text()); Object.entries(payload.items||{}).forEach(([k,v])=>storage.set(k, v, {recover:true})); snapshotLocalData(); alert('Sauvegarde restaurée. Recharge la page si besoin.'); }
-  catch(err){ alert('Fichier de sauvegarde invalide.'); }
+  try{ const payload=JSON.parse(await file.text()); Object.entries(payload.items||{}).forEach(([k,v])=>storage.set(k, v, {recover:true})); snapshotLocalData(); notifySuccess('Sauvegarde restaurée. Recharge la page si besoin.'); }
+  catch(err){ notifyError('Fichier de sauvegarde invalide.'); }
   e.target.value='';
 });
 $('#cloudBtn')?.addEventListener('click', openCloudPanel);
 $('#cloudClose').addEventListener('click', () => routeTo('home'));
-$('#saveFirebaseConfig').addEventListener('click', () => alert('Firebase est déjà intégré dans CoachPulse V6.'));
+$('#saveFirebaseConfig').addEventListener('click', () => notifyUser('Firebase est déjà intégré dans CoachPulse V6.'));
 $('#staffLogin').addEventListener('click', async () => { $('#loginEmail').value=$('#staffEmail').value.trim(); $('#loginPassword').value=$('#staffPassword').value; await signInStaff(); });
 $('#openAdminFromCloud').addEventListener('click', () => { cloudPanel.classList.remove('open'); routeTo('admin'); });
 $('#syncNow').addEventListener('click', () => { if(guardAdminAction()) syncCloud(true); });
-$('#pullCloud').addEventListener('click', async () => { if(!guardAdminAction()) return; try{ await pullCloud(); alert('Données cloud récupérées.'); }catch(e){ alert('Récupération impossible : '+cleanError(e)); } });
+$('#pullCloud').addEventListener('click', async () => { if(!guardAdminAction()) return; try{ await pullCloud(); notifySuccess('Données cloud récupérées.'); }catch(e){ notifyError('Récupération impossible : '+cleanError(e)); } });
 $('#migrateCentral')?.addEventListener('click', () => migrateLocalDataToCentralFirestore(true));
-$('#pullCentralPlayers')?.addEventListener('click', async () => { try{ await pullCentralPlayersToLocal(true); }catch(e){ alert('Récupération impossible : '+cleanError(e)); } });
+$('#pullCentralPlayers')?.addEventListener('click', async () => { try{ await pullCentralPlayersToLocal(true); }catch(e){ notifyError('Récupération impossible : '+cleanError(e)); } });
 $('#exportCentralJson')?.addEventListener('click', () => exportCentralFirestore('json'));
 $('#exportCentralCsv')?.addEventListener('click', () => exportCentralFirestore('csv'));
 $('#createMemberBtn').addEventListener('click', createMember);
