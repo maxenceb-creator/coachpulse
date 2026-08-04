@@ -463,6 +463,10 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
   assert(presencePageSource.includes('function normalizePresenceEventForStorage'), 'La page Présences doit normaliser les événements avant stockage.');
   assert(presencePageSource.includes('return api.presenceSaveEvent(normalized);'), 'La synchronisation cloud doit envoyer un événement normalisé.');
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  assert(appSource.includes('const safeSessionPayload = firestoreSafeData(sessionPayload);'), 'La sauvegarde des séances Présences doit nettoyer le payload Firestore.');
+  assert(appSource.includes('const safeAttendancePayload = firestoreSafeData(row);'), 'La sauvegarde des lignes Présences doit nettoyer le payload Firestore.');
+  assert(appSource.includes('procedure:presencePlainProcedure(row.sessionSnapshot?.procedure || sessionPayload.procedure)'), 'Les snapshots Présences doivent conserver une procédure sérialisable.');
 }
 
 function testPresenceD2CodeStaysScopedToU19(){
