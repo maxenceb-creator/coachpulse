@@ -48,6 +48,8 @@ const appDataCache = {
   playerProfiles:new Map(),
   teamProfiles:new Map()
 };
+const HOME_TEAM_SELECTION_KEY = 'coachpulse:home:selectedTeamId';
+let homeDashboardRequestId = 0;
 function cloneData(value){
   if(typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
@@ -340,6 +342,363 @@ function renderModuleShell(){
     el.addEventListener('click', () => routeTo(el.dataset.tool));
   });
 }
+
+function ensureHomeTeamDashboardStyles(){
+  if(document.getElementById('homeTeamDashboardStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'homeTeamDashboardStyles';
+  style.textContent = `
+    .home-team-dashboard{margin-top:0;background:linear-gradient(135deg,#fff,#f7fbf9);border:1px solid var(--line);border-radius:28px;padding:18px;box-shadow:0 18px 44px rgba(6,23,13,.10)}
+    .home-team-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,320px);align-items:end;gap:14px;margin-bottom:14px}
+    .home-team-head h2{margin:4px 0;color:#06351f;font-size:clamp(34px,5vw,58px);line-height:.95}
+    .home-team-head p{margin:0;color:var(--muted);font-weight:820;font-size:clamp(15px,1.5vw,18px)}
+    .home-team-eyebrow{display:inline-flex;border:1px solid rgba(29,153,91,.18);background:#eefaf3;color:#006936;border-radius:999px;padding:5px 10px;font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.08em}
+    .home-team-select{display:grid;gap:6px;color:var(--muted);font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.08em}
+    .home-team-select select{width:100%;min-height:46px;border:1px solid var(--line);border-radius:16px;background:#fff;color:#06351f;padding:10px 12px;font:inherit;font-size:16px;font-weight:1000;text-transform:none;letter-spacing:0}
+    .home-team-layout{display:grid;grid-template-columns:minmax(320px,1.08fr) minmax(320px,.92fr);gap:14px;align-items:stretch}
+    .home-team-feature{position:relative;overflow:hidden;border:1px solid rgba(205,183,137,.55);border-radius:24px;background:radial-gradient(circle at 86% 8%,rgba(40,183,109,.45),transparent 32%),linear-gradient(135deg,#06351f,#008243);color:#fff;padding:22px;min-height:302px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 18px 36px rgba(6,23,13,.16)}
+    .home-team-feature::after{content:'';position:absolute;inset:auto -40px -70px auto;width:210px;height:210px;border-radius:999px;border:28px solid rgba(205,183,137,.12)}
+    .home-team-feature h3,.home-team-feature p{position:relative;margin:0}
+    .home-team-feature h3{font-size:clamp(22px,2.5vw,30px);line-height:1.05}
+    .home-team-feature .value{position:relative;color:#fff;font-size:clamp(42px,6vw,72px);font-weight:1000;line-height:.92;margin:12px 0 6px}
+    .home-team-feature .meta{position:relative;display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .home-team-pill{display:inline-flex;align-items:center;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.12);border-radius:999px;padding:7px 10px;color:#fff;font-size:14px;font-weight:950}
+    .home-team-feature button{position:relative;align-self:flex-start;background:#fff;color:#06351f;border:1px solid rgba(205,183,137,.65);box-shadow:0 10px 24px rgba(6,23,13,.16);padding:11px 15px;min-height:44px}
+    .home-team-side{display:grid;grid-template-columns:1fr;gap:12px}
+    .home-team-card{border:1px solid var(--line);border-radius:22px;background:#fff;padding:15px;min-height:146px;display:flex;flex-direction:column;justify-content:space-between;gap:10px;box-shadow:0 12px 26px rgba(6,23,13,.06)}
+    .home-team-card h3{margin:0;color:#06351f;font-size:16px;line-height:1.1}
+    .home-team-card .meta{display:grid;gap:4px;color:var(--muted);font-weight:790;font-size:13px;line-height:1.2}
+    .home-team-card .value{color:#006936;font-size:clamp(24px,3vw,36px);font-weight:1000;line-height:1}
+    .home-team-card button{align-self:flex-start;background:#f8fafc;border:1px solid var(--line);color:#06351f;padding:8px 11px;min-height:40px;font-size:13px}
+    .home-team-card button:hover{border-color:rgba(29,153,91,.45)}
+    .home-team-watch{margin-top:14px;border:1px solid rgba(205,183,137,.45);border-radius:22px;background:#fffaf0;padding:14px}
+    .home-team-watch h3{margin:0 0 10px;color:#06351f;font-size:20px}
+    .home-team-alerts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+    .home-team-alert{border:1px solid rgba(205,183,137,.45);background:#fff;border-radius:16px;padding:12px;color:#06351f;font-weight:900}
+    .home-team-alert span{display:block;color:var(--muted);font-size:13px;font-weight:760;margin-top:3px}
+    .home-team-empty{border:1px dashed rgba(29,153,91,.24);background:#f8fafc;border-radius:18px;padding:20px;color:var(--muted);font-weight:850;text-align:center}
+    .home-team-loading{min-height:160px;display:grid;place-items:center;color:var(--muted);font-weight:900}
+    @media(max-width:1180px){
+      .home-team-layout{grid-template-columns:1fr}
+      .home-team-feature{min-height:240px}
+    }
+    @media(max-width:760px){
+      .home-team-dashboard{padding:14px;border-radius:20px}
+      .home-team-head{display:grid}
+      .home-team-side,.home-team-alerts{grid-template-columns:1fr}
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function hideLegacyHomeDashboard(){
+  if(!homeView) return;
+  homeView.querySelectorAll('.dashboard-hero,.metric-grid,.dashboard-grid').forEach(el => el.classList.add('hidden'));
+}
+
+function ensureHomeTeamDashboard(){
+  if(!homeView) return null;
+  ensureHomeTeamDashboardStyles();
+  hideLegacyHomeDashboard();
+  let section = document.getElementById('homeTeamDashboard');
+  if(!section){
+    section = document.createElement('section');
+    section.id = 'homeTeamDashboard';
+    section.className = 'home-team-dashboard';
+  }
+  if(section.parentElement !== homeView || homeView.firstElementChild !== section) homeView.prepend(section);
+  return section;
+}
+
+function homeTeamId(team={}){
+  return String(team.teamId || team.id || team.value || '').trim();
+}
+
+function homeTeamName(team={}){
+  return team.name || team.nom || team.label || team.team || team.equipe || homeTeamId(team).replace(/^team-/, '').toUpperCase() || 'Equipe';
+}
+
+function homeDateValue(row={}){
+  const raw = row.date || row.sessionDate || row.matchDate || row.testDate || row.createdAtIso || row.createdAt || '';
+  if(!raw) return null;
+  if(raw?.toDate) return raw.toDate();
+  if(raw instanceof Date) return Number.isNaN(raw.getTime()) ? null : raw;
+  const value = String(raw).trim();
+  const time = String(row.startTime || row.heureDebut || row.time || '00:00').trim() || '00:00';
+  const fr = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const iso = fr ? `${fr[3]}-${fr[2]}-${fr[1]}` : value;
+  const withTime = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T${time.length === 5 ? `${time}:00` : time}` : iso;
+  const date = new Date(withTime);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function homeFormatDate(value){
+  const date = value instanceof Date ? value : homeDateValue({date:value});
+  return date ? date.toLocaleDateString('fr-FR', {day:'2-digit', month:'2-digit', year:'numeric'}) : '-';
+}
+
+function homeFormatTime(row={}){
+  return row.startTime || row.heureDebut || row.time || row.endTime || row.heureFin ? `${row.startTime || row.heureDebut || row.time || '-'}${row.endTime || row.heureFin ? `-${row.endTime || row.heureFin}` : ''}` : '-';
+}
+
+function homeReadableLabel(value='', fallback='-'){
+  const raw = String(value || '').trim();
+  if(!raw) return fallback;
+  const normalized = raw.toLowerCase();
+  const labels = {
+    athletictest:'Tests athlétiques',
+    physicaltest:'Tests athlétiques',
+    technicaltest:'Tests techniques',
+    entrainement:'Entraînement',
+    entraînement:'Entraînement',
+    match:'Match',
+    tournoi:'Tournoi',
+    futsal:'Futsal',
+    test:'Test'
+  };
+  if(labels[normalized]) return labels[normalized];
+  return raw
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^./, char => char.toUpperCase());
+}
+
+function homeEmptyCard(title, text, moduleId){
+  return `<article class="home-team-card"><div><h3>${escapeHtml(title)}</h3><div class="meta"><span>${escapeHtml(text)}</span></div></div>${moduleId && canAccessTool(moduleId) ? `<button type="button" data-home-open="${escapeHtml(moduleId)}">Ouvrir</button>` : ''}</article>`;
+}
+
+function homeStatusCode(row={}){
+  return String(row.status || row.code || row.attendanceStatus || '').trim().toUpperCase();
+}
+
+function homeAttendanceSummary(session={}, attendance=[]){
+  const sessionId = session.sessionId || session.id;
+  const rows = attendance.filter(row => row.sessionId === sessionId || row.eventId === sessionId);
+  const total = rows.length;
+  const present = rows.filter(row => ['P','PRESENT','PRESENTE','PRÉSENT','PRÉSENTE'].includes(homeStatusCode(row))).length;
+  const absent = rows.filter(row => ['A','ABSENT','ABSENTE','ANJ','AJ'].includes(homeStatusCode(row))).length;
+  const minutes = rows.map(row => Number(row.minutes ?? row.durationMinutes ?? row.sessionMinutes)).filter(Number.isFinite);
+  return {
+    total,
+    present,
+    absent,
+    rate: total ? Math.round((present / total) * 100) : null,
+    averageMinutes: minutes.length ? Math.round(minutes.reduce((sum, value) => sum + value, 0) / minutes.length) : null
+  };
+}
+
+function homeNumericValuesFromTest(row={}){
+  const values = [];
+  ['value','valeur','result','resultat','score','average','moyenne'].forEach(key => {
+    const value = Number(row[key]);
+    if(Number.isFinite(value)) values.push(value);
+  });
+  Object.values(row.tests || row.metrics || row.results || {}).forEach(item => {
+    if(item && typeof item === 'object'){
+      ['value','valeur','result','resultat','score'].forEach(key => {
+        const value = Number(item[key]);
+        if(Number.isFinite(value)) values.push(value);
+      });
+    } else {
+      const value = Number(item);
+      if(Number.isFinite(value)) values.push(value);
+    }
+  });
+  return values;
+}
+
+function homeTestName(row={}, family='Test'){
+  return row.testName || row.testLabel || row.metric || row.testType || row.type || row.category || family;
+}
+
+function homeLatestTest(technicalTests=[], physicalTests=[]){
+  const rows = [
+    ...technicalTests.map(row => ({...row, family:'Technique', moduleId:'tests'})),
+    ...physicalTests.map(row => ({...row, family:'Athlétique', moduleId:'tests-athletiques'}))
+  ].map(row => ({...row, dateObj:homeDateValue(row)})).filter(row => row.dateObj);
+  if(!rows.length) return null;
+  rows.sort((a,b) => b.dateObj - a.dateObj);
+  const latest = rows[0];
+  const latestName = homeTestName(latest, latest.family);
+  const sameTestRows = rows.filter(row => homeTestName(row, row.family) === latestName && row.family === latest.family);
+  const sameDayRows = sameTestRows.filter(row => homeFormatDate(row.dateObj) === homeFormatDate(latest.dateObj));
+  const playerCount = new Set(sameDayRows.map(row => row.playerId).filter(Boolean)).size || sameDayRows.length;
+  const latestValues = sameDayRows.flatMap(homeNumericValuesFromTest);
+  const average = latestValues.length ? Math.round((latestValues.reduce((sum, value) => sum + value, 0) / latestValues.length) * 10) / 10 : null;
+  const previous = sameTestRows.filter(row => row.dateObj < latest.dateObj);
+  const previousValues = previous.length ? previous[0] && sameTestRows.filter(row => homeFormatDate(row.dateObj) === homeFormatDate(previous[0].dateObj)).flatMap(homeNumericValuesFromTest) : [];
+  const previousAverage = previousValues.length ? previousValues.reduce((sum, value) => sum + value, 0) / previousValues.length : null;
+  const progression = average !== null && previousAverage !== null ? Math.round((average - previousAverage) * 10) / 10 : null;
+  return {row:latest, name:latestName, date:latest.dateObj, playerCount, average, progression, family:latest.family, moduleId:latest.moduleId};
+}
+
+function homeMatchScore(row={}){
+  if(row.score) return String(row.score);
+  const forGoals = Number(row.goalsFor ?? row.butsMarques ?? row.scoreFor ?? row.homeGoals ?? row.scoreHome);
+  const againstGoals = Number(row.goalsAgainst ?? row.butsEncaisses ?? row.scoreAgainst ?? row.awayGoals ?? row.scoreAway);
+  return Number.isFinite(forGoals) && Number.isFinite(againstGoals) ? `${forGoals}-${againstGoals}` : '-';
+}
+
+function homeMatchResult(row={}){
+  const raw = String(row.result || row.resultat || '').trim();
+  if(raw) return raw;
+  const score = homeMatchScore(row).match(/(\d+)\D+(\d+)/);
+  if(!score) return '-';
+  const a = Number(score[1]);
+  const b = Number(score[2]);
+  if(a > b) return 'Victoire';
+  if(a < b) return 'Défaite';
+  return 'Nul';
+}
+
+function homeMatchStats(row={}, events=[]){
+  const matchId = row.matchId || row.id;
+  const rows = events.filter(event => event.matchId === matchId || event.gameId === matchId);
+  const textOf = event => String(`${event.type || ''} ${event.action || ''} ${event.label || ''}`.toLowerCase());
+  const shots = rows.filter(event => /tir|shot/.test(textOf(event))).length;
+  const entries20 = rows.filter(event => /20/.test(textOf(event))).length;
+  const xgValues = rows.map(event => Number(event.xg ?? event.xG)).filter(Number.isFinite);
+  const xg = xgValues.length ? Math.round(xgValues.reduce((sum, value) => sum + value, 0) * 100) / 100 : null;
+  return {events:rows.length, shots, entries20, xg};
+}
+
+function homeLatestMatch(matches=[], events=[]){
+  const rows = matches.map(row => ({...row, dateObj:homeDateValue(row)})).filter(row => row.dateObj).sort((a,b) => b.dateObj - a.dateObj);
+  if(!rows.length) return null;
+  const match = rows[0];
+  return {row:match, stats:homeMatchStats(match, events)};
+}
+
+function homeSessionItems(sessions=[]){
+  return sessions.map(row => ({...row, dateObj:homeDateValue(row)})).filter(row => row.dateObj).sort((a,b) => a.dateObj - b.dateObj);
+}
+
+function homeAuthorizedMedicalSummary(collections={}){
+  if(!canViewModule('medical') && !canViewModule('injuries')) return null;
+  const injuries = (collections.injuries || []).filter(row => !['closed','termine','terminé','inactive'].includes(String(row.status || row.statut || '').toLowerCase()));
+  const followUps = [...(collections.medicalFollowUps || []), ...(collections.medicalAppointments || [])];
+  return {injuries:injuries.length, followUps:followUps.length};
+}
+
+async function homeAuthorizedTeams(){
+  const knownIds = getAuthorizedTeamIds().filter(Boolean);
+  let teams = [];
+  try{ teams = await listTeams({includeArchived:false}); }
+  catch(error){ console.warn('Accueil équipes: lecture équipes impossible', error); }
+  const filtered = filterAuthorizedTeams(teams || []).filter(team => {
+    const teamId = homeTeamId(team);
+    if(!teamId || !canAccessTeamId(teamId)) return false;
+    return team.archived !== true && String(team.status || team.statut || '').toLowerCase() !== 'archived';
+  });
+  const byId = new Map(filtered.map(team => [homeTeamId(team), team]));
+  knownIds.forEach(teamId => {
+    if(canAccessTeamId(teamId) && !byId.has(teamId)) byId.set(teamId, {teamId, name:teamId.replace(/^team-/, '').toUpperCase()});
+  });
+  return [...byId.values()];
+}
+
+function renderHomeTeamDashboardLoading(){
+  const section = ensureHomeTeamDashboard();
+  if(section) section.innerHTML = '<div class="home-team-loading">Chargement des données des équipes autorisées...</div>';
+}
+
+function renderHomeTeamDashboardEmpty(message){
+  const section = ensureHomeTeamDashboard();
+  if(section) section.innerHTML = `<div class="home-team-empty">${escapeHtml(message)}</div>`;
+}
+
+function renderHomeTeamDashboard(team, teams, data){
+  const section = ensureHomeTeamDashboard();
+  if(!section) return;
+  const collections = data.collections || {};
+  const teamId = homeTeamId(team);
+  const sessions = homeSessionItems(collections.sessions || []);
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const nextSession = sessions.find(row => row.dateObj >= today);
+  const pastSessions = sessions.filter(row => row.dateObj < new Date(today.getTime() + 24 * 60 * 60 * 1000)).sort((a,b) => b.dateObj - a.dateObj);
+  const lastSession = pastSessions[0] || null;
+  const lastSummary = lastSession ? homeAttendanceSummary(lastSession, collections.attendance || []) : null;
+  const latestTest = homeLatestTest(collections.technicalTests || [], collections.physicalTests || []);
+  const latestMatch = homeLatestMatch(collections.matches || [], collections.matchEvents || []);
+  const medical = homeAuthorizedMedicalSummary(collections);
+  const selector = teams.length > 1
+    ? `<label class="home-team-select">Equipe<select id="homeTeamSelect">${teams.map(item => `<option value="${escapeHtml(homeTeamId(item))}" ${homeTeamId(item) === teamId ? 'selected' : ''}>${escapeHtml(homeTeamName(item))}</option>`).join('')}</select></label>`
+    : `<div class="home-team-select"><span>Equipe</span><select disabled><option>${escapeHtml(homeTeamName(team))}</option></select></div>`;
+  const nextSessionCard = nextSession
+    ? `<article class="home-team-feature"><div><span class="home-team-eyebrow">Aujourd'hui / prochain événement</span><h3>Prochaine séance</h3><div class="value">${homeFormatDate(nextSession.dateObj)}</div><div class="meta"><span class="home-team-pill">${escapeHtml(homeFormatTime(nextSession))}</span><span class="home-team-pill">${escapeHtml(homeReadableLabel(nextSession.type || nextSession.eventType, 'Séance'))}</span><span class="home-team-pill">${escapeHtml(nextSession.location || nextSession.lieu || 'Lieu à compléter')}</span></div></div>${canAccessTool('presences') ? '<button type="button" data-home-open="presences">Ouvrir la séance</button>' : ''}</article>`
+    : `<article class="home-team-feature"><div><span class="home-team-eyebrow">Aujourd'hui / prochain événement</span><h3>Aucune séance planifiée</h3><div class="value">-</div><div class="meta"><span class="home-team-pill">Planning à compléter</span><span class="home-team-pill">${escapeHtml(homeTeamName(team))}</span></div></div>${canAccessTool('presences') ? '<button type="button" data-home-open="presences">Créer une séance</button>' : ''}</article>`;
+  const sideCards = [
+    lastSession
+      ? `<article class="home-team-card"><div><h3>Dernière séance</h3><div class="value">${lastSummary?.rate ?? '-'}%</div><div class="meta"><span>${homeFormatDate(lastSession.dateObj)}</span><span>${lastSummary?.present ?? 0} présentes · ${lastSummary?.absent ?? 0} absentes</span><span>${lastSummary?.averageMinutes ? `${lastSummary.averageMinutes} min en moyenne` : 'Durée non disponible'}</span></div></div>${canAccessTool('presences') ? '<button type="button" data-home-open="presences">Détail</button>' : ''}</article>`
+      : homeEmptyCard('Dernière séance', 'Aucune séance passée.', 'presences'),
+    latestTest
+      ? `<article class="home-team-card"><div><h3>Dernier test</h3><div class="value">${latestTest.average ?? '-'}</div><div class="meta"><span>${escapeHtml(homeReadableLabel(latestTest.name, latestTest.family))}</span><span>${homeFormatDate(latestTest.date)} · ${latestTest.playerCount} joueuse(s)</span><span>${latestTest.progression === null ? 'Évolution à compléter' : `${latestTest.progression > 0 ? '+' : ''}${latestTest.progression} vs précédent`}</span></div></div>${canAccessTool(latestTest.moduleId) ? `<button type="button" data-home-open="${escapeHtml(latestTest.moduleId)}">Ouvrir</button>` : ''}</article>`
+      : homeEmptyCard('Dernier test', 'Aucun test disponible.', 'tests'),
+    latestMatch
+      ? `<article class="home-team-card"><div><h3>Dernier match</h3><div class="value">${escapeHtml(homeMatchScore(latestMatch.row))}</div><div class="meta"><span>${escapeHtml(homeMatchResult(latestMatch.row))} · ${homeFormatDate(latestMatch.row.dateObj)}</span><span>vs ${escapeHtml(latestMatch.row.opponent || latestMatch.row.adversaire || 'Adversaire non renseigné')}</span><span>${latestMatch.stats.shots ? `${latestMatch.stats.shots} tirs` : `${latestMatch.stats.events} action(s)`}${latestMatch.stats.xg !== null ? ` · xG ${latestMatch.stats.xg}` : ''}</span></div></div>${canAccessTool('stats') ? '<button type="button" data-home-open="stats">Détail</button>' : ''}</article>`
+      : homeEmptyCard('Dernier match', 'Aucun match enregistré.', 'stats')
+  ].join('');
+  const alerts = [
+    medical ? `<div class="home-team-alert">Suivi médical<span>${medical.injuries} blessure(s) active(s) · ${medical.followUps} suivi(s) en cours</span></div>` : '',
+    lastSummary && lastSummary.absent ? `<div class="home-team-alert">Assiduité<span>${lastSummary.absent} absence(s) sur la dernière séance</span></div>` : '',
+    latestMatch ? `<div class="home-team-alert">Matchs<span>Dernier résultat : ${escapeHtml(homeMatchResult(latestMatch.row))}</span></div>` : '<div class="home-team-alert">Matchs<span>Aucun match enregistré pour le moment</span></div>',
+    latestTest ? `<div class="home-team-alert">Tests récents<span>${escapeHtml(homeReadableLabel(latestTest.name, latestTest.family))} réalisé le ${homeFormatDate(latestTest.date)}</span></div>` : '<div class="home-team-alert">Tests à compléter<span>Aucun test disponible pour cette équipe</span></div>'
+  ].filter(Boolean).join('');
+  section.innerHTML = `
+    <div class="home-team-head">
+      <div>
+        <span class="home-team-eyebrow">Synthèse équipe</span>
+        <h2>${escapeHtml(homeTeamName(team))}</h2>
+        <p>Vue rapide de l’équipe selon vos accès.</p>
+      </div>
+      ${selector}
+    </div>
+    <div class="home-team-layout">
+      ${nextSessionCard}
+      <div class="home-team-side">${sideCards}</div>
+    </div>
+    <div class="home-team-watch">
+      <h3>À surveiller</h3>
+      <div class="home-team-alerts">${alerts || '<div class="home-team-alert">Aucune alerte prioritaire<span>Les données disponibles ne signalent rien à surveiller.</span></div>'}</div>
+    </div>
+  `;
+  const select = document.getElementById('homeTeamSelect');
+  if(select){
+    select.addEventListener('change', () => {
+      const value = select.value;
+      if(!canAccessTeamId(value)) return renderHomeTeamDashboardEmpty('Accès non autorisé à cette équipe.');
+      storage.set(HOME_TEAM_SELECTION_KEY, value, {recover:true});
+      refreshHomeTeamDashboard({silent:false});
+    });
+  }
+  section.querySelectorAll('[data-home-open]').forEach(button => {
+    button.addEventListener('click', () => routeTo(button.dataset.homeOpen));
+  });
+}
+
+async function refreshHomeTeamDashboard(options={}){
+  if(!currentUser || !homeView || homeView.classList.contains('hidden')) return;
+  const requestId = ++homeDashboardRequestId;
+  if(!options.silent) renderHomeTeamDashboardLoading();
+  try{
+    const teams = await homeAuthorizedTeams();
+    if(requestId !== homeDashboardRequestId) return;
+    if(!teams.length) return renderHomeTeamDashboardEmpty('Aucune équipe autorisée n’est associée à ce compte.');
+    const savedTeamId = storage.get(HOME_TEAM_SELECTION_KEY, '');
+    const selectedTeam = teams.find(team => homeTeamId(team) === savedTeamId && canAccessTeamId(savedTeamId)) || teams[0];
+    const selectedTeamId = homeTeamId(selectedTeam);
+    storage.set(HOME_TEAM_SELECTION_KEY, selectedTeamId, {recover:true});
+    const data = await teamProfileLoadData({teamId:selectedTeamId, homeDashboard:true});
+    if(requestId !== homeDashboardRequestId) return;
+    renderHomeTeamDashboard(selectedTeam, teams, data);
+  }catch(error){
+    console.warn('Accueil équipes: chargement impossible', error);
+    if(requestId === homeDashboardRequestId) renderHomeTeamDashboardEmpty(error?.message || 'Impossible de charger les données de cette équipe.');
+  }
+}
+
 function updateRoleUi(){
   currentUserRole = getCurrentUserRole();
   renderModuleShell();
@@ -381,6 +740,7 @@ function showHome(){
   cloudPanel.classList.remove('open');
   homeView.classList.remove('hidden');
   if(adminView) adminView.classList.add('hidden');
+  refreshHomeTeamDashboard({silent:false});
 }
 function showAdmin(){
   if(!isSuperAdmin()) { notifyWarning('Accès non autorisé : gestion utilisateurs réservée aux éditeurs autorisés.'); return showHome(); }
@@ -664,6 +1024,7 @@ function updateDashboard(){
   setText('dashboardSyncAlert', pending ? 'Des changements sont en attente de synchronisation.' : (lastSync ? 'Cloud synchronisé, sauvegarde locale active.' : 'Mode local actif avant première synchronisation.'));
   setText('dashboardDataAlert', playerCount ? `${playerCount} fiche(s) joueuse(s) disponibles dans la base commune locale.` : 'Aucune joueuse Firebase récupérée localement pour le moment.');
   updateRoleUi();
+  if(homeView && !homeView.classList.contains('hidden')) refreshHomeTeamDashboard({silent:true});
 }
 function snapshotLocalData(options={}){
   const payload = buildPayload();
@@ -1495,7 +1856,8 @@ function playerMatchesTeamIdForAnySeason(player={}, teamId=''){
 }
 async function teamProfileLoadData(options={}){
   return measureAsync('teamProfileLoadData', async () => {
-  if(!canViewModule('teamProfile')) throw new Error('Accès non autorisé.');
+  const allowHomeDashboard = options.homeDashboard === true && ['teamProfile','presences','stats','tests','tests-athletiques'].some(canViewModule);
+  if(!canViewModule('teamProfile') && !allowHomeDashboard) throw new Error('Accès non autorisé.');
 	  const teamId = String(options.teamId || '').trim();
 	  if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
 	  const summaryOnly = options.summaryOnly === true;
