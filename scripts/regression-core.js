@@ -357,6 +357,7 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('data-finalize-athletic-test'), 'Les Tests athlétiques doivent garder une action d’enregistrement définitif par ligne.');
   assert(appSource.includes("finalized:true") || appSource.includes('finalized,'), 'La finalisation des Tests athlétiques doit être persistée dans les documents physicalTests.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('rowFinalized'), 'L’historique des Tests athlétiques doit filtrer les lignes finalisées depuis la donnée partagée.');
+  assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('function historyRows(){return rows.filter(r=>!rowFinalized(r))}'), 'L’historique des Tests athlétiques doit rester global et ne pas dépendre de la joueuse/catégorie sélectionnée.');
   assert(rulesSource.includes("allow delete: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests'))"), 'Les suppressions physicalTests doivent rester contrôlées par droits module et teamId/playerId.');
 
   [
