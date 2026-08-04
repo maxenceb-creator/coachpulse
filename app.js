@@ -4367,8 +4367,9 @@ async function presenceSaveEvent(event={}){
     },
     procedure:presencePlainProcedure(session.procedure || event.procedure || event.sessionProcedure)
   };
+  const safeSessionPayload = firestoreSafeData(sessionPayload);
   await firebaseFns.setDoc(firebaseFns.doc(db, 'sessions', sessionId), {
-    ...sessionPayload,
+    ...safeSessionPayload,
     id:sessionId,
     sessionId,
     source:'Présences',
@@ -4390,7 +4391,8 @@ async function presenceSaveEvent(event={}){
         sessionId,
         date:sessionPayload.date || '',
         teamId:sessionPayload.teamId || '',
-        teamIds:sessionTeamIds
+        teamIds:sessionTeamIds,
+        procedure:presencePlainProcedure(row.sessionSnapshot?.procedure || sessionPayload.procedure)
       },
       playerSnapshot:{
         ...(row.playerSnapshot || {}),
@@ -4408,15 +4410,18 @@ async function presenceSaveEvent(event={}){
   });
   await Promise.all([
     ...staleAttendanceDeletes,
-    ...attendanceRows.map(row => firebaseFns.setDoc(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
-      ...row,
-      source:'Présences',
-      createdFromPresenceModule:true,
-      updatedAt:firebaseFns.serverTimestamp(),
-      updatedAtIso:now,
-      updatedBy:currentUser.uid,
-      updatedByEmail:currentUser.email || ''
-    }, {merge:true}))
+    ...attendanceRows.map(row => {
+      const safeAttendancePayload = firestoreSafeData(row);
+      return firebaseFns.setDoc(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
+        ...safeAttendancePayload,
+        source:'Présences',
+        createdFromPresenceModule:true,
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:now,
+        updatedBy:currentUser.uid,
+        updatedByEmail:currentUser.email || ''
+      }, {merge:true});
+    })
   ]);
   invalidateAppDataCaches('presences');
   invalidateAppDataCaches('teamProfiles');
