@@ -348,7 +348,7 @@ function ensureHomeTeamDashboardStyles(){
   const style = document.createElement('style');
   style.id = 'homeTeamDashboardStyles';
   style.textContent = `
-    .home-team-dashboard{margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:26px;padding:18px;box-shadow:0 14px 34px rgba(6,23,13,.08)}
+    .home-team-dashboard{margin-top:0;background:#fff;border:1px solid var(--line);border-radius:26px;padding:18px;box-shadow:0 14px 34px rgba(6,23,13,.08)}
     .home-team-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
     .home-team-head h2{margin:2px 0 4px;color:#06351f;font-size:clamp(24px,3vw,38px);line-height:1.02}
     .home-team-head p{margin:0;color:var(--muted);font-weight:780}
@@ -376,17 +376,22 @@ function ensureHomeTeamDashboardStyles(){
   document.head.appendChild(style);
 }
 
+function hideLegacyHomeDashboard(){
+  if(!homeView) return;
+  homeView.querySelectorAll('.dashboard-hero,.metric-grid,.dashboard-grid').forEach(el => el.classList.add('hidden'));
+}
+
 function ensureHomeTeamDashboard(){
   if(!homeView) return null;
   ensureHomeTeamDashboardStyles();
+  hideLegacyHomeDashboard();
   let section = document.getElementById('homeTeamDashboard');
-  if(section) return section;
-  section = document.createElement('section');
-  section.id = 'homeTeamDashboard';
-  section.className = 'home-team-dashboard';
-  const quickGrid = homeView.querySelector('.quick-grid');
-  if(quickGrid?.parentNode) quickGrid.parentNode.insertBefore(section, quickGrid);
-  else homeView.appendChild(section);
+  if(!section){
+    section = document.createElement('section');
+    section.id = 'homeTeamDashboard';
+    section.className = 'home-team-dashboard';
+  }
+  if(section.parentElement !== homeView || homeView.firstElementChild !== section) homeView.prepend(section);
   return section;
 }
 

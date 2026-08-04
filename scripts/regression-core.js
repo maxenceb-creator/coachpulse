@@ -489,6 +489,8 @@ function testHomeDashboardStaysScopedToAuthorizedTeams(){
 
   assert(appSource.includes('const HOME_TEAM_SELECTION_KEY'), 'L’accueil doit conserver l’équipe sélectionnée localement.');
   assert(appSource.includes('async function homeAuthorizedTeams'), 'L’accueil doit charger les équipes via un helper dédié.');
+  assert(appSource.includes('function hideLegacyHomeDashboard'), 'Le nouvel accueil doit masquer les anciens blocs statiques.');
+  assert(appSource.includes("'.dashboard-hero,.metric-grid,.dashboard-grid'"), 'Les anciens blocs accueil ne doivent plus être visibles.');
   assert(appSource.includes('filterAuthorizedTeams(teams)'), 'L’accueil doit réutiliser le filtrage central des équipes autorisées.');
   assert(appSource.includes('canAccessTeamId(teamId)'), 'L’accueil doit vérifier le teamId avant affichage.');
   assert(appSource.includes('teamProfileLoadData({teamId:selectedTeamId, homeDashboard:true})'), 'L’accueil doit charger les données par teamId via la fiche équipe centralisée.');
