@@ -119,6 +119,13 @@ assertShellStrategy(source, meta.NETWORK_FIRST_ASSETS);
 [
   'const APP_SHELL_CACHE_PREFIX',
   'async function clearAppShellCacheOnLaunch',
+  'function ensurePwaDiagnosticsPanel',
+  'async function updatePwaDiagnostics',
+  'function detectLocalStorageStatus',
+  'function detectIndexedDbStatus',
+  'async function getPwaCacheLabel',
+  'pwaPendingSyncStatus',
+  'pwaLastCloudSyncStatus',
   "if(!navigator.onLine || !('caches' in window)) return;",
   'keys.filter(key => key.startsWith(APP_SHELL_CACHE_PREFIX)).map(key => caches.delete(key))',
   "navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'})"
