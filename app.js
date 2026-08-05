@@ -999,7 +999,7 @@ function clearSensitiveLocalData(){
 }
 function buildPayload(){
   return {
-    version:'CoachPulse PWA V6.4 Base Joueuses',
+    version:'CoachPulse PWA',
     savedAt:new Date().toISOString(),
     user:{uid:currentUser?.uid||null,email:currentUser?.email||null,name:currentProfile?.name||null,role:currentProfile?.role||null},
     bases:{joueuses:{source:'outils HTML intégrés'}, matchs:{source:'Coach Stats'}, presences:{source:'Présences'}, tests:{source:'Tests techniques'}},

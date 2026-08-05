@@ -1,7 +1,7 @@
 {
-  "name": "CoachPulse PWA V6.4 Base Joueuses",
+  "name": "CoachPulse PWA",
   "short_name": "CoachPulse",
-  "description": "CoachPulse V6.4 avec connexion staff Firebase, base joueuses commune et service worker actualisé.",
+  "description": "CoachPulse avec connexion staff Firebase, base joueuses commune et service worker actualisé.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
