@@ -12,7 +12,7 @@ const CORE_ASSETS = [
   './pages/coach-stats.html', './pages/methodologie.html', './pages/presences.html', './pages/tests-techniques.html', './pages/tests-techniques/testsTechniquesConfig.js', './pages/tests-athletiques.html', './pages/tests-athletiques/testsAthletiquesConfig.js', './pages/data-hub.html', './pages/admin-database.html', './pages/suivi-medical.html', './pages/player-profile.html', './pages/team-profile.html',
   './pages/coach-stats/coachStatsConfig.js', './pages/coach-stats/heatmap-tooltips.css', './pages/coach-stats/heatmap-tooltips.js',
   './pages/methodologie/embedded-colors.css', './pages/methodologie/embedded-colors.js',
-  './pages/presences/presence-config.js', './pages/presences/presence-utils.js',
+  './pages/presences/presence-config.js', './pages/presences/presence-utils.js', './pages/presences/presence-attendance-codes.js',
   './pages/player-profile/playerProfile.css', './pages/player-profile/playerProfileData.js', './pages/player-profile/playerProfileFilters.js', './pages/player-profile/playerProfileStats.js', './pages/player-profile/playerProfileCompare.js', './pages/player-profile/playerProfileRender.js', './pages/player-profile/playerProfile.js',
   './pages/team-profile/teamProfile.css', './pages/team-profile/teamProfileData.js', './pages/team-profile/teamProfileFilters.js', './pages/team-profile/teamProfileMetrics.js', './pages/team-profile/teamProfileCharts.js', './pages/team-profile/teamProfileUI.js', './pages/team-profile/teamProfile.js',
   './connectors/fichesJoueusesConnector.js', './connectors/presencesConnector.js',
