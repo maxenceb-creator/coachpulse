@@ -1,4 +1,4 @@
-(function(){
+(function(global){
   function esc(value){
     return String(value ?? "").replace(/[&<>"']/g, char => ({
       "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
@@ -6,12 +6,9 @@
   }
 
   function readJson(key, fallback){
-    try{
-      const value = localStorage.getItem(key);
-      return value ? JSON.parse(value) : fallback;
-    }catch(_error){
-      return fallback;
-    }
+    const storage = global.CoachPulseStorage;
+    if(storage?.getJson) return storage.getJson(key, fallback);
+    return fallback;
   }
 
   function parseDate(value){
@@ -54,7 +51,7 @@
     return Number.isFinite(value) ? `${(value >> 16) & 255},${(value >> 8) & 255},${value & 255}` : "29,153,91";
   }
 
-  window.CoachPulsePresencesUtils = {
+  global.CoachPulsePresencesUtils = {
     addDays,
     addMonths,
     esc,
@@ -64,4 +61,4 @@
     readJson,
     sameDay
   };
-})();
+})(typeof window !== "undefined" ? window : globalThis);

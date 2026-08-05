@@ -1640,6 +1640,7 @@
   <script src="../shared/services/teams-service.js"></script>
   <script src="../shared/services/players-service.js"></script>
   <script src="../shared/services/presence-events-service.js"></script>
+  <script src="../shared/utils/storage-service.js"></script>
   <script src="presences/presence-config.js"></script>
   <script src="presences/presence-utils.js"></script>
   <script src="presences/presence-attendance-codes.js"></script>
@@ -1648,6 +1649,13 @@
       const presenceConfig = window.CoachPulsePresencesConfig || {};
       const presenceUtils = window.CoachPulsePresencesUtils || {};
       const presenceAttendanceCodes = window.CoachPulsePresenceAttendanceCodes || {};
+      const storage = (() => {
+        try{
+          return window.CoachPulseStorage || window.parent?.CoachPulseStorage || null;
+        }catch(_error){
+          return window.CoachPulseStorage || null;
+        }
+      })();
       const {
         storageKeys = {},
         monthNames = [],
@@ -1682,6 +1690,10 @@
         DEFAULT_ATTENDANCE_CODES,
         ATTENDANCE_CODE_TONES
       );
+      function setJson(key, value){
+        if(storage?.setJson) return storage.setJson(key, value, {recover:true});
+        return false;
+      }
       const PRESENCE_EVENTS_KEY = storageKeys.presenceEvents || "coachpulse:presenceEvents:v1";
       const PRESENCE_SETTINGS_KEY = storageKeys.presenceSettings || "coachpulse:presenceSettings:v1";
       const EVENT_KEY = storageKeys.methodologieEvents || "methodo_events_v24";
@@ -1709,7 +1721,7 @@
           ...settings,
           attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)
         };
-        localStorage.setItem(PRESENCE_SETTINGS_KEY, JSON.stringify(next));
+        setJson(PRESENCE_SETTINGS_KEY, next);
       }
       function teamsService(){
         try{
@@ -1906,7 +1918,7 @@
       }
       function savePresenceEvents(events){
         const normalized = (Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id);
-        localStorage.setItem(PRESENCE_EVENTS_KEY, JSON.stringify(normalized));
+        setJson(PRESENCE_EVENTS_KEY, normalized);
       }
       function eventSyncStamp(event={}){
         return Date.parse(event.updatedAt || event.createdAt || "") || 0;
