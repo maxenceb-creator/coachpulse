@@ -756,6 +756,7 @@ function showAdmin(){
 function openCloudPanel(){
   if(!requireAuth()) return setLocked(true);
   if(!guardAdminAction('Le panneau Cloud est réservé aux administrateurs.')) return;
+  ensurePwaDiagnosticsPanel();
   frame.classList.add('hidden');
   frame.removeAttribute('src');
   homeView.classList.add('hidden');
@@ -764,6 +765,7 @@ function openCloudPanel(){
   $('#staffEmail').value = currentUser?.email || '';
   $('#staffName').value = currentProfile?.name || '';
   $('#staffRole').value = currentProfile?.role || '';
+  updatePwaDiagnostics();
   if(!window.matchMedia('(max-width:1100px)').matches) shell.classList.add('collapsed');
 }
 
@@ -4882,6 +4884,116 @@ function updateCloudKpis(){
   pendingEl.textContent = storage.isPendingSync() ? '1' : '0';
   const last = storage.get('coachpulse:lastCloudSync', '');
   lastEl.textContent = last ? new Date(last).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : 'Jamais';
+  if($('#pwaDiagnosticPanel')) updatePwaDiagnostics();
+}
+function ensurePwaDiagnosticsPanel(){
+  if(!cloudPanel || $('#pwaDiagnosticPanel')) return;
+  cloudPanel.insertAdjacentHTML('beforeend', `
+    <section id="pwaDiagnosticPanel" class="pwa-diagnostics" aria-label="Diagnostic PWA tablette">
+      <div class="pwa-diagnostics-head">
+        <div>
+          <span>Diagnostic tablette</span>
+          <h3>PWA & stockage</h3>
+        </div>
+        <button id="refreshPwaDiagnostics" type="button">Actualiser</button>
+      </div>
+      <div class="pwa-diagnostic-grid">
+        <div><span>Version cache</span><b id="pwaCacheVersion">Analyse...</b></div>
+        <div><span>localStorage</span><b id="pwaLocalStorageStatus">Analyse...</b></div>
+        <div><span>IndexedDB</span><b id="pwaIndexedDbStatus">Analyse...</b></div>
+        <div><span>Sync en attente</span><b id="pwaPendingSyncStatus">Analyse...</b></div>
+        <div><span>Dernière sync cloud</span><b id="pwaLastCloudSyncStatus">Analyse...</b></div>
+        <div><span>Service worker</span><b id="pwaServiceWorkerStatus">Analyse...</b></div>
+      </div>
+    </section>
+  `);
+  ensurePwaDiagnosticStyles();
+  $('#refreshPwaDiagnostics')?.addEventListener('click', updatePwaDiagnostics);
+}
+function ensurePwaDiagnosticStyles(){
+  if($('#pwaDiagnosticStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'pwaDiagnosticStyles';
+  style.textContent = `
+    .pwa-diagnostics{max-width:1120px;margin-top:18px;border:1px solid var(--line);border-radius:22px;background:#fff;box-shadow:0 12px 28px rgba(6,23,13,.08);padding:16px}
+    .pwa-diagnostics-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+    .pwa-diagnostics-head span{display:block;color:var(--muted);font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.08em}
+    .pwa-diagnostics-head h3{margin:2px 0 0;color:#06351f;font-size:24px}
+    .pwa-diagnostics-head button{background:#f8fafc;border:1px solid var(--line);color:#06351f;padding:9px 11px}
+    .pwa-diagnostic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+    .pwa-diagnostic-grid div{border:1px solid var(--line);border-radius:16px;background:#f8fafc;padding:10px;min-width:0}
+    .pwa-diagnostic-grid span{display:block;color:var(--muted);font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.05em}
+    .pwa-diagnostic-grid b{display:block;margin-top:5px;color:#06351f;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .pwa-diagnostic-grid b.ok{color:#047857}.pwa-diagnostic-grid b.warn{color:#b45309}.pwa-diagnostic-grid b.bad{color:#991b1b}
+    @media(max-width:900px){.pwa-diagnostic-grid{grid-template-columns:1fr}.pwa-diagnostics-head{align-items:flex-start;flex-direction:column}}
+  `;
+  document.head.appendChild(style);
+}
+function formatDiagnosticDate(value){
+  if(!value) return 'Jamais';
+  const date = new Date(value);
+  if(Number.isNaN(date.getTime())) return 'Date invalide';
+  return date.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function setDiagnosticValue(id, value, state='ok'){
+  const el = $(id);
+  if(!el) return;
+  el.textContent = value;
+  el.className = state;
+}
+function detectLocalStorageStatus(){
+  try{
+    const key = 'coachpulse:pwa-diagnostic-test';
+    localStorage.setItem(key, '1');
+    localStorage.removeItem(key);
+    return {label:'Disponible', state:'ok'};
+  }catch(e){
+    return {label:'Indisponible', state:'bad'};
+  }
+}
+function detectIndexedDbStatus(){
+  return new Promise(resolve => {
+    if(!('indexedDB' in window)) return resolve({label:'Indisponible', state:'bad'});
+    const name = 'coachpulse-pwa-diagnostic';
+    let request;
+    try{ request = indexedDB.open(name, 1); }
+    catch(e){ resolve({label:'Bloqué', state:'bad'}); return; }
+    request.onerror = () => resolve({label:'Bloqué', state:'bad'});
+    request.onsuccess = () => {
+      request.result.close();
+      resolve({label:'Disponible', state:'ok'});
+    };
+    request.onupgradeneeded = () => request.result.createObjectStore('check');
+  });
+}
+async function getPwaCacheLabel(){
+  if(!('caches' in window)) return {label:'Cache indisponible', state:'bad'};
+  try{
+    const keys = await caches.keys();
+    const appCaches = keys.filter(key => key.startsWith(APP_SHELL_CACHE_PREFIX)).sort();
+    if(!appCaches.length) return {label:'Aucun cache CoachPulse', state:'warn'};
+    return {label:appCaches[appCaches.length - 1], state:'ok'};
+  }catch(e){
+    return {label:'Lecture impossible', state:'bad'};
+  }
+}
+function getServiceWorkerDiagnostic(){
+  if(!('serviceWorker' in navigator)) return {label:'Indisponible', state:'bad'};
+  if(navigator.serviceWorker.controller) return {label:'Actif', state:'ok'};
+  return {label:'Installé au prochain chargement', state:'warn'};
+}
+async function updatePwaDiagnostics(){
+  if(!$('#pwaDiagnosticPanel')) return;
+  const localStatus = detectLocalStorageStatus();
+  const indexedDbStatus = await detectIndexedDbStatus();
+  const cacheStatus = await getPwaCacheLabel();
+  const swStatus = getServiceWorkerDiagnostic();
+  setDiagnosticValue('#pwaCacheVersion', cacheStatus.label, cacheStatus.state);
+  setDiagnosticValue('#pwaLocalStorageStatus', localStatus.label, localStatus.state);
+  setDiagnosticValue('#pwaIndexedDbStatus', indexedDbStatus.label, indexedDbStatus.state);
+  setDiagnosticValue('#pwaPendingSyncStatus', storage.isPendingSync() ? 'Oui' : 'Non', storage.isPendingSync() ? 'warn' : 'ok');
+  setDiagnosticValue('#pwaLastCloudSyncStatus', formatDiagnosticDate(storage.get('coachpulse:lastCloudSync', '')), 'ok');
+  setDiagnosticValue('#pwaServiceWorkerStatus', swStatus.label, swStatus.state);
 }
 async function logout(){
   try{ if(auth) await firebaseFns.signOut(auth); }catch(e){ notifyError('Déconnexion impossible : '+cleanError(e)); }
