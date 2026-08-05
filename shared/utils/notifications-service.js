@@ -27,6 +27,8 @@
       .cp-confirm{width:min(520px,100%);border:1px solid rgba(205,183,137,.58);border-radius:22px;background:#fff;color:#06351f;box-shadow:0 24px 70px rgba(6,23,13,.32);padding:18px;font:800 15px/1.4 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       .cp-confirm h2{margin:0 0 8px;font-size:20px;color:#06351f}
       .cp-confirm p{margin:0;color:#203a2e;white-space:pre-line}
+      .cp-prompt-input{width:100%;margin-top:14px;border:1px solid rgba(0,63,36,.18);border-radius:14px;padding:11px 12px;background:#f8fafc;color:#06351f;font:800 14px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;outline:none}
+      .cp-prompt-input:focus{border-color:#1d995b;box-shadow:0 0 0 3px rgba(29,153,91,.14);background:#fff}
       .cp-confirm-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;flex-wrap:wrap}
       .cp-confirm-actions button{border:1px solid rgba(0,63,36,.14);border-radius:12px;padding:10px 14px;background:#f8fafc;color:#06351f;font:900 14px/1 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:pointer}
       .cp-confirm-actions .primary{background:linear-gradient(135deg,#1d995b,#006936);border-color:#006936;color:#fff}
@@ -119,6 +121,40 @@
     });
   }
 
+  function prompt(message, options={}){
+    const text = String(message || '').trim();
+    if(!global.document || !text) return Promise.resolve(null);
+    ensureStyles();
+    return new Promise(resolve => {
+      let settled = false;
+      const backdrop = global.document.createElement('div');
+      backdrop.className = 'cp-confirm-backdrop';
+      backdrop.setAttribute('role', 'dialog');
+      backdrop.setAttribute('aria-modal', 'true');
+      backdrop.innerHTML = `<section class="cp-confirm"><h2>${escapeHtml(options.title || 'Saisie requise')}</h2><p>${escapeHtml(text)}</p><input class="cp-prompt-input" data-prompt-input type="text" value="${escapeHtml(options.defaultValue || '')}" autocomplete="off"><div class="cp-confirm-actions"><button type="button" data-cancel>${escapeHtml(options.cancelLabel || 'Annuler')}</button><button type="button" class="${options.danger ? 'danger' : 'primary'}" data-confirm>${escapeHtml(options.confirmLabel || 'Valider')}</button></div></section>`;
+      const input = backdrop.querySelector('[data-prompt-input]');
+      function close(value){
+        if(settled) return;
+        settled = true;
+        global.document.removeEventListener('keydown', onKey);
+        backdrop.remove();
+        resolve(value);
+      }
+      function onKey(event){
+        if(event.key === 'Escape') close(null);
+        if(event.key === 'Enter' && event.target === input) close(input?.value || '');
+      }
+      backdrop.addEventListener('click', event => {
+        if(event.target === backdrop || event.target.closest('[data-cancel]')) close(null);
+        if(event.target.closest('[data-confirm]')) close(input?.value || '');
+      });
+      global.document.addEventListener('keydown', onKey);
+      global.document.body.appendChild(backdrop);
+      input?.focus();
+      input?.select();
+    });
+  }
+
   function escapeHtml(value){
     return String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   }
@@ -126,6 +162,7 @@
   const service = {
     show,
     confirm,
+    prompt,
     info:(message, options={}) => show(message, {...options, type:'info'}),
     success:(message, options={}) => show(message, {...options, type:'success'}),
     warn:(message, options={}) => show(message, {...options, type:'warn'}),
