@@ -1,4 +1,5 @@
-const CACHE_NAME = 'coachpulse-v6-4-69-20260804-presences-modules';
+const CACHE_NAME = 'coachpulse-v6-4-70-20260806-pwa-refresh';
+const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
@@ -19,6 +20,7 @@ const CORE_ASSETS = [
   './connectors/testsConnectorCore.js', './connectors/testsTechniquesConnector.js', './connectors/testsPhysiquesConnector.js'
 ];
 const NETWORK_FIRST_ASSETS = new Set(['./', './index.html', './app.js', './css/responsive.css']);
+const NETWORK_FIRST_EXTENSIONS = /\.(html|js|css|json)$/i;
 
 function assetKey(url) {
   if(url.origin !== self.location.origin) return '';
@@ -43,17 +45,33 @@ function cacheFirst(request) {
   return caches.match(request).then(cached => cached || fetch(request).then(response => cacheResponse(request, response)));
 }
 
+function shouldUseNetworkFirst(request, url) {
+  if(request.mode === 'navigate') return true;
+  if(NETWORK_FIRST_ASSETS.has(assetKey(url))) return true;
+  return url.origin === self.location.origin && NETWORK_FIRST_EXTENSIONS.test(url.pathname);
+}
+
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS)).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', event => {
-  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith(APP_CACHE_PREFIX) && k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+});
+self.addEventListener('message', event => {
+  const type = event.data && event.data.type;
+  if(type === 'COACHPULSE_SKIP_WAITING'){
+    self.skipWaiting();
+    return;
+  }
+  if(type === 'COACHPULSE_CLEAR_APP_CACHE'){
+    event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith(APP_CACHE_PREFIX)).map(k => caches.delete(k)))));
+  }
 });
 self.addEventListener('fetch', event => {
   if(event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   if(url.hostname.includes('gstatic.com') || url.hostname.includes('googleapis.com')) return;
-  if(event.request.mode === 'navigate' || NETWORK_FIRST_ASSETS.has(assetKey(url))) {
+  if(shouldUseNetworkFirst(event.request, url)) {
     event.respondWith(networkFirst(event.request));
     return;
   }

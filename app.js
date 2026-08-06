@@ -40,7 +40,9 @@ let cloudWriteTimer = null;
 let applyingCloud = false;
 let lastCloudItemsHash = '';
 let adminAccessChoiceCache = null;
+let appRefreshInProgress = false;
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
+const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
 const appDataCache = {
   athleticRows:{rows:null, loadedAt:0},
@@ -53,6 +55,8 @@ const appDataCache = {
 let technicalPlayerFootHintsCache = null;
 const HOME_TEAM_SELECTION_KEY = 'coachpulse:home:selectedTeamId';
 let homeDashboardRequestId = 0;
+let centralPlayersRefreshPending = null;
+let lastCentralPlayersRefreshAt = 0;
 function cloneData(value){
   if(typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
@@ -921,7 +925,7 @@ async function initFirebase(){
         setLocked(false);
         try{ startRealtimeSync(); }catch(e){ console.warn('Realtime sync unavailable after login', e); }
         await syncCloud(false).catch(e => console.warn('Cloud sync unavailable after login', e));
-        await pullCentralPlayersToLocal(false).catch(e => console.warn('Central players pull unavailable after login', e));
+        await refreshCentralPlayersFromCloud({force:true, reason:'login'}).catch(e => console.warn('Central players pull unavailable after login', e));
         try{ purgeUnauthorizedLocalData(); }catch(e){ console.warn('Local data purge unavailable after login', e); }
         const last = storage.get('coachpulse:lastTool', 'home');
         routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
@@ -1691,19 +1695,35 @@ async function migrateLocalDataToCentralFirestore(manual=true){
 async function pullCentralPlayersToLocal(manual=true){
   if(manual && !guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  return refreshCentralPlayersFromCloud({force:true, manual, reason:manual ? 'manual' : 'pull'});
+}
+async function refreshCentralPlayersFromCloud(options={}){
+  const {force=false, manual=false, reason='auto'} = options;
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  if(!navigator.onLine && !force) return [];
+  const now = Date.now();
+  if(!force && now - lastCentralPlayersRefreshAt < CLOUD_PLAYERS_REFRESH_THROTTLE_MS) return [];
+  if(centralPlayersRefreshPending) return centralPlayersRefreshPending;
   const service = playersService();
-  let players = [];
-  if(service?.readFirestorePlayers){
-    players = await service.readFirestorePlayers(firestoreServiceContext({forceRefresh:true}));
-  }else{
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
-    snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
-    storage.setJson('coachpulse:centralPlayers', players, {recover:true});
-  }
-  notifyFramesPlayersUpdated();
-  updateCloudKpis();
-  if(manual) notifySuccess(`${players.length} joueuses récupérées depuis Firebase.`);
-  return players;
+  centralPlayersRefreshPending = (async () => {
+    let players = [];
+    if(service?.readFirestorePlayers){
+      players = await service.readFirestorePlayers(firestoreServiceContext({forceRefresh:true}));
+    }else{
+      const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
+      snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
+      storage.setJson('coachpulse:centralPlayers', players, {recover:true});
+    }
+    lastCentralPlayersRefreshAt = Date.now();
+    storage.set('coachpulse:lastPlayersCloudRefresh', new Date().toISOString(), {recover:true});
+    try{ purgeUnauthorizedLocalData(); }catch(error){ console.warn('Purge locale après actualisation joueuses indisponible', error); }
+    notifyFramesPlayersUpdated();
+    updateCloudKpis();
+    if(manual) notifySuccess(`${players.length} joueuses récupérées depuis Firebase.`);
+    else console.info(`[CoachPulse] Base joueuses Firestore actualisée (${players.length}) · ${reason}`);
+    return players;
+  })().finally(() => { centralPlayersRefreshPending = null; });
+  return centralPlayersRefreshPending;
 }
 async function readCentralFirestoreExport(){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
@@ -5264,7 +5284,10 @@ function ensurePwaDiagnosticsPanel(){
           <span>Diagnostic tablette</span>
           <h3>PWA & stockage</h3>
         </div>
-        <button id="refreshPwaDiagnostics" type="button">Actualiser</button>
+        <div class="pwa-diagnostics-actions">
+          <button id="refreshPwaDiagnostics" type="button">Actualiser</button>
+          <button id="forceAppRefresh" type="button">Mettre à jour l’app</button>
+        </div>
       </div>
       <div class="pwa-diagnostic-grid">
         <div><span>Version cache</span><b id="pwaCacheVersion">Analyse...</b></div>
@@ -5278,6 +5301,7 @@ function ensurePwaDiagnosticsPanel(){
   `);
   ensurePwaDiagnosticStyles();
   $('#refreshPwaDiagnostics')?.addEventListener('click', updatePwaDiagnostics);
+  $('#forceAppRefresh')?.addEventListener('click', () => refreshInstalledApp());
 }
 function ensurePwaDiagnosticStyles(){
   if($('#pwaDiagnosticStyles')) return;
@@ -5286,9 +5310,11 @@ function ensurePwaDiagnosticStyles(){
   style.textContent = `
     .pwa-diagnostics{max-width:1120px;margin-top:18px;border:1px solid var(--line);border-radius:22px;background:#fff;box-shadow:0 12px 28px rgba(6,23,13,.08);padding:16px}
     .pwa-diagnostics-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+    .pwa-diagnostics-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .pwa-diagnostics-head span{display:block;color:var(--muted);font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.08em}
     .pwa-diagnostics-head h3{margin:2px 0 0;color:#06351f;font-size:24px}
     .pwa-diagnostics-head button{background:#f8fafc;border:1px solid var(--line);color:#06351f;padding:9px 11px}
+    .pwa-diagnostics-head #forceAppRefresh{background:linear-gradient(135deg,var(--green),#006936);border-color:#006936;color:#fff}
     .pwa-diagnostic-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
     .pwa-diagnostic-grid div{border:1px solid var(--line);border-radius:16px;background:#f8fafc;padding:10px;min-width:0}
     .pwa-diagnostic-grid span{display:block;color:var(--muted);font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.05em}
@@ -5845,9 +5871,19 @@ $('#refreshMembersBtn').addEventListener('click', async () => { adminAccessChoic
 $('#membersTbody').addEventListener('click', adminTableClick);
 adminView?.addEventListener('change', adminAccessPickerChange);
 
-window.addEventListener('online', () => { updateSyncState('Retour Internet · sync...'); syncCloud(false); });
+window.addEventListener('online', () => {
+  updateSyncState('Retour Internet · sync...');
+  syncCloud(false);
+  refreshCentralPlayersFromCloud({reason:'online'}).catch(error => console.warn('Actualisation joueuses au retour Internet indisponible', error));
+});
 window.addEventListener('offline', () => updateSyncState('Hors ligne · local actif'));
 window.addEventListener('resize', () => { if(window.matchMedia('(max-width:1180px)').matches) shell.classList.remove('collapsed'); });
+window.addEventListener('focus', () => {
+  if(currentUser) refreshCentralPlayersFromCloud({reason:'focus'}).catch(error => console.warn('Actualisation joueuses au focus indisponible', error));
+});
+document.addEventListener('visibilitychange', () => {
+  if(!document.hidden && currentUser) refreshCentralPlayersFromCloud({reason:'visible'}).catch(error => console.warn('Actualisation joueuses au retour app indisponible', error));
+});
 window.addEventListener('message', e => {
   if(e.data?.type === 'coachpulse-local-change') snapshotLocalData();
   if(e.data?.type === 'coachpulse-open-module' && e.data.moduleId){
@@ -5870,14 +5906,87 @@ async function clearAppShellCacheOnLaunch(){
     console.warn('Nettoyage cache application indisponible', error);
   }
 }
+function ensureAppUpdatePromptStyles(){
+  if($('#coachpulseAppUpdateStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'coachpulseAppUpdateStyles';
+  style.textContent = `
+    .app-update-prompt{position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom));z-index:1500;display:flex;align-items:center;gap:12px;width:min(720px,calc(100vw - 28px));padding:14px 16px;border:1px solid rgba(205,183,137,.72);border-radius:20px;background:rgba(255,255,255,.98);box-shadow:0 22px 60px rgba(6,23,13,.24);transform:translateX(-50%);color:#06351f}
+    .app-update-prompt strong{display:block;font-size:15px}
+    .app-update-prompt span{display:block;color:#66756d;font-size:13px;font-weight:800}
+    .app-update-prompt button{border:1px solid var(--line);border-radius:13px;padding:10px 12px;background:#f8fafc;color:#06351f;font-weight:1000;white-space:nowrap}
+    .app-update-prompt .primary{background:linear-gradient(135deg,var(--green),#006936);border-color:#006936;color:#fff}
+    @media(max-width:680px){.app-update-prompt{align-items:stretch;flex-direction:column}.app-update-prompt button{width:100%}}
+  `;
+  document.head.appendChild(style);
+}
+function showAppUpdatePrompt(message='Une nouvelle version de CoachPulse est disponible.'){
+  ensureAppUpdatePromptStyles();
+  let prompt = $('#coachpulseAppUpdatePrompt');
+  if(!prompt){
+    prompt = document.createElement('div');
+    prompt.id = 'coachpulseAppUpdatePrompt';
+    prompt.className = 'app-update-prompt';
+    prompt.innerHTML = `
+      <div>
+        <strong>Mettre à jour CoachPulse</strong>
+        <span id="coachpulseAppUpdateText"></span>
+      </div>
+      <button type="button" class="primary" id="coachpulseAppRefreshBtn">Mettre à jour</button>
+      <button type="button" id="coachpulseAppUpdateLaterBtn">Plus tard</button>
+    `;
+    document.body.appendChild(prompt);
+    $('#coachpulseAppRefreshBtn')?.addEventListener('click', () => refreshInstalledApp());
+    $('#coachpulseAppUpdateLaterBtn')?.addEventListener('click', () => prompt.remove());
+  }
+  $('#coachpulseAppUpdateText').textContent = message;
+}
+async function refreshInstalledApp(){
+  if(appRefreshInProgress) return;
+  appRefreshInProgress = true;
+  notifyWarning('Mise à jour CoachPulse en cours. Les saisies hors connexion sont conservées.', {durationMs:0});
+  snapshotLocalData();
+  if(currentUser && storage.isPendingSync()) await syncCloud(false).catch(error => console.warn('Synchronisation avant mise à jour indisponible', error));
+  await clearAppShellCacheOnLaunch();
+  if('serviceWorker' in navigator){
+    const registration = await navigator.serviceWorker.ready.catch(() => null);
+    await registration?.update?.().catch(() => {});
+    if(registration?.waiting){
+      registration.waiting.postMessage({type:'COACHPULSE_SKIP_WAITING'});
+      setTimeout(() => window.location.reload(), 900);
+      return;
+    }
+    navigator.serviceWorker.controller?.postMessage({type:'COACHPULSE_CLEAR_APP_CACHE'});
+  }
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.set('coachpulseRefresh', Date.now().toString());
+  window.location.replace(nextUrl.toString());
+}
+function watchServiceWorkerUpdates(registration){
+  if(!registration) return;
+  if(registration.waiting && navigator.serviceWorker.controller) showAppUpdatePrompt();
+  registration.addEventListener('updatefound', () => {
+    const worker = registration.installing;
+    if(!worker) return;
+    worker.addEventListener('statechange', () => {
+      if(worker.state === 'installed' && navigator.serviceWorker.controller) showAppUpdatePrompt();
+    });
+  });
+}
 async function registerServiceWorker(){
   if(!('serviceWorker' in navigator)) return;
   try{
     const registration = await navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'});
+    watchServiceWorkerUpdates(registration);
     registration.update?.().catch(() => {});
   }catch(error){
     console.error(error);
   }
+}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(appRefreshInProgress) window.location.reload();
+  });
 }
 window.addEventListener('load', () => clearAppShellCacheOnLaunch().finally(registerServiceWorker));
 window.addEventListener('load', () => {
