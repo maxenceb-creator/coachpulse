@@ -6,6 +6,7 @@ const players = require('../shared/services/players-service.js');
 const teams = require('../shared/services/teams-service.js');
 const permissions = require('../shared/services/permissions-service.js');
 const modules = require('../shared/utils/module-registry.js');
+const playerDataAudit = require('./audit-player-data.js');
 
 function loadBrowserScript(filePath, windowOverrides={}){
   const window = {
@@ -463,19 +464,58 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
   assert(presencePageSource.includes('function normalizePresenceEventForStorage'), 'La page Présences doit normaliser les événements avant stockage.');
   assert(presencePageSource.includes('return api.presenceSaveEvent(normalized);'), 'La synchronisation cloud doit envoyer un événement normalisé.');
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  assert(appSource.includes('const safeSessionPayload = firestoreSafeData(sessionPayload);'), 'La sauvegarde des séances Présences doit nettoyer le payload Firestore.');
+  assert(appSource.includes('const safeAttendancePayload = firestoreSafeData(row);'), 'La sauvegarde des lignes Présences doit nettoyer le payload Firestore.');
+  assert(appSource.includes('procedure:presencePlainProcedure(row.sessionSnapshot?.procedure || sessionPayload.procedure)'), 'Les snapshots Présences doivent conserver une procédure sérialisable.');
 }
 
 function testPresenceD2CodeStaysScopedToU19(){
   const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
+  const presenceConfigSource = fs.readFileSync('pages/presences/presence-config.js', 'utf8');
   const presenceServiceSource = fs.readFileSync('shared/services/presence-events-service.js', 'utf8');
   const appSource = fs.readFileSync('app.js', 'utf8');
 
-  assert(presencePageSource.includes('short:"D2"'), 'Le code D2 doit être disponible dans les paramètres Présences.');
-  assert(presencePageSource.includes('teamIds:["team-u19"]'), 'Le code D2 doit rester limité au teamId U19.');
+  assert(presenceConfigSource.includes('short:"D2"'), 'Le code D2 doit être disponible dans les paramètres Présences.');
+  assert(presenceConfigSource.includes('teamIds:["team-u19"]'), 'Le code D2 doit rester limité au teamId U19.');
   assert(presencePageSource.includes('function attendanceStatusesForTeam'), 'La feuille de présence doit filtrer les codes selon le teamId.');
   assert(presencePageSource.includes('allowedStatusIds.has(patch.status)'), 'La sauvegarde doit refuser un code non autorisé pour l’équipe.');
   assert(presenceServiceSource.includes("D2:{code:'D2'"), 'Le service partagé doit normaliser le code D2.');
   assert(appSource.includes("'D2'"), 'Les imports Présences doivent reconnaître le code D2.');
+}
+
+function testHomeDashboardStaysScopedToAuthorizedTeams(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+
+  assert(appSource.includes('const HOME_TEAM_SELECTION_KEY'), 'L’accueil doit conserver l’équipe sélectionnée localement.');
+  assert(appSource.includes('async function homeAuthorizedTeams'), 'L’accueil doit charger les équipes via un helper dédié.');
+  assert(appSource.includes('function hideLegacyHomeDashboard'), 'Le nouvel accueil doit masquer les anciens blocs statiques.');
+  assert(appSource.includes("'.dashboard-hero,.metric-grid,.dashboard-grid'"), 'Les anciens blocs accueil ne doivent plus être visibles.');
+  assert(appSource.includes('filterAuthorizedTeams(teams)'), 'L’accueil doit réutiliser le filtrage central des équipes autorisées.');
+  assert(appSource.includes('canAccessTeamId(teamId)'), 'L’accueil doit vérifier le teamId avant affichage.');
+  assert(appSource.includes('teamProfileLoadData({teamId:selectedTeamId, homeDashboard:true})'), 'L’accueil doit charger les données par teamId via la fiche équipe centralisée.');
+  assert(appSource.includes('const allowHomeDashboard'), 'L’accueil doit réutiliser le chargeur fiche équipe sans exiger le module fiche équipe complet.');
+  assert(appSource.includes('homeView.classList.contains'), 'L’accueil doit éviter les chargements quand la page n’est pas visible.');
+}
+
+function testPlayerDataAuditDetectsDuplicatesAndBrokenLinks(){
+  const report = playerDataAudit.auditPlayers(playerDataAudit.collectionsFromExport({
+    collections:{
+      players:[
+        {playerId:'player-a', nom:'DUPONT', prenom:'AVA', birth:'2013-01-01', status:'active'},
+        {playerId:'player-b', nom:'DUPONT', prenom:'AVA', birth:'2013-01-01', status:'active'},
+        {playerId:'player-old', nom:'MARTIN', prenom:'LINA', birth:'2010-05-10', status:'archived'}
+      ],
+      technicalTests:[
+        {testId:'t1', playerId:'player-missing'},
+        {testId:'t2', playerId:'player-old'}
+      ]
+    }
+  }));
+
+  assert(report.errors.some(issue => issue.type === 'duplicate-active-identity'), 'L’audit doit détecter les doublons actifs.');
+  assert(report.warnings.some(issue => issue.type === 'unknown-linked-player'), 'L’audit doit détecter les historiques liés à un playerId absent.');
+  assert(report.warnings.some(issue => issue.type === 'archived-player-not-merged'), 'L’audit doit signaler une joueuse archivée avec historique non fusionné.');
 }
 
 function testPlayerProfileDataFallsBackToSelectedPlayerOnly(){
@@ -555,6 +595,8 @@ testAccessRegressionSurfaceStaysComplete();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPresenceD2CodeStaysScopedToU19();
+testHomeDashboardStaysScopedToAuthorizedTeams();
+testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 
 Promise.resolve()

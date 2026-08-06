@@ -90,9 +90,13 @@ function assertCriticalAssets(assets) {
     './pages/player-profile.html',
     './pages/team-profile.html',
     './pages/presences.html',
+    './pages/presences/presence-config.js',
+    './pages/presences/presence-utils.js',
     './shared/services/players-service.js',
     './shared/services/teams-service.js',
     './shared/services/permissions-service.js',
+    './shared/utils/storage-service.js',
+    './shared/utils/notifications-service.js',
     './shared/utils/module-registry.js'
   ].forEach(asset => {
     if(!assets.includes(asset)) fail(`Asset critique non precache: ${asset}`);
@@ -115,6 +119,13 @@ assertShellStrategy(source, meta.NETWORK_FIRST_ASSETS);
 [
   'const APP_SHELL_CACHE_PREFIX',
   'async function clearAppShellCacheOnLaunch',
+  'function ensurePwaDiagnosticsPanel',
+  'async function updatePwaDiagnostics',
+  'function detectLocalStorageStatus',
+  'function detectIndexedDbStatus',
+  'async function getPwaCacheLabel',
+  'pwaPendingSyncStatus',
+  'pwaLastCloudSyncStatus',
   "if(!navigator.onLine || !('caches' in window)) return;",
   'keys.filter(key => key.startsWith(APP_SHELL_CACHE_PREFIX)).map(key => caches.delete(key))',
   "navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'})"

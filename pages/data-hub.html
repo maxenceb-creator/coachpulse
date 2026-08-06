@@ -47,6 +47,7 @@ main{padding-top:14px!important}
     <div id="history" class="history"></div>
   </section>
 </main>
+<script src="../shared/utils/notifications-service.js"></script>
 <script type="module">
 import { analyzeRows as analyzePlayersRows } from '../connectors/fichesJoueusesConnector.js';
 import { analyzeRows as analyzePresencesRows } from '../connectors/presencesConnector.js';
@@ -66,6 +67,11 @@ function setStatus(text, bad=false){
 }
 function escapeHtml(v){
   return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+async function confirmAction(message, options={}){
+  const notify = window.CoachPulseNotify || window.parent?.CoachPulseNotify;
+  if(notify?.confirm) return notify.confirm(message, options);
+  return confirm(message);
 }
 function csvRows(text){
   const sample = text.slice(0,2000);
@@ -225,7 +231,12 @@ async function simulate(){
 async function syncFirebase(){
   if(!state.simulation) await simulate();
   if(!state.simulation) return;
-  if(!confirm(`Synchroniser Firebase ?\nCréations : ${state.simulation.created}\nMises à jour : ${state.simulation.updated}\nIgnorées : ${state.simulation.unchanged}\nErreurs : ${state.simulation.errors}\n\nAucune suppression ne sera faite.`)) return;
+  const confirmed = await confirmAction(`Créations : ${state.simulation.created}\nMises à jour : ${state.simulation.updated}\nIgnorées : ${state.simulation.unchanged}\nErreurs : ${state.simulation.errors}\n\nAucune suppression ne sera faite.`, {
+    title:'Synchroniser Firebase ?',
+    confirmLabel:'Synchroniser',
+    cancelLabel:'Annuler'
+  });
+  if(!confirmed) return;
   const api=parentApi();
   try{
     setStatus('Synchronisation Firebase...');
