@@ -20,9 +20,16 @@
     subCategories:['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','SENIORS'],
     teams:OFFICIAL_TEAMS.map(team => team.name)
   };
+  const FIRESTORE_CACHE_TTL_MS = 5 * 60 * 1000;
+  const firestoreTeamsCache = {rows:null, loadedAt:0, pending:null};
 
   function asText(value){ return String(value ?? '').trim(); }
   function nowIso(){ return new Date().toISOString(); }
+  function invalidateTeamsCache(){
+    firestoreTeamsCache.rows = null;
+    firestoreTeamsCache.loadedAt = 0;
+    firestoreTeamsCache.pending = null;
+  }
 
   function stableId(){
     const raw = Array.from(arguments).map(part =>
@@ -153,9 +160,26 @@
 
   async function listTeams(ctx={}, options={}){
     const {firebaseFns, db} = firestoreContext(ctx);
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION));
-    const teams = [];
-    snap.forEach(docSnap => teams.push(normalizeTeam({id:docSnap.id, teamId:docSnap.id, ...docSnap.data(), _originalId:docSnap.id})));
+    const now = Date.now();
+    if(!options.forceRefresh && firestoreTeamsCache.rows && now - firestoreTeamsCache.loadedAt < FIRESTORE_CACHE_TTL_MS){
+      const cached = mergeWithOfficialTeams(firestoreTeamsCache.rows);
+      return options.includeArchived ? cached : cached.filter(team => team.status !== 'archived');
+    }
+    if(!options.forceRefresh && firestoreTeamsCache.pending){
+      const pendingRows = await firestoreTeamsCache.pending;
+      const pendingMerged = mergeWithOfficialTeams(pendingRows);
+      return options.includeArchived ? pendingMerged : pendingMerged.filter(team => team.status !== 'archived');
+    }
+    firestoreTeamsCache.pending = firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION))
+      .then(snap => {
+        const teams = [];
+        snap.forEach(docSnap => teams.push(normalizeTeam({id:docSnap.id, teamId:docSnap.id, ...docSnap.data(), _originalId:docSnap.id})));
+        firestoreTeamsCache.rows = teams;
+        firestoreTeamsCache.loadedAt = Date.now();
+        return teams;
+      })
+      .finally(() => { firestoreTeamsCache.pending = null; });
+    const teams = await firestoreTeamsCache.pending;
     const merged = mergeWithOfficialTeams(teams);
     return options.includeArchived ? merged : merged.filter(team => team.status !== 'archived');
   }
@@ -188,6 +212,7 @@
       }, {merge:true}));
     });
     await Promise.all(writes);
+    invalidateTeamsCache();
     return officialTeamRows();
   }
 
@@ -209,6 +234,7 @@
     if(before && before.createdAtIso) delete payload.createdAtIso;
     if(!before && firebaseFns.serverTimestamp) payload.createdAt = firebaseFns.serverTimestamp();
     await firebaseFns.setDoc(ref, payload, {merge:true});
+    invalidateTeamsCache();
     return {team:clean, before, created:!before};
   }
 
@@ -220,6 +246,7 @@
     if(!before) throw new Error('Équipe introuvable.');
     const clean = normalizeTeamForWrite({...before, status:archived ? 'archived' : 'active'}, {firebaseFns, user:ctx.user});
     await firebaseFns.setDoc(ref, clean, {merge:true});
+    invalidateTeamsCache();
     return {team:clean, before};
   }
 
@@ -256,7 +283,7 @@
     COLLECTION, SETTINGS_COLLECTION, OPTIONS_ID, OFFICIAL_TEAMS, DEFAULT_DB_OPTIONS,
     stableId, canonicalTeamId, defaultTeamForSubCategory, categoryForSubCategory, resolveOfficialTeam, cleanOptionList,
     officialTeamRows, mergeWithOfficialTeams, normalizeTeam, normalizeTeamForWrite,
-    listTeams, ensureOfficialTeams, getTeam, saveTeam, archiveTeam, readDatabaseOptions, saveDatabaseOptions
+    listTeams, ensureOfficialTeams, getTeam, saveTeam, archiveTeam, readDatabaseOptions, saveDatabaseOptions, invalidateTeamsCache
   };
 
   global.CoachPulseTeamsService = service;
