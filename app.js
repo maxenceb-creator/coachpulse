@@ -4839,7 +4839,7 @@ async function technicalSaveTest(test={}){
   invalidateAppDataCaches('teamProfiles');
   snapshotLocalData();
   if(db && currentUser){
-    const payload = {...firestoreSafeData(clean), updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined};
+    const payload = {...firestoreSafeData({...clean, syncPending:false}), updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined};
     await firebaseFns.setDoc(firebaseFns.doc(db, 'technicalTests', technicalTestId), payload, {merge:true});
     const refreshed = localTechnicalPayload();
     const localIdx = refreshed.findIndex(row => technicalRowStorageId(row) === technicalTestId);
