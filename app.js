@@ -44,7 +44,7 @@ let appRefreshInProgress = false;
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260806-cache-login-fix';
+const APP_SHELL_VERSION = '20260806-cache-login-auth-fix';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -60,6 +60,7 @@ const HOME_TEAM_SELECTION_KEY = 'coachpulse:home:selectedTeamId';
 let homeDashboardRequestId = 0;
 let centralPlayersRefreshPending = null;
 let lastCentralPlayersRefreshAt = 0;
+let firebaseInitPromise = null;
 function cloneData(value){
   if(typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
@@ -838,6 +839,52 @@ async function loadFirebaseFns(){
   return firebaseFns;
 }
 
+function isRecoverableAuthStorageError(error){
+  const raw = String(error?.code || error?.message || error || '').toLowerCase();
+  return raw.includes('quota')
+    || raw.includes('indexeddb')
+    || raw.includes('idb')
+    || raw.includes('storage')
+    || raw.includes('internal-error')
+    || raw.includes('auth/network-request-failed');
+}
+
+function clearFirebaseAuthWebStorage(){
+  const isFirebaseAuthKey = key => /^firebase:authUser:/i.test(String(key || ''))
+    || /^firebase:redirectUser:/i.test(String(key || ''))
+    || /^firebase:persistence:/i.test(String(key || ''));
+  const stores = [];
+  try{ if(window.localStorage) stores.push(window.localStorage); }catch(_error){}
+  try{ if(window.sessionStorage) stores.push(window.sessionStorage); }catch(_error){}
+  stores.forEach(store => {
+    if(!store) return;
+    try{
+      for(let index = store.length - 1; index >= 0; index -= 1){
+        const key = store.key(index);
+        if(isFirebaseAuthKey(key)) store.removeItem(key);
+      }
+    }catch(_error){}
+  });
+}
+
+async function clearFirebaseAuthBrowserCache(reason='auth-recovery'){
+  try{ if(auth && firebaseFns?.signOut) await firebaseFns.signOut(auth).catch(() => {}); }catch(_error){}
+  clearFirebaseAuthWebStorage();
+  console.info(`CoachPulse Firebase Auth cache nettoyé (${reason}). Données hors connexion conservées.`);
+}
+
+async function configureAuthPersistence(){
+  if(!firebaseFns?.setPersistence || !auth) return;
+  const persistence = firebaseFns.browserSessionPersistence || firebaseFns.inMemoryPersistence;
+  if(!persistence) return;
+  try{
+    await firebaseFns.setPersistence(auth, persistence);
+  }catch(error){
+    console.warn('Persistance Firebase session indisponible, bascule mémoire.', error);
+    if(firebaseFns.inMemoryPersistence) await firebaseFns.setPersistence(auth, firebaseFns.inMemoryPersistence).catch(() => {});
+  }
+}
+
 function isSeedAdminEmail(email=''){
   const value = String(email || '').toLowerCase();
   return [
@@ -917,10 +964,17 @@ async function ensureUserProfile(user){
 }
 
 async function initFirebase(){
+  if(firebaseInitPromise) return firebaseInitPromise;
+  firebaseInitPromise = initFirebaseInternal().finally(() => { firebaseInitPromise = null; });
+  return firebaseInitPromise;
+}
+
+async function initFirebaseInternal(){
   try{
     await loadFirebaseFns();
     fbApp = firebaseFns.getApps().length ? firebaseFns.getApps()[0] : firebaseFns.initializeApp(FIREBASE_CONFIG);
     auth = firebaseFns.getAuth(fbApp);
+    await configureAuthPersistence();
     db = firebaseFns.getFirestore(fbApp);
     try{ await firebaseFns.enableIndexedDbPersistence(db); }catch(_e){}
     firebaseFns.onAuthStateChanged(auth, async user => {
@@ -932,7 +986,7 @@ async function initFirebase(){
           await ensureUserProfile(user);
         }catch(e){
           $('#authError').textContent = cleanError(e);
-          await firebaseFns.signOut(auth);
+          await clearFirebaseAuthBrowserCache('profile-load-failed');
           setLocked(true);
           return;
         }
@@ -958,6 +1012,17 @@ async function initFirebase(){
   }
 }
 
+async function signInWithAuthRecovery(email, password){
+  try{
+    return await firebaseFns.signInWithEmailAndPassword(auth, email, password);
+  }catch(error){
+    if(!isRecoverableAuthStorageError(error)) throw error;
+    await clearFirebaseAuthBrowserCache('login-retry');
+    await configureAuthPersistence();
+    return firebaseFns.signInWithEmailAndPassword(auth, email, password);
+  }
+}
+
 async function signInStaff(){
   $('#authError').textContent = '';
   if(signingIn) return;
@@ -966,7 +1031,7 @@ async function signInStaff(){
   if(btn) btn.disabled = true;
   try{
     if(!auth) await initFirebase();
-    await firebaseFns.signInWithEmailAndPassword(auth, $('#loginEmail').value.trim(), $('#loginPassword').value);
+    await signInWithAuthRecovery($('#loginEmail').value.trim(), $('#loginPassword').value);
   }catch(e){
     $('#authError').textContent = 'Connexion impossible : ' + cleanError(e);
   }finally{
@@ -5406,6 +5471,7 @@ async function updatePwaDiagnostics(){
 }
 async function logout(){
   try{ if(auth) await firebaseFns.signOut(auth); }catch(e){ notifyError('Déconnexion impossible : '+cleanError(e)); }
+  await clearFirebaseAuthBrowserCache('logout');
   stopRealtimeSync();
   currentUser = null; currentProfile = null;
   clearSensitiveLocalData();
@@ -6042,6 +6108,7 @@ window.addEventListener('load', () => enforceFreshAppShellOnLaunch().then(reload
   return registerServiceWorker();
 }));
 window.addEventListener('load', () => {
+  if(window.__coachpulseShellReloading) return;
   storage.setJson('coachpulse:firebaseConfig', FIREBASE_CONFIG, {recover:true});
   setLocked(true);
   setTimeout(() => $('#splash').classList.add('hide'), 950);
