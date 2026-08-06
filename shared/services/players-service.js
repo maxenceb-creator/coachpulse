@@ -9,7 +9,7 @@
   const PLAYER_REF_COLLECTIONS = ['matchEvents', 'attendance', 'technicalTests', 'physicalTests', 'injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines', 'workloads', 'medicalFollowUps', 'convocations', 'individualReports'];
   const OFFICIAL_TEAMS = ['U7 A','U9 A','U11 A','U13 A','U13 B','U16 A','U19','R1'];
   const FIRESTORE_CACHE_TTL_MS = 5 * 60 * 1000;
-  const firestorePlayersCache = {rows:null, loadedAt:0};
+  const firestorePlayersCache = {rows:null, loadedAt:0, pending:null};
   const TEAM_CATEGORY_RULES = [
     {team:'U7 A', category:'U7', subCategories:['U6','U7']},
     {team:'U9 A', category:'U9', subCategories:['U8','U9']},
@@ -27,6 +27,7 @@
   function invalidatePlayersCache(){
     firestorePlayersCache.rows = null;
     firestorePlayersCache.loadedAt = 0;
+    firestorePlayersCache.pending = null;
   }
 
   function stableId(){
@@ -436,11 +437,20 @@
     if(!ctx.forceRefresh && firestorePlayersCache.rows && now - firestorePlayersCache.loadedAt < FIRESTORE_CACHE_TTL_MS){
       return filterPlayers(writeCache([...firestorePlayersCache.rows, ...parseCache(CUSTOM_CACHE_KEY)]), filters);
     }
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION));
-    const rows = [];
-    snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()})));
-    firestorePlayersCache.rows = rows;
-    firestorePlayersCache.loadedAt = now;
+    if(!ctx.forceRefresh && firestorePlayersCache.pending){
+      const pendingRows = await firestorePlayersCache.pending;
+      return filterPlayers(writeCache([...pendingRows, ...parseCache(CUSTOM_CACHE_KEY)]), filters);
+    }
+    firestorePlayersCache.pending = firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION))
+      .then(snap => {
+        const rows = [];
+        snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()})));
+        firestorePlayersCache.rows = rows;
+        firestorePlayersCache.loadedAt = Date.now();
+        return rows;
+      })
+      .finally(() => { firestorePlayersCache.pending = null; });
+    const rows = await firestorePlayersCache.pending;
     const normalized = writeCache([...rows, ...parseCache(CUSTOM_CACHE_KEY)]);
     return filterPlayers(normalized, filters);
   }

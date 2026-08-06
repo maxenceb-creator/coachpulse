@@ -45,10 +45,12 @@ const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
 const appDataCache = {
   athleticRows:{rows:null, loadedAt:0},
   technicalRows:{rows:null, loadedAt:0},
-  presenceEvents:{rows:null, loadedAt:0, key:''},
+  technicalFootHints:{rows:null, loadedAt:0, pending:null},
+  presenceEvents:{rows:null, loadedAt:0, key:'', pending:null},
   playerProfiles:new Map(),
   teamProfiles:new Map()
 };
+let technicalPlayerFootHintsCache = null;
 const HOME_TEAM_SELECTION_KEY = 'coachpulse:home:selectedTeamId';
 let homeDashboardRequestId = 0;
 function cloneData(value){
@@ -81,6 +83,7 @@ async function measureAsync(label, work){
 }
 function invalidateAppDataCaches(scope='all'){
   if(scope === 'all' || scope === 'players') playersService()?.invalidatePlayersCache?.();
+  if(scope === 'all' || scope === 'teams') teamsService()?.invalidateTeamsCache?.();
   if(scope === 'all' || scope === 'athletic'){
     appDataCache.athleticRows.rows = null;
     appDataCache.athleticRows.loadedAt = 0;
@@ -88,11 +91,16 @@ function invalidateAppDataCaches(scope='all'){
   if(scope === 'all' || scope === 'technical' || scope === 'tests'){
     appDataCache.technicalRows.rows = null;
     appDataCache.technicalRows.loadedAt = 0;
+    appDataCache.technicalFootHints.rows = null;
+    appDataCache.technicalFootHints.loadedAt = 0;
+    appDataCache.technicalFootHints.pending = null;
+    technicalPlayerFootHintsCache = null;
   }
   if(scope === 'all' || scope === 'presence' || scope === 'presences'){
     appDataCache.presenceEvents.rows = null;
     appDataCache.presenceEvents.loadedAt = 0;
     appDataCache.presenceEvents.key = '';
+    appDataCache.presenceEvents.pending = null;
   }
   if(scope === 'all' || scope === 'players' || scope === 'playerProfiles') appDataCache.playerProfiles.clear();
   if(scope === 'all' || scope === 'players' || scope === 'teams' || scope === 'teamProfiles') appDataCache.teamProfiles.clear();
@@ -1333,7 +1341,6 @@ function extractTechnicalDataFromHtml(html=''){
   }
   return null;
 }
-let technicalPlayerFootHintsCache = null;
 async function technicalPlayerFootHints(){
   if(technicalPlayerFootHintsCache) return technicalPlayerFootHintsCache;
   let hints = readTechnicalPlayerFootHints();
@@ -1349,29 +1356,40 @@ async function technicalPlayerFootHints(){
 }
 async function technicalFirestorePlayerFootHints(){
   if(!db || !firebaseFns?.getDocs || !firebaseFns?.collection) return [];
-  const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'technicalTests'));
-  const hints = [];
-  snap.forEach(docSnap => {
-    const data = docSnap.data() || {};
-    const snapshot = data.playerSnapshot || data.player || {};
-    const source = {...snapshot, ...data};
-    const foot = technicalFootValue(source) || technicalFootValue(snapshot);
-    const nationalite = technicalNationalityValue(source) || technicalNationalityValue(snapshot);
-    if(!foot && !nationalite) return;
-    hints.push({
-      playerId:data.playerId || snapshot.playerId || data.id || '',
-      id:data.playerId || snapshot.playerId || data.id || '',
-      nom:snapshot.nom || data.nom || data.lastName || '',
-      prenom:snapshot.prenom || data.prenom || data.firstName || '',
-      displayName:snapshot.displayName || data.playerName || data.displayName || '',
-      dateNaissance:snapshot.dateNaissance || data.dateNaissance || data.birth || data.birthDate || '',
-      foot,
-      pied:foot,
-      meilleurPiedLabel:foot,
-      nationalite
-    });
-  });
-  return mergeTechnicalPlayerFootHints(hints);
+  const cache = appDataCache.technicalFootHints;
+  const now = Date.now();
+  if(cache.rows && now - cache.loadedAt < DATA_CACHE_TTL_MS) return cache.rows;
+  if(cache.pending) return cache.pending;
+  cache.pending = firebaseFns.getDocs(firebaseFns.collection(db, 'technicalTests'))
+    .then(snap => {
+      const hints = [];
+      snap.forEach(docSnap => {
+        const data = docSnap.data() || {};
+        const snapshot = data.playerSnapshot || data.player || {};
+        const source = {...snapshot, ...data};
+        const foot = technicalFootValue(source) || technicalFootValue(snapshot);
+        const nationalite = technicalNationalityValue(source) || technicalNationalityValue(snapshot);
+        if(!foot && !nationalite) return;
+        hints.push({
+          playerId:data.playerId || snapshot.playerId || data.id || '',
+          id:data.playerId || snapshot.playerId || data.id || '',
+          nom:snapshot.nom || data.nom || data.lastName || '',
+          prenom:snapshot.prenom || data.prenom || data.firstName || '',
+          displayName:snapshot.displayName || data.playerName || data.displayName || '',
+          dateNaissance:snapshot.dateNaissance || data.dateNaissance || data.birth || data.birthDate || '',
+          foot,
+          pied:foot,
+          meilleurPiedLabel:foot,
+          nationalite
+        });
+      });
+      const merged = mergeTechnicalPlayerFootHints(hints);
+      cache.rows = merged;
+      cache.loadedAt = Date.now();
+      return merged;
+    })
+    .finally(() => { cache.pending = null; });
+  return cache.pending;
 }
 function playerHintKey(raw={}){
   const normalized = normalizePlayer(raw);
@@ -4947,6 +4965,9 @@ async function presenceListEvents(){
   ){
     return cloneData(appDataCache.presenceEvents.rows);
   }
+  if(appDataCache.presenceEvents.pending && appDataCache.presenceEvents.key === cacheKey){
+    return cloneData(await appDataCache.presenceEvents.pending);
+  }
   const docsFromSnap = snap => {
     const rows = [];
     snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
@@ -5004,27 +5025,34 @@ async function presenceListEvents(){
   if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return [];
   const teamChunks = [];
   for(let i=0;i<authorizedTeamIds.length;i+=10) teamChunks.push(authorizedTeamIds.slice(i,i+10));
-  const sessionRows = isAdmin()
-    ? docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'sessions')))
-    : canAccessAllPlayersForModule('presences')
+  const loadEvents = async () => {
+    const sessionRows = isAdmin()
       ? await readPresenceSessionsForAllPlayersScope()
-      : await readPresenceSessionsForTeams(teamChunks);
-  const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
-    .filter(row => row.sessionId || row.id)
-    .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true);
-  const sessionIds = [...new Set(sessions.map(row => row.sessionId || row.id).filter(Boolean))];
-  const sessionChunks = [];
-  for(let i=0;i<sessionIds.length;i+=10) sessionChunks.push(sessionIds.slice(i,i+10));
-  const attendanceRows = sessionChunks.length
-    ? (await Promise.all(sessionChunks.map(chunk => readWhere('attendance', 'sessionId', 'in', chunk)))).flat()
-    : [];
-  const attendance = scopedRecordsForModuleAccess(attendanceRows, 'presences');
-  const events = sessions
-    .map(session => presenceCloudEventFromSession(session, attendance))
-    .filter(event => event.id && event.date)
-    .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
-  appDataCache.presenceEvents = {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey};
-  return events;
+      : canAccessAllPlayersForModule('presences')
+        ? await readPresenceSessionsForAllPlayersScope()
+        : await readPresenceSessionsForTeams(teamChunks);
+    const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
+      .filter(row => row.sessionId || row.id)
+      .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true);
+    const sessionIds = [...new Set(sessions.map(row => row.sessionId || row.id).filter(Boolean))];
+    const sessionChunks = [];
+    for(let i=0;i<sessionIds.length;i+=10) sessionChunks.push(sessionIds.slice(i,i+10));
+    const attendanceRows = sessionChunks.length
+      ? (await Promise.all(sessionChunks.map(chunk => readWhere('attendance', 'sessionId', 'in', chunk)))).flat()
+      : [];
+    const attendance = scopedRecordsForModuleAccess(attendanceRows, 'presences');
+    const events = sessions
+      .map(session => presenceCloudEventFromSession(session, attendance))
+      .filter(event => event.id && event.date)
+      .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+    appDataCache.presenceEvents = {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey, pending:null};
+    return events;
+  };
+  appDataCache.presenceEvents.key = cacheKey;
+  appDataCache.presenceEvents.pending = loadEvents().finally(() => {
+    if(appDataCache.presenceEvents.key === cacheKey) appDataCache.presenceEvents.pending = null;
+  });
+  return cloneData(await appDataCache.presenceEvents.pending);
 }
 async function presenceSaveEvent(event={}){
   if(!canEditModule('presences')) throw new Error('Modification Présences non autorisée.');
