@@ -3038,7 +3038,49 @@ async function adminUpdatePlayer(playerId, updates={}, action='update'){
 }
 async function adminArchivePlayer(playerId, archived=true){
   if(!guardAdminAction()) return;
-  return adminUpdatePlayer(playerId, {status:archived ? 'archived' : 'active'}, archived ? 'archive' : 'update');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  if(!playerId) throw new Error('playerId manquant.');
+  const ref = firebaseFns.doc(db, 'players', playerId);
+  const beforeSnap = await firebaseFns.getDoc(ref);
+  if(!beforeSnap.exists()) throw new Error('Joueuse introuvable.');
+  const before = {id:beforeSnap.id, playerId:beforeSnap.id, ...beforeSnap.data()};
+  const nextStatus = archived ? 'archived' : 'active';
+  const patch = {
+    status:nextStatus,
+    updatedAt:firebaseFns.serverTimestamp(),
+    updatedAtIso:new Date().toISOString(),
+    updatedBy:currentUser.uid,
+    updatedByEmail:currentUser.email || ''
+  };
+  if(archived){
+    patch.archivedAtIso = patch.updatedAtIso;
+    patch.archivedBy = currentUser.uid;
+    patch.archivedByEmail = currentUser.email || '';
+  }else{
+    patch.reactivatedAtIso = patch.updatedAtIso;
+    patch.reactivatedBy = currentUser.uid;
+    patch.reactivatedByEmail = currentUser.email || '';
+  }
+  await firebaseFns.setDoc(ref, patch, {merge:true});
+  const checkSnap = await firebaseFns.getDoc(ref);
+  const check = checkSnap.exists() ? checkSnap.data() : {};
+  if(String(check.status || '').toLowerCase() !== nextStatus){
+    throw new Error(`Statut joueuse non modifié après écriture (${check.status || 'vide'}).`);
+  }
+  playersService()?.invalidatePlayersCache?.();
+  const after = {...before, ...patch};
+  await writeChangeLog({
+    collectionName:'players',
+    documentId:playerId,
+    action:archived ? 'archive' : 'reactivate',
+    before,
+    after,
+    changes:playerAdminDiff(before, after),
+    summary:`Joueuse ${archived ? 'archivée' : 'réactivée'} : ${before.displayName || `${before.prenom || ''} ${before.nom || ''}`.trim() || playerId}`
+  });
+  await pullCentralPlayersToLocal(false).catch(()=>{});
+  notifyFramesPlayersUpdated();
+  return {changed:true, playerId, status:nextStatus};
 }
 function isPlayerReference(data={}, playerId=''){
   return data.playerId === playerId

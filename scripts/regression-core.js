@@ -576,6 +576,17 @@ function testPlayerProfileRenderStartsEmptyAndUsesPlayerIds(){
   assert(emptyIdentity.includes('Sélectionne une joueuse pour charger sa fiche complète.'));
 }
 
+function testPlayerArchiveUsesDirectStatusPatch(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const match = appSource.match(/async function adminArchivePlayer[\s\S]*?\n}\nfunction isPlayerReference/);
+  assert(match, 'La fonction adminArchivePlayer doit rester disponible.');
+  const body = match[0];
+  assert(body.includes("const nextStatus = archived ? 'archived' : 'active'"), 'L’archivage doit calculer explicitement le statut cible.');
+  assert(body.includes('await firebaseFns.setDoc(ref, patch, {merge:true});'), 'L’archivage doit écrire un patch de statut direct.');
+  assert(body.includes('Statut joueuse non modifié après écriture'), 'L’archivage doit vérifier le statut relu après écriture.');
+  assert(!body.includes('adminUpdatePlayer('), 'L’archivage ne doit pas repasser par la mise à jour complète de fiche.');
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -598,6 +609,7 @@ testPresenceD2CodeStaysScopedToU19();
 testHomeDashboardStaysScopedToAuthorizedTeams();
 testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
+testPlayerArchiveUsesDirectStatusPatch();
 
 Promise.resolve()
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)
