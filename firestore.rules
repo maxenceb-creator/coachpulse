@@ -316,7 +316,7 @@ service cloud.firestore {
         && request.resource.data.status in ['ACTIVE', 'ARCHIVED', 'active', 'injured', 'left', 'archived']
         && canAccessScopedData(resource.data)
         && canAccessScopedData(request.resource.data);
-      allow delete: if canDeleteCoreData(resource.data);
+      allow delete: if canWriteSportData() && canAccessModule('tests') && canAccessScopedDataForModule(resource.data, 'tests');
     }
 
     match /teams/{teamId} {
