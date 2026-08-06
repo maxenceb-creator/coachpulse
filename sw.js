@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-72-20260806-cache-login-fix';
+const CACHE_NAME = 'coachpulse-v6-4-73-20260806-cache-login-auth-fix';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
