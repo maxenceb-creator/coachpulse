@@ -129,6 +129,19 @@ const lastSave = $('#lastSave');
 const authGate = $('#authGate');
 const topUser = $('#topUser');
 
+function prepareInitialHomeRender(){
+  if(!homeView || homeView.dataset.initialHomePrepared === '1') return;
+  homeView.dataset.initialHomePrepared = '1';
+  homeView.querySelectorAll('.dashboard-hero,.metric-grid,.dashboard-grid').forEach(el => el.remove());
+  homeView.innerHTML = `
+    <section class="home-team-dashboard">
+      <div class="home-team-loading">Chargement du dernier accueil CoachPulse...</div>
+    </section>
+  `;
+}
+
+prepareInitialHomeRender();
+
 function closeDrawer(){ drawer.classList.remove('open'); overlay.classList.remove('show'); }
 function openDrawer(){
   if(window.matchMedia('(max-width:1180px)').matches) shell.classList.remove('collapsed');
