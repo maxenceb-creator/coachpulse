@@ -133,11 +133,7 @@ function prepareInitialHomeRender(){
   if(!homeView || homeView.dataset.initialHomePrepared === '1') return;
   homeView.dataset.initialHomePrepared = '1';
   homeView.querySelectorAll('.dashboard-hero,.metric-grid,.dashboard-grid').forEach(el => el.remove());
-  homeView.innerHTML = `
-    <section class="home-team-dashboard">
-      <div class="home-team-loading">Chargement du dernier accueil CoachPulse...</div>
-    </section>
-  `;
+  homeView.innerHTML = '';
 }
 
 prepareInitialHomeRender();
@@ -629,8 +625,10 @@ async function homeAuthorizedTeams(){
 }
 
 function renderHomeTeamDashboardLoading(){
-  const section = ensureHomeTeamDashboard();
-  if(section) section.innerHTML = '<div class="home-team-loading">Chargement des données des équipes autorisées...</div>';
+  if(!homeView) return;
+  hideLegacyHomeDashboard();
+  const section = document.getElementById('homeTeamDashboard');
+  if(section) section.remove();
 }
 
 function renderHomeTeamDashboardEmpty(message){
