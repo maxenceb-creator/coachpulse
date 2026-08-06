@@ -21,6 +21,7 @@ const conflictMarkers = ['<<<<<<<', '=======', '>>>>>>>'];
 const errors = [];
 const warnings = [];
 const ignoredDirs = new Set(['.git', 'node_modules', 'public', 'output', '.firebase', 'coverage']);
+const generatedDirs = new Set(['public', 'output', 'dist', 'build', '.firebase']);
 
 function read(relativePath) {
   const file = path.join(root, relativePath);
@@ -42,6 +43,18 @@ function listFiles(dir, predicate, found = []) {
     }
     const relativePath = path.relative(root, fullPath);
     if(!predicate || predicate(relativePath)) found.push(relativePath);
+  });
+  return found;
+}
+
+function listEntries(dir, predicate, found = []) {
+  if(!fs.existsSync(dir)) return found;
+  fs.readdirSync(dir, {withFileTypes:true}).forEach(entry => {
+    if(entry.name === '.git' || entry.name === 'node_modules') return;
+    const fullPath = path.join(dir, entry.name);
+    const relativePath = path.relative(root, fullPath);
+    if(!predicate || predicate(entry, relativePath)) found.push(relativePath);
+    if(entry.isDirectory()) listEntries(fullPath, predicate, found);
   });
   return found;
 }
@@ -108,6 +121,38 @@ if(firebaseConfig) {
 
 ['index.html', ...listFiles(path.join(root, 'pages'), file => file.endsWith('.html'))]
   .forEach(checkDuplicateHtmlIds);
+
+listEntries(root, (entry, relativePath) => {
+  const base = path.basename(relativePath);
+  return entry.isDirectory() && / 2$/.test(base);
+}).forEach(relativePath => warnings.push(`Dossier local en double probable: ${relativePath}`));
+
+Object.keys(require('../package.json').scripts || {}).forEach(scriptName => {
+  if(scriptName.startsWith('deploy:') && !read('firebase.json').includes('npm run build:public')) {
+    errors.push(`Script ${scriptName} sans build public verifie dans firebase.json`);
+  }
+});
+
+const trackedGenerated = require('child_process')
+  .execSync('git ls-files', {cwd: root, encoding: 'utf8'})
+  .split(/\r?\n/)
+  .filter(Boolean)
+  .filter(file => generatedDirs.has(file.split(/[\\/]/)[0]));
+if(trackedGenerated.length) {
+  errors.push(`Artefacts generes suivis par Git: ${trackedGenerated.join(', ')}`);
+}
+
+listFiles(root, file => /\.(html|js|css)$/.test(file)).forEach(file => {
+  const content = read(file);
+  const lines = content.split(/\r?\n/).length;
+  if(file.endsWith('.html')) {
+    const scriptCount = (content.match(/<script\b/gi) || []).length;
+    const styleCount = (content.match(/<style\b/gi) || []).length;
+    if(scriptCount > 4) warnings.push(`HTML a modulariser: ${file} contient ${scriptCount} scripts inline/charges`);
+    if(styleCount > 1) warnings.push(`CSS inline a surveiller: ${file} contient ${styleCount} blocs style`);
+  }
+  if(lines > 1200) warnings.push(`Fichier volumineux a decouper progressivement: ${file} (${lines} lignes)`);
+});
 
 const secretLikeFiles = listFiles(root, file => {
   const base = path.basename(file).toLowerCase();
