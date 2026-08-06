@@ -44,6 +44,9 @@ let appRefreshInProgress = false;
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
+const APP_SHELL_VERSION = '20260806-cache-login-fix';
+const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
+const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
   athleticRows:{rows:null, loadedAt:0},
   technicalRows:{rows:null, loadedAt:0},
@@ -5908,14 +5911,44 @@ setInterval(snapshotLocalData, 15000);
 window.addEventListener('pagehide', snapshotLocalData);
 window.addEventListener('storage', snapshotLocalData);
 
-async function clearAppShellCacheOnLaunch(){
-  if(!navigator.onLine || !('caches' in window)) return;
+async function clearAppShellCache(reason='launch'){
+  if(!('caches' in window)) return;
   try{
     const keys = await caches.keys();
     await Promise.all(keys.filter(key => key.startsWith(APP_SHELL_CACHE_PREFIX)).map(key => caches.delete(key)));
+    navigator.serviceWorker?.controller?.postMessage({type:'COACHPULSE_CLEAR_APP_CACHE', reason});
   }catch(error){
     console.warn('Nettoyage cache application indisponible', error);
   }
+}
+async function requestServiceWorkerUpdate(){
+  if(!('serviceWorker' in navigator)) return null;
+  try{
+    const registrations = navigator.serviceWorker.getRegistrations ? await navigator.serviceWorker.getRegistrations() : [];
+    await Promise.all(registrations.map(registration => registration.update?.().catch(() => {})));
+    return navigator.serviceWorker.ready.catch(() => null);
+  }catch(error){
+    console.warn('Actualisation service worker indisponible', error);
+    return null;
+  }
+}
+async function enforceFreshAppShellOnLaunch(){
+  if(!navigator.onLine) return false;
+  let previousVersion = '';
+  try{ previousVersion = localStorage.getItem(APP_SHELL_VERSION_KEY) || ''; }catch(_error){}
+  await clearAppShellCache('launch');
+  await requestServiceWorkerUpdate();
+  try{ localStorage.setItem(APP_SHELL_VERSION_KEY, APP_SHELL_VERSION); }catch(_error){}
+  if(previousVersion === APP_SHELL_VERSION) return false;
+  try{
+    if(sessionStorage.getItem(APP_SHELL_REFRESH_KEY) === APP_SHELL_VERSION) return false;
+    sessionStorage.setItem(APP_SHELL_REFRESH_KEY, APP_SHELL_VERSION);
+  }catch(_error){}
+  window.__coachpulseShellReloading = true;
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.set('coachpulseApp', APP_SHELL_VERSION);
+  window.location.replace(nextUrl.toString());
+  return true;
 }
 function ensureAppUpdatePromptStyles(){
   if($('#coachpulseAppUpdateStyles')) return;
@@ -5958,7 +5991,7 @@ async function refreshInstalledApp(){
   notifyWarning('Mise à jour CoachPulse en cours. Les saisies hors connexion sont conservées.', {durationMs:0});
   snapshotLocalData();
   if(currentUser && storage.isPendingSync()) await syncCloud(false).catch(error => console.warn('Synchronisation avant mise à jour indisponible', error));
-  await clearAppShellCacheOnLaunch();
+  await clearAppShellCache('manual-refresh');
   if('serviceWorker' in navigator){
     const registration = await navigator.serviceWorker.ready.catch(() => null);
     await registration?.update?.().catch(() => {});
@@ -5999,7 +6032,15 @@ if('serviceWorker' in navigator){
     if(appRefreshInProgress) window.location.reload();
   });
 }
-window.addEventListener('load', () => clearAppShellCacheOnLaunch().finally(registerServiceWorker));
+window.addEventListener('pageshow', event => {
+  if(event.persisted) enforceFreshAppShellOnLaunch().catch(error => console.warn('Contrôle cache pageshow indisponible', error));
+});
+window.addEventListener('load', () => enforceFreshAppShellOnLaunch().then(reloading => {
+  if(!reloading) return registerServiceWorker();
+}).catch(error => {
+  console.warn('Contrôle cache au démarrage indisponible', error);
+  return registerServiceWorker();
+}));
 window.addEventListener('load', () => {
   storage.setJson('coachpulse:firebaseConfig', FIREBASE_CONFIG, {recover:true});
   setLocked(true);

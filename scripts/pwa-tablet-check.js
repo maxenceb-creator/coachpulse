@@ -74,7 +74,7 @@ function assertShellStrategy(source, networkFirstAssets) {
   });
 
   [
-    'new Request(request, {cache: \'reload\'})',
+    'new Request(request, {cache: \'no-store\'})',
     "request.mode === 'navigate'",
     'NETWORK_FIRST_EXTENSIONS.test(url.pathname)',
     'self.skipWaiting()',
@@ -98,6 +98,7 @@ function assertCriticalAssets(assets) {
     './shared/services/players-service.js',
     './shared/services/teams-service.js',
     './shared/services/permissions-service.js',
+    './shared/services/presence-events-service.js',
     './shared/utils/storage-service.js',
     './shared/utils/notifications-service.js',
     './shared/utils/module-registry.js'
@@ -121,7 +122,9 @@ assertCriticalAssets(meta.CORE_ASSETS);
 assertShellStrategy(source, meta.NETWORK_FIRST_ASSETS);
 [
   'const APP_SHELL_CACHE_PREFIX',
-  'async function clearAppShellCacheOnLaunch',
+  'const APP_SHELL_VERSION',
+  'async function clearAppShellCache',
+  'async function enforceFreshAppShellOnLaunch',
   'function ensurePwaDiagnosticsPanel',
   'async function updatePwaDiagnostics',
   'function detectLocalStorageStatus',
@@ -129,7 +132,7 @@ assertShellStrategy(source, meta.NETWORK_FIRST_ASSETS);
   'async function getPwaCacheLabel',
   'pwaPendingSyncStatus',
   'pwaLastCloudSyncStatus',
-  "if(!navigator.onLine || !('caches' in window)) return;",
+  "if(!('caches' in window)) return;",
   'keys.filter(key => key.startsWith(APP_SHELL_CACHE_PREFIX)).map(key => caches.delete(key))',
   "navigator.serviceWorker.register('./sw.js', {updateViaCache:'none'})"
 ].forEach(snippet => {
