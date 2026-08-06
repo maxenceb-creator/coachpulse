@@ -425,6 +425,12 @@
     return normalized;
   }
 
+  function writeFirestoreCache(players){
+    const normalized = dedupePlayers(players);
+    try{ global.localStorage?.setItem(CACHE_KEY, JSON.stringify(normalized)); }catch(_e){}
+    return normalized;
+  }
+
   function firestoreContext({firebaseFns, db}={}){
     if(!firebaseFns || !db) throw new Error('Connexion Firebase requise.');
     return {firebaseFns, db};
@@ -435,11 +441,11 @@
     const {firebaseFns, db} = firestoreContext(ctx);
     const now = Date.now();
     if(!ctx.forceRefresh && firestorePlayersCache.rows && now - firestorePlayersCache.loadedAt < FIRESTORE_CACHE_TTL_MS){
-      return filterPlayers(writeCache([...firestorePlayersCache.rows, ...parseCache(CUSTOM_CACHE_KEY)]), filters);
+      return filterPlayers(dedupePlayers([...writeFirestoreCache(firestorePlayersCache.rows), ...parseCache(CUSTOM_CACHE_KEY)]), filters);
     }
     if(!ctx.forceRefresh && firestorePlayersCache.pending){
       const pendingRows = await firestorePlayersCache.pending;
-      return filterPlayers(writeCache([...pendingRows, ...parseCache(CUSTOM_CACHE_KEY)]), filters);
+      return filterPlayers(dedupePlayers([...writeFirestoreCache(pendingRows), ...parseCache(CUSTOM_CACHE_KEY)]), filters);
     }
     firestorePlayersCache.pending = firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION))
       .then(snap => {
@@ -451,7 +457,7 @@
       })
       .finally(() => { firestorePlayersCache.pending = null; });
     const rows = await firestorePlayersCache.pending;
-    const normalized = writeCache([...rows, ...parseCache(CUSTOM_CACHE_KEY)]);
+    const normalized = dedupePlayers([...writeFirestoreCache(rows), ...parseCache(CUSTOM_CACHE_KEY)]);
     return filterPlayers(normalized, filters);
   }
 

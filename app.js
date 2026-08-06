@@ -42,6 +42,7 @@ let lastCloudItemsHash = '';
 let adminAccessChoiceCache = null;
 let appRefreshInProgress = false;
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
+const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
 const appDataCache = {
   athleticRows:{rows:null, loadedAt:0},
@@ -54,6 +55,8 @@ const appDataCache = {
 let technicalPlayerFootHintsCache = null;
 const HOME_TEAM_SELECTION_KEY = 'coachpulse:home:selectedTeamId';
 let homeDashboardRequestId = 0;
+let centralPlayersRefreshPending = null;
+let lastCentralPlayersRefreshAt = 0;
 function cloneData(value){
   if(typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
@@ -125,6 +128,15 @@ const syncText = $('#syncText');
 const lastSave = $('#lastSave');
 const authGate = $('#authGate');
 const topUser = $('#topUser');
+
+function prepareInitialHomeRender(){
+  if(!homeView || homeView.dataset.initialHomePrepared === '1') return;
+  homeView.dataset.initialHomePrepared = '1';
+  homeView.querySelectorAll('.dashboard-hero,.metric-grid,.dashboard-grid').forEach(el => el.remove());
+  homeView.innerHTML = '';
+}
+
+prepareInitialHomeRender();
 
 function closeDrawer(){ drawer.classList.remove('open'); overlay.classList.remove('show'); }
 function openDrawer(){
@@ -613,8 +625,10 @@ async function homeAuthorizedTeams(){
 }
 
 function renderHomeTeamDashboardLoading(){
-  const section = ensureHomeTeamDashboard();
-  if(section) section.innerHTML = '<div class="home-team-loading">Chargement des données des équipes autorisées...</div>';
+  if(!homeView) return;
+  hideLegacyHomeDashboard();
+  const section = document.getElementById('homeTeamDashboard');
+  if(section) section.remove();
 }
 
 function renderHomeTeamDashboardEmpty(message){
@@ -922,7 +936,7 @@ async function initFirebase(){
         setLocked(false);
         try{ startRealtimeSync(); }catch(e){ console.warn('Realtime sync unavailable after login', e); }
         await syncCloud(false).catch(e => console.warn('Cloud sync unavailable after login', e));
-        await pullCentralPlayersToLocal(false).catch(e => console.warn('Central players pull unavailable after login', e));
+        await refreshCentralPlayersFromCloud({force:true, reason:'login'}).catch(e => console.warn('Central players pull unavailable after login', e));
         try{ purgeUnauthorizedLocalData(); }catch(e){ console.warn('Local data purge unavailable after login', e); }
         const last = storage.get('coachpulse:lastTool', 'home');
         routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
@@ -1692,19 +1706,35 @@ async function migrateLocalDataToCentralFirestore(manual=true){
 async function pullCentralPlayersToLocal(manual=true){
   if(manual && !guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  return refreshCentralPlayersFromCloud({force:true, manual, reason:manual ? 'manual' : 'pull'});
+}
+async function refreshCentralPlayersFromCloud(options={}){
+  const {force=false, manual=false, reason='auto'} = options;
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  if(!navigator.onLine && !force) return [];
+  const now = Date.now();
+  if(!force && now - lastCentralPlayersRefreshAt < CLOUD_PLAYERS_REFRESH_THROTTLE_MS) return [];
+  if(centralPlayersRefreshPending) return centralPlayersRefreshPending;
   const service = playersService();
-  let players = [];
-  if(service?.readFirestorePlayers){
-    players = await service.readFirestorePlayers(firestoreServiceContext({forceRefresh:true}));
-  }else{
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
-    snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
-    storage.setJson('coachpulse:centralPlayers', players, {recover:true});
-  }
-  notifyFramesPlayersUpdated();
-  updateCloudKpis();
-  if(manual) notifySuccess(`${players.length} joueuses récupérées depuis Firebase.`);
-  return players;
+  centralPlayersRefreshPending = (async () => {
+    let players = [];
+    if(service?.readFirestorePlayers){
+      players = await service.readFirestorePlayers(firestoreServiceContext({forceRefresh:true}));
+    }else{
+      const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
+      snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
+      storage.setJson('coachpulse:centralPlayers', players, {recover:true});
+    }
+    lastCentralPlayersRefreshAt = Date.now();
+    storage.set('coachpulse:lastPlayersCloudRefresh', new Date().toISOString(), {recover:true});
+    try{ purgeUnauthorizedLocalData(); }catch(error){ console.warn('Purge locale après actualisation joueuses indisponible', error); }
+    notifyFramesPlayersUpdated();
+    updateCloudKpis();
+    if(manual) notifySuccess(`${players.length} joueuses récupérées depuis Firebase.`);
+    else console.info(`[CoachPulse] Base joueuses Firestore actualisée (${players.length}) · ${reason}`);
+    return players;
+  })().finally(() => { centralPlayersRefreshPending = null; });
+  return centralPlayersRefreshPending;
 }
 async function readCentralFirestoreExport(){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
@@ -5852,9 +5882,19 @@ $('#refreshMembersBtn').addEventListener('click', async () => { adminAccessChoic
 $('#membersTbody').addEventListener('click', adminTableClick);
 adminView?.addEventListener('change', adminAccessPickerChange);
 
-window.addEventListener('online', () => { updateSyncState('Retour Internet · sync...'); syncCloud(false); });
+window.addEventListener('online', () => {
+  updateSyncState('Retour Internet · sync...');
+  syncCloud(false);
+  refreshCentralPlayersFromCloud({reason:'online'}).catch(error => console.warn('Actualisation joueuses au retour Internet indisponible', error));
+});
 window.addEventListener('offline', () => updateSyncState('Hors ligne · local actif'));
 window.addEventListener('resize', () => { if(window.matchMedia('(max-width:1180px)').matches) shell.classList.remove('collapsed'); });
+window.addEventListener('focus', () => {
+  if(currentUser) refreshCentralPlayersFromCloud({reason:'focus'}).catch(error => console.warn('Actualisation joueuses au focus indisponible', error));
+});
+document.addEventListener('visibilitychange', () => {
+  if(!document.hidden && currentUser) refreshCentralPlayersFromCloud({reason:'visible'}).catch(error => console.warn('Actualisation joueuses au retour app indisponible', error));
+});
 window.addEventListener('message', e => {
   if(e.data?.type === 'coachpulse-local-change') snapshotLocalData();
   if(e.data?.type === 'coachpulse-open-module' && e.data.moduleId){
