@@ -37,7 +37,7 @@ function loadServiceWorkerMetadata() {
     console
   };
   vm.createContext(sandbox);
-  vm.runInContext(`${source}\nglobalThis.__SW_AUDIT__ = {CACHE_NAME, CORE_ASSETS, NETWORK_FIRST_ASSETS:Array.from(NETWORK_FIRST_ASSETS)};`, sandbox);
+  vm.runInContext(`${source}\nglobalThis.__SW_AUDIT__ = {CACHE_NAME, CORE_ASSETS, NETWORK_FIRST_ASSETS:Array.from(NETWORK_FIRST_ASSETS), APP_CACHE_PREFIX, NETWORK_FIRST_EXTENSIONS:String(NETWORK_FIRST_EXTENSIONS)};`, sandbox);
   return {source, meta: sandbox.__SW_AUDIT__};
 }
 
@@ -75,10 +75,13 @@ function assertShellStrategy(source, networkFirstAssets) {
 
   [
     'new Request(request, {cache: \'reload\'})',
-    'event.request.mode === \'navigate\'',
+    "request.mode === 'navigate'",
+    'NETWORK_FIRST_EXTENSIONS.test(url.pathname)',
     'self.skipWaiting()',
     'self.clients.claim()',
-    'keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))'
+    'keys.filter(k => k.startsWith(APP_CACHE_PREFIX) && k !== CACHE_NAME).map(k => caches.delete(k))',
+    "type === 'COACHPULSE_SKIP_WAITING'",
+    "type === 'COACHPULSE_CLEAR_APP_CACHE'"
   ].forEach(snippet => {
     if(!source.includes(snippet)) fail(`Garde-fou service worker manquant: ${snippet}`);
   });
