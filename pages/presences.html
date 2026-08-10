@@ -6,6 +6,7 @@
   <title>CoachPulse · Présences</title>
   <link rel="stylesheet" href="../css/responsive.css">
   <style>
+    [data-admin-only][hidden]{display:none!important}
     :root{
       --green:#00843d;
       --dark:#005d2b;
@@ -1352,7 +1353,7 @@
       <button class="presence-tab" data-tab="sessions" type="button"><span>✅</span>Séances<small>Présences</small></button>
       <button class="presence-tab" data-tab="reports" type="button"><span>📊</span>Bilans<small>Suivi collectif</small></button>
       <button class="presence-tab" data-tab="prevention" type="button"><span>⚡</span>Prévention<small>Charge</small></button>
-      <button class="presence-tab" data-tab="settings" type="button"><span>🧩</span>Paramètres<small>Réglages</small></button>
+      <button class="presence-tab" data-tab="settings" data-admin-only type="button" hidden><span>🧩</span>Paramètres<small>Réglages</small></button>
     </nav>
 
     <section id="panel-sessions" class="presence-panel sessions-shell" aria-labelledby="sessionsTitle">
@@ -1579,7 +1580,7 @@
         </article>
       </div>
     </section>
-    <section id="panel-settings" class="presence-panel settings-page" aria-label="Paramètres Présences">
+    <section id="panel-settings" class="presence-panel settings-page" data-admin-only aria-label="Paramètres Présences" hidden>
       <div class="kpi-grid page-kpis" aria-label="Résumé des réglages Présences">
         <div class="kpi-card"><strong id="settingsTeamsCount">0</strong><span>Équipes</span></div>
         <div class="kpi-card"><strong id="settingsEventsCount">0</strong><span>Événements</span></div>
@@ -1707,6 +1708,20 @@
       let reportPlayerFilterIds = new Set();
       let preventionPlayerFilterIds = new Set();
       let cloudReady = false;
+      let presenceAccess = null;
+      let stopPresenceEventsSubscription = null;
+      let stopPresenceSettingsSubscription = null;
+      let realtimeRefreshTimer = null;
+      function isPresenceAdmin(){
+        const profile = presenceAccess?.profile || {};
+        return String(profile.permissionLevel || '').toUpperCase() === 'ADMIN' || String(profile.role || '').toUpperCase() === 'ADMIN';
+      }
+      function applyPresenceAccess(context){
+        if(context?.type === 'coachpulse-access-context') presenceAccess = context;
+        const allowed = isPresenceAdmin();
+        document.querySelectorAll('[data-admin-only]').forEach(node => { node.hidden = !allowed; });
+        if(!allowed && document.getElementById('panel-settings')?.classList.contains('active')) activateTab('calendar');
+      }
       function presenceSettings(){
         const saved = readJson(PRESENCE_SETTINGS_KEY, {});
         return {
@@ -1722,6 +1737,13 @@
           attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)
         };
         setJson(PRESENCE_SETTINGS_KEY, next);
+        const api = centralDataApi();
+        if(isPresenceAdmin() && api?.presenceSaveSettings){
+          api.presenceSaveSettings(next).then(() => {
+            cloudReady = true;
+            setSettingsMessage('Paramètres enregistrés dans le cloud.', 'success');
+          }).catch(error => setSettingsMessage(`Paramètres conservés localement, cloud non synchronisé : ${error?.message || error}`, 'error'));
+        }
       }
       function teamsService(){
         try{
@@ -1948,6 +1970,17 @@
         savePresenceEvents(merged);
         cloudReady = true;
         return {merged, cloudEvents:Array.isArray(cloudEvents) ? cloudEvents : []};
+      }
+      async function pullPresenceSettingsFromCloud(){
+        const api = centralDataApi();
+        if(!api?.presenceLoadSettings) return;
+        const cloudSettings = await api.presenceLoadSettings();
+        if(cloudSettings && Object.keys(cloudSettings).length){
+          const next = {...DEFAULT_PRESENCE_SETTINGS, ...cloudSettings, attendanceCodes:mergeAttendanceCodes(cloudSettings.attendanceCodes)};
+          setJson(PRESENCE_SETTINGS_KEY, next);
+          fillSettingsForm();
+          applySessionDefaults(false);
+        }
       }
       async function pushPresenceEventToCloud(event){
         const api = centralDataApi();
@@ -3291,17 +3324,40 @@
       }
       async function initPresenceCloud(){
         try{
-          const {cloudEvents=[]} = await pullPresenceEventsFromCloud();
+          const api = centralDataApi();
+          const [, presenceResult] = await Promise.all([
+            pullPresenceSettingsFromCloud(),
+            pullPresenceEventsFromCloud()
+          ]);
+          const {cloudEvents=[]} = presenceResult || {};
           const syncedCount = await syncPresenceEventsToCloud(cloudEvents);
           render();
           renderSessionList();
           if(cloudReady) setSessionMessage(syncedCount ? `${syncedCount} événement(s) synchronisé(s) avec le cloud.` : "Événements chargés depuis le cloud.", "success");
+          stopPresenceEventsSubscription?.();
+          stopPresenceEventsSubscription = api?.presenceSubscribeEvents?.(() => {
+            clearTimeout(realtimeRefreshTimer);
+            realtimeRefreshTimer = setTimeout(async () => {
+              try{ await pullPresenceEventsFromCloud(); render(); renderSessionList(); }
+              catch(error){ console.warn('[Présences] Actualisation temps réel impossible', error); }
+            }, 150);
+          }) || null;
+          stopPresenceSettingsSubscription?.();
+          stopPresenceSettingsSubscription = api?.presenceSubscribeSettings?.(settings => {
+            const next = {...DEFAULT_PRESENCE_SETTINGS, ...settings, attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)};
+            setJson(PRESENCE_SETTINGS_KEY, next);
+            fillSettingsForm();
+            applySessionDefaults(false);
+            render();
+          }) || null;
         }catch(error){
           cloudReady = false;
           setSessionMessage(`Cloud indisponible : affichage local uniquement. ${error?.message || error}`, "error");
         }
       }
       initTabs();
+      window.addEventListener('message', event => applyPresenceAccess(event.data));
+      try{ applyPresenceAccess(window.parent?.accessContext?.()); }catch(_error){ applyPresenceAccess(null); }
       initSessions();
       initSettings();
       initCalendarControls();
