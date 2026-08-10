@@ -1712,6 +1712,8 @@
       let stopPresenceEventsSubscription = null;
       let stopPresenceSettingsSubscription = null;
       let realtimeRefreshTimer = null;
+      const presenceCloudSaveTimers = new Map();
+      const presenceCloudWriteChains = new Map();
       function isPresenceAdmin(){
         const profile = presenceAccess?.profile || {};
         return String(profile.permissionLevel || '').toUpperCase() === 'ADMIN' || String(profile.role || '').toUpperCase() === 'ADMIN';
@@ -1988,6 +1990,26 @@
         const normalized = normalizePresenceEventForStorage(event);
         if(!normalized.teamId) throw new Error("teamId obligatoire pour synchroniser l'événement.");
         return api.presenceSaveEvent(normalized);
+      }
+      function schedulePresenceEventCloudSave(eventId, delay=650){
+        clearTimeout(presenceCloudSaveTimers.get(eventId));
+        setSessionMessage("Modification enregistrée localement…", "");
+        presenceCloudSaveTimers.set(eventId, setTimeout(() => {
+          presenceCloudSaveTimers.delete(eventId);
+          const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve();
+          const nextWrite = previousWrite.catch(() => {}).then(async () => {
+            const latestEvent = loadPresenceEvents().find(item => item.id === eventId);
+            if(!latestEvent) return;
+            await pushPresenceEventToCloud(latestEvent);
+            markPresenceEventsSynced([eventId]);
+            setSessionMessage("Feuille de présence synchronisée.", "success");
+          }).catch(error => {
+            setSessionMessage(`Sauvegarde cloud impossible : ${error?.message || error}.`, "error");
+          }).finally(() => {
+            if(presenceCloudWriteChains.get(eventId) === nextWrite) presenceCloudWriteChains.delete(eventId);
+          });
+          presenceCloudWriteChains.set(eventId, nextWrite);
+        }, delay));
       }
       async function syncPresenceEventsToCloud(cloudEvents=[]){
         const api = centralDataApi();
@@ -3017,7 +3039,7 @@
           </div>
         `;
       }
-      async function updateAttendanceEntry(eventId, playerId, patch){
+      function updateAttendanceEntry(eventId, playerId, patch){
         const events = loadPresenceEvents();
         const index = events.findIndex(event => event.id === eventId);
         if(index < 0) return;
@@ -3055,13 +3077,8 @@
           updatedAt:new Date().toISOString()
         };
         savePresenceEvents(events);
-        renderSessionList();
-        try{
-          await pushPresenceEventToCloud(events[index]);
-          setSessionMessage("Feuille de présence synchronisée.", "success");
-        }catch(error){
-          setSessionMessage(`Sauvegarde cloud impossible : ${error?.message || error}.`, "error");
-        }
+        renderAttendanceDetail();
+        schedulePresenceEventCloudSave(eventId);
       }
       function updateDurationFromTimes(){
         const start = document.getElementById("sessionStart")?.value || "";

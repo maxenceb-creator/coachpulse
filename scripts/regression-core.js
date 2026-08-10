@@ -587,6 +587,16 @@ function testPlayerArchiveUsesDirectStatusPatch(){
   assert(!body.includes('adminUpdatePlayer('), 'L’archivage ne doit pas repasser par la mise à jour complète de fiche.');
 }
 
+function testPresenceInteractionsStayNonBlocking(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const presenceSource = fs.readFileSync('pages/presences.html', 'utf8');
+
+  assert(appSource.includes("FIRESTORE_MANAGED_LOCAL_KEYS.has(String(key || ''))"), 'Les écritures Présence gérées par Firestore ne doivent pas déclencher une sauvegarde globale lourde.');
+  assert(!appSource.includes("setInterval(snapshotLocalData, 15000)"), 'La sauvegarde complète ne doit plus être exécutée toutes les 15 secondes.');
+  assert(presenceSource.includes('schedulePresenceEventCloudSave(eventId);'), 'Les clics de présence doivent utiliser une sauvegarde cloud regroupée.');
+  assert(!presenceSource.includes('await pushPresenceEventToCloud(events[index]);'), 'Un clic de présence ne doit pas attendre directement l’écriture Firestore complète.');
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -610,6 +620,7 @@ testHomeDashboardStaysScopedToAuthorizedTeams();
 testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 testPlayerArchiveUsesDirectStatusPatch();
+testPresenceInteractionsStayNonBlocking();
 
 Promise.resolve()
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)

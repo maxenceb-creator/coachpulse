@@ -41,6 +41,11 @@ let applyingCloud = false;
 let lastCloudItemsHash = '';
 let adminAccessChoiceCache = null;
 let appRefreshInProgress = false;
+let localChangeSnapshotTimer = null;
+const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
+  'coachpulse:presenceEvents:v1',
+  'coachpulse:presenceSettings:v1'
+]);
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
@@ -1075,6 +1080,11 @@ function snapshotLocalData(options={}){
   updateCloudKpis();
   updateDashboard();
   if(lastSave) lastSave.textContent = new Date(payload.savedAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+}
+function scheduleSnapshotForLocalChange(key=''){
+  if(FIRESTORE_MANAGED_LOCAL_KEYS.has(String(key || ''))) return;
+  clearTimeout(localChangeSnapshotTimer);
+  localChangeSnapshotTimer = setTimeout(() => snapshotLocalData(), 750);
 }
 
 function isLocalStorageQuotaError(error){
@@ -5957,17 +5967,19 @@ document.addEventListener('visibilitychange', () => {
   if(!document.hidden && currentUser) refreshCentralPlayersFromCloud({reason:'visible'}).catch(error => console.warn('Actualisation joueuses au retour app indisponible', error));
 });
 window.addEventListener('message', e => {
-  if(e.data?.type === 'coachpulse-local-change') snapshotLocalData();
+  if(e.data?.type === 'coachpulse-local-change'){
+    scheduleSnapshotForLocalChange(e.data.key);
+  }
   if(e.data?.type === 'coachpulse-open-module' && e.data.moduleId){
     if(e.data.playerId) storage.set('coachpulse:playerProfile:selectedPlayerId', e.data.playerId, {recover:true});
     routeTo(e.data.moduleId);
   }
 });
 frame.addEventListener('load', installFrameLocalStorageWatcher);
-setInterval(() => { snapshotLocalData(); if(currentUser && storage.isPendingSync()) scheduleCloudSync(500); }, 5000);
-setInterval(snapshotLocalData, 15000);
+setInterval(() => { if(currentUser && storage.isPendingSync()) scheduleCloudSync(500); }, 5000);
+setInterval(() => snapshotLocalData({fromCloud:true}), 60000);
 window.addEventListener('pagehide', snapshotLocalData);
-window.addEventListener('storage', snapshotLocalData);
+window.addEventListener('storage', event => scheduleSnapshotForLocalChange(event.key));
 
 async function clearAppShellCacheOnLaunch(){
   if(!navigator.onLine || !('caches' in window)) return;
