@@ -2980,6 +2980,27 @@
         `).join("");
         renderAttendanceDetail();
       }
+      function playerFromAttendanceSnapshot(event, playerId){
+        const raw = event?.attendance?.[playerId];
+        const snapshot = raw?.playerSnapshot || {};
+        const player = playerById(playerId, event?.date);
+        return {
+          ...(player || {}),
+          ...snapshot,
+          playerId,
+          team:snapshot.team || player?.team || event?.team || "",
+          teamId:snapshot.teamId || player?.teamId || event?.teamId || ""
+        };
+      }
+      function attendancePlayersForEvent(event){
+        const attendanceIds = Object.keys(event?.attendance || {}).filter(Boolean);
+        if(attendanceIds.length){
+          return attendanceIds
+            .map(playerId => playerFromAttendanceSnapshot(event, playerId))
+            .sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
+        }
+        return playersForTeam(event.teamId, event.date);
+      }
       function renderAttendanceDetail(){
         const card = document.getElementById("attendanceDetail");
         const content = document.getElementById("attendanceDetailContent");
@@ -2992,7 +3013,7 @@
           return;
         }
         card.hidden = false;
-        const players = playersForTeam(event.teamId, event.date);
+        const players = attendancePlayersForEvent(event);
         if(!event.teamId){
           content.innerHTML = '<div class="empty-state">Aucune équipe reliée à cet événement.</div>';
           return;
@@ -3111,7 +3132,9 @@
           delete attendance[playerId];
         }else{
           const player = playerById(playerId, current.date);
-          const playerSnapshot = playerSnapshotForAttendance(player, current.teamId, current.date);
+          const playerSnapshot = player
+            ? playerSnapshotForAttendance(player, current.teamId, current.date)
+            : current.attendance?.[playerId]?.playerSnapshot || {};
           attendance[playerId] = {
             ...next,
             teamId:current.teamId || "",
