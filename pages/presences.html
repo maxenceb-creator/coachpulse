@@ -6,6 +6,7 @@
   <title>CoachPulse · Présences</title>
   <link rel="stylesheet" href="../css/responsive.css">
   <style>
+    [data-admin-only][hidden]{display:none!important}
     :root{
       --green:#00843d;
       --dark:#005d2b;
@@ -1352,7 +1353,7 @@
       <button class="presence-tab" data-tab="sessions" type="button"><span>✅</span>Séances<small>Présences</small></button>
       <button class="presence-tab" data-tab="reports" type="button"><span>📊</span>Bilans<small>Suivi collectif</small></button>
       <button class="presence-tab" data-tab="prevention" type="button"><span>⚡</span>Prévention<small>Charge</small></button>
-      <button class="presence-tab" data-tab="settings" type="button"><span>🧩</span>Paramètres<small>Réglages</small></button>
+      <button class="presence-tab" data-tab="settings" data-admin-only type="button" hidden><span>🧩</span>Paramètres<small>Réglages</small></button>
     </nav>
 
     <section id="panel-sessions" class="presence-panel sessions-shell" aria-labelledby="sessionsTitle">
@@ -1392,6 +1393,9 @@
               <select id="sessionType" name="type" required>
                 <option value="entrainement">Entraînement</option>
                 <option value="match">Match</option>
+                <option value="match_championnat">Match de championnat</option>
+                <option value="match_coupe">Match de coupe</option>
+                <option value="match_amical">Match amical</option>
                 <option value="tournoi">Tournoi</option>
                 <option value="futsal">Futsal</option>
                 <option value="test">Test</option>
@@ -1579,7 +1583,7 @@
         </article>
       </div>
     </section>
-    <section id="panel-settings" class="presence-panel settings-page" aria-label="Paramètres Présences">
+    <section id="panel-settings" class="presence-panel settings-page" data-admin-only aria-label="Paramètres Présences" hidden>
       <div class="kpi-grid page-kpis" aria-label="Résumé des réglages Présences">
         <div class="kpi-card"><strong id="settingsTeamsCount">0</strong><span>Équipes</span></div>
         <div class="kpi-card"><strong id="settingsEventsCount">0</strong><span>Événements</span></div>
@@ -1707,6 +1711,24 @@
       let reportPlayerFilterIds = new Set();
       let preventionPlayerFilterIds = new Set();
       let cloudReady = false;
+      let presenceAccess = null;
+      let stopPresenceEventsSubscription = null;
+      let stopPresenceSettingsSubscription = null;
+      let realtimeRefreshTimer = null;
+      let presenceEventsMemoryCache = null;
+      let presenceLocalSaveTimer = null;
+      const presenceCloudSaveTimers = new Map();
+      const presenceCloudWriteChains = new Map();
+      function isPresenceAdmin(){
+        const profile = presenceAccess?.profile || {};
+        return String(profile.permissionLevel || '').toUpperCase() === 'ADMIN' || String(profile.role || '').toUpperCase() === 'ADMIN';
+      }
+      function applyPresenceAccess(context){
+        if(context?.type === 'coachpulse-access-context') presenceAccess = context;
+        const allowed = isPresenceAdmin();
+        document.querySelectorAll('[data-admin-only]').forEach(node => { node.hidden = !allowed; });
+        if(!allowed && document.getElementById('panel-settings')?.classList.contains('active')) activateTab('calendar');
+      }
       function presenceSettings(){
         const saved = readJson(PRESENCE_SETTINGS_KEY, {});
         return {
@@ -1722,6 +1744,13 @@
           attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)
         };
         setJson(PRESENCE_SETTINGS_KEY, next);
+        const api = centralDataApi();
+        if(isPresenceAdmin() && api?.presenceSaveSettings){
+          api.presenceSaveSettings(next).then(() => {
+            cloudReady = true;
+            setSettingsMessage('Paramètres enregistrés dans le cloud.', 'success');
+          }).catch(error => setSettingsMessage(`Paramètres conservés localement, cloud non synchronisé : ${error?.message || error}`, 'error'));
+        }
       }
       function teamsService(){
         try{
@@ -1900,9 +1929,8 @@
         return calendarTeamFilterIds.size === 1 ? [...calendarTeamFilterIds][0] : "";
       }
       function loadEvents(){
-        const savedPresenceEvents = readJson(PRESENCE_EVENTS_KEY, []);
         const savedMethodoEvents = readJson(EVENT_KEY, []);
-        const presenceEvents = Array.isArray(savedPresenceEvents) ? savedPresenceEvents : [];
+        const presenceEvents = loadPresenceEvents();
         const methodo = Array.isArray(savedMethodoEvents) ? savedMethodoEvents : [];
         const legacy = readJson(LEGACY_PRESENCE_KEY, null);
         const legacySessions = Array.isArray(legacy?.sessions) ? legacy.sessions : [];
@@ -1913,12 +1941,29 @@
         ].filter(Boolean).sort((a,b) => a.date - b.date);
       }
       function loadPresenceEvents(){
+        if(Array.isArray(presenceEventsMemoryCache)) return presenceEventsMemoryCache;
         const events = readJson(PRESENCE_EVENTS_KEY, []);
-        return Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+        presenceEventsMemoryCache = Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+        return presenceEventsMemoryCache;
       }
       function savePresenceEvents(events){
         const normalized = (Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id);
+        presenceEventsMemoryCache = normalized;
         setJson(PRESENCE_EVENTS_KEY, normalized);
+      }
+      function queuePresenceEventsLocalSave(events){
+        presenceEventsMemoryCache = Array.isArray(events) ? events : [];
+        if(presenceLocalSaveTimer != null){
+          if(typeof cancelIdleCallback === "function") cancelIdleCallback(presenceLocalSaveTimer);
+          else clearTimeout(presenceLocalSaveTimer);
+        }
+        const persist = () => {
+          presenceLocalSaveTimer = null;
+          setJson(PRESENCE_EVENTS_KEY, presenceEventsMemoryCache || []);
+        };
+        presenceLocalSaveTimer = typeof requestIdleCallback === "function"
+          ? requestIdleCallback(persist, {timeout:3000})
+          : setTimeout(persist, 750);
       }
       function eventSyncStamp(event={}){
         return Date.parse(event.updatedAt || event.createdAt || "") || 0;
@@ -1945,9 +1990,20 @@
         if(!api?.presenceListEvents) return [];
         const cloudEvents = await api.presenceListEvents();
         const merged = mergePresenceEvents(loadPresenceEvents(), Array.isArray(cloudEvents) ? cloudEvents : []);
-        savePresenceEvents(merged);
+        queuePresenceEventsLocalSave(merged);
         cloudReady = true;
         return {merged, cloudEvents:Array.isArray(cloudEvents) ? cloudEvents : []};
+      }
+      async function pullPresenceSettingsFromCloud(){
+        const api = centralDataApi();
+        if(!api?.presenceLoadSettings) return;
+        const cloudSettings = await api.presenceLoadSettings();
+        if(cloudSettings && Object.keys(cloudSettings).length){
+          const next = {...DEFAULT_PRESENCE_SETTINGS, ...cloudSettings, attendanceCodes:mergeAttendanceCodes(cloudSettings.attendanceCodes)};
+          setJson(PRESENCE_SETTINGS_KEY, next);
+          fillSettingsForm();
+          applySessionDefaults(false);
+        }
       }
       async function pushPresenceEventToCloud(event){
         const api = centralDataApi();
@@ -1955,6 +2011,25 @@
         const normalized = normalizePresenceEventForStorage(event);
         if(!normalized.teamId) throw new Error("teamId obligatoire pour synchroniser l'événement.");
         return api.presenceSaveEvent(normalized);
+      }
+      function schedulePresenceEventCloudSave(eventId, delay=650){
+        clearTimeout(presenceCloudSaveTimers.get(eventId));
+        setSessionMessage("Modification enregistrée localement…", "");
+        presenceCloudSaveTimers.set(eventId, setTimeout(() => {
+          presenceCloudSaveTimers.delete(eventId);
+          const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve();
+          const nextWrite = previousWrite.catch(() => {}).then(async () => {
+            const latestEvent = loadPresenceEvents().find(item => item.id === eventId);
+            if(!latestEvent) return;
+            await pushPresenceEventToCloud(latestEvent);
+            setSessionMessage("Feuille de présence synchronisée.", "success");
+          }).catch(error => {
+            setSessionMessage(`Sauvegarde cloud impossible : ${error?.message || error}.`, "error");
+          }).finally(() => {
+            if(presenceCloudWriteChains.get(eventId) === nextWrite) presenceCloudWriteChains.delete(eventId);
+          });
+          presenceCloudWriteChains.set(eventId, nextWrite);
+        }, delay));
       }
       async function syncPresenceEventsToCloud(cloudEvents=[]){
         const api = centralDataApi();
@@ -1964,15 +2039,13 @@
         const eventsToSync = localEvents.filter(event => {
           if(!event?.id) return false;
           const cloudEvent = cloudById.get(event.id);
-          const syncedAt = Date.parse(event.cloudSyncedAt || "") || 0;
-          return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent) || eventSyncStamp(event) > syncedAt;
+          return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent);
         });
         const syncedIds = [];
         for(const event of eventsToSync){
           await api.presenceSaveEvent(event);
           syncedIds.push(event.id);
         }
-        markPresenceEventsSynced(syncedIds);
         return syncedIds.length;
       }
       async function deletePresenceEventFromCloud(event){
@@ -2010,7 +2083,7 @@
           `).join("");
           const more = dayEvents.length > 3 ? `<div class="event-more">+${dayEvents.length - 3} autre(s)</div>` : "";
           days.push(`
-            <div class="calendar-day ${date.getMonth() === month ? "" : "muted"} ${sameDay(date,today) ? "today" : ""} ${selectable && dateIso === selectedCalendarDate ? "selected" : ""}" role="button" tabindex="0" data-create-date="${dateIso}" ${selectable ? `data-select-date="${dateIso}"` : ""} title="Créer un événement le ${dateIso}">
+            <div class="calendar-day ${date.getMonth() === month ? "" : "muted"} ${sameDay(date,today) ? "today" : ""} ${selectable && dateIso === selectedCalendarDate ? "selected" : ""}" role="button" tabindex="0" data-create-date="${dateIso}" ${selectable ? `data-select-date="${dateIso}"` : ""} title="Un clic : afficher la journée · Double-clic : créer un événement le ${dateIso}">
               <div class="day-number"><b>${date.getDate()}</b><span>${dayEvents.length ? dayEvents.length : ""}</span></div>
               ${chips}${more}
             </div>
@@ -2260,6 +2333,9 @@
         return ({
           entrainement:"Entraînement",
           match:"Match",
+          match_championnat:"Match de championnat",
+          match_coupe:"Match de coupe",
+          match_amical:"Match amical",
           tournoi:"Tournoi",
           futsal:"Futsal",
           test:"Test"
@@ -2933,7 +3009,7 @@
         });
         const selectedCount = players.reduce((sum, player) => sum + (attendanceEntry(event, player.playerId).status ? 1 : 0), 0);
         const statusKpis = availableStatuses.map(status => `
-          <div class="attendance-kpi">
+          <div class="attendance-kpi" data-attendance-kpi="${esc(status.id)}">
             <strong>${counts[status.id] || 0}</strong>
             <span>${esc(status.label)}</span>
           </div>
@@ -2970,7 +3046,7 @@
             <span class="attendance-event-pill">${esc(typeLabel(event.type))}</span>
           </header>
           <div class="attendance-kpis" aria-label="Résumé des statuts de présence">
-            <div class="attendance-kpi"><strong>${selectedCount}</strong><span>Sur séance</span></div>
+            <div class="attendance-kpi" data-attendance-kpi="selected"><strong>${selectedCount}</strong><span>Sur séance</span></div>
             ${statusKpis}
           </div>
           <div class="attendance-sheet">
@@ -2984,7 +3060,39 @@
           </div>
         `;
       }
-      async function updateAttendanceEntry(eventId, playerId, patch){
+      function updateAttendanceDetailUi(event, playerId, patch={}){
+        const content = document.getElementById("attendanceDetailContent");
+        if(!content || !event || event.id !== selectedAttendanceEventId) return;
+        const row = [...content.querySelectorAll(".attendance-row[data-player-id]")]
+          .find(item => item.dataset.playerId === String(playerId));
+        const entry = attendanceEntry(event, playerId);
+        if(row){
+          row.classList.toggle("unselected", !entry.status);
+          row.querySelectorAll("[data-attendance-status]").forEach(button => {
+            const active = button.dataset.attendanceStatus === entry.status;
+            button.classList.toggle("active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+          });
+          if(Object.prototype.hasOwnProperty.call(patch, "status")){
+            const minutes = row.querySelector('[data-attendance-field="minutes"]');
+            if(minutes) minutes.value = entry.minutes;
+          }
+        }
+        const players = playersForTeam(event.teamId, event.date);
+        const counts = {};
+        let selected = 0;
+        players.forEach(player => {
+          const status = attendanceEntry(event, player.playerId).status;
+          if(status){ selected++; counts[status] = (counts[status] || 0) + 1; }
+        });
+        content.querySelectorAll("[data-attendance-kpi]").forEach(kpi => {
+          const key = kpi.dataset.attendanceKpi;
+          const value = key === "selected" ? selected : (counts[key] || 0);
+          const output = kpi.querySelector("strong");
+          if(output) output.textContent = value;
+        });
+      }
+      function updateAttendanceEntry(eventId, playerId, patch){
         const events = loadPresenceEvents();
         const index = events.findIndex(event => event.id === eventId);
         if(index < 0) return;
@@ -3021,14 +3129,10 @@
           attendance,
           updatedAt:new Date().toISOString()
         };
-        savePresenceEvents(events);
-        renderSessionList();
-        try{
-          await pushPresenceEventToCloud(events[index]);
-          setSessionMessage("Feuille de présence synchronisée.", "success");
-        }catch(error){
-          setSessionMessage(`Sauvegarde cloud impossible : ${error?.message || error}.`, "error");
-        }
+        presenceEventsMemoryCache = events;
+        updateAttendanceDetailUi(events[index], playerId, patch);
+        queuePresenceEventsLocalSave(events);
+        schedulePresenceEventCloudSave(eventId);
       }
       function updateDurationFromTimes(){
         const start = document.getElementById("sessionStart")?.value || "";
@@ -3252,12 +3356,25 @@
         document.getElementById("calendarPageNextMonth")?.addEventListener("click", () => shiftMonth("calendarPage", 1));
         document.getElementById("calendarPageTodayMonth")?.addEventListener("click", () => resetMonth("calendarPage"));
       }
+      function selectCalendarDate(dateValue){
+        selectedCalendarDate = dateValue;
+        document.querySelectorAll("#calendarPageGrid [data-select-date]").forEach(day => {
+          day.classList.toggle("selected", day.dataset.selectDate === dateValue);
+        });
+        const events = filteredEvents(loadEvents());
+        renderCalendarPageKpis(events);
+        renderCalendarDayDetail(events);
+      }
       document.getElementById("calendarPageGrid")?.addEventListener("click", event => {
         const day = event.target.closest("[data-select-date]");
         if(!day) return;
-        selectedCalendarDate = day.dataset.selectDate;
-        render();
-        if(event.target.closest(".event-chip") || day.querySelector(".event-chip")) return;
+        selectCalendarDate(day.dataset.selectDate);
+      });
+      document.getElementById("calendarPageGrid")?.addEventListener("dblclick", event => {
+        const day = event.target.closest("[data-select-date]");
+        if(!day) return;
+        event.preventDefault();
+        selectCalendarDate(day.dataset.selectDate);
         openSessionCreationForDate(day.dataset.selectDate);
       });
       document.getElementById("calendarPageGrid")?.addEventListener("keydown", event => {
@@ -3265,8 +3382,7 @@
         const day = event.target.closest("[data-select-date]");
         if(!day) return;
         event.preventDefault();
-        selectedCalendarDate = day.dataset.selectDate;
-        render();
+        selectCalendarDate(day.dataset.selectDate);
       });
       ["calendarPageTeamFilters","reportsTeamFilters","preventionTeamFilters"].forEach(bindTeamFilter);
       document.getElementById("calendarDayList")?.addEventListener("click", event => {
@@ -3291,17 +3407,42 @@
       }
       async function initPresenceCloud(){
         try{
-          const {cloudEvents=[]} = await pullPresenceEventsFromCloud();
-          const syncedCount = await syncPresenceEventsToCloud(cloudEvents);
+          const api = centralDataApi();
+          const [, presenceResult] = await Promise.all([
+            pullPresenceSettingsFromCloud(),
+            pullPresenceEventsFromCloud()
+          ]);
+          const {cloudEvents=[]} = presenceResult || {};
           render();
           renderSessionList();
-          if(cloudReady) setSessionMessage(syncedCount ? `${syncedCount} événement(s) synchronisé(s) avec le cloud.` : "Événements chargés depuis le cloud.", "success");
+          if(cloudReady) setSessionMessage("Événements chargés depuis le cloud.", "success");
+          syncPresenceEventsToCloud(cloudEvents).then(syncedCount => {
+            if(syncedCount) setSessionMessage(`${syncedCount} événement(s) local(aux) synchronisé(s) avec le cloud.`, "success");
+          }).catch(error => console.warn('[Présences] Synchronisation locale différée impossible', error));
+          stopPresenceEventsSubscription?.();
+          stopPresenceEventsSubscription = api?.presenceSubscribeEvents?.(() => {
+            clearTimeout(realtimeRefreshTimer);
+            realtimeRefreshTimer = setTimeout(async () => {
+              try{ await pullPresenceEventsFromCloud(); render(); renderSessionList(); }
+              catch(error){ console.warn('[Présences] Actualisation temps réel impossible', error); }
+            }, 150);
+          }) || null;
+          stopPresenceSettingsSubscription?.();
+          stopPresenceSettingsSubscription = api?.presenceSubscribeSettings?.(settings => {
+            const next = {...DEFAULT_PRESENCE_SETTINGS, ...settings, attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)};
+            setJson(PRESENCE_SETTINGS_KEY, next);
+            fillSettingsForm();
+            applySessionDefaults(false);
+            render();
+          }) || null;
         }catch(error){
           cloudReady = false;
           setSessionMessage(`Cloud indisponible : affichage local uniquement. ${error?.message || error}`, "error");
         }
       }
       initTabs();
+      window.addEventListener('message', event => applyPresenceAccess(event.data));
+      try{ applyPresenceAccess(window.parent?.accessContext?.()); }catch(_error){ applyPresenceAccess(null); }
       initSessions();
       initSettings();
       initCalendarControls();

@@ -53,6 +53,22 @@
       ]
     },
     {
+      "collectionGroup": "sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "createdFromPresenceModule", "order": "ASCENDING"},
+        {"fieldPath": "teamId", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "createdFromPresenceModule", "order": "ASCENDING"},
+        {"fieldPath": "teamIds", "arrayConfig": "CONTAINS"}
+      ]
+    },
+    {
       "collectionGroup": "attendance",
       "queryScope": "COLLECTION",
       "fields": [

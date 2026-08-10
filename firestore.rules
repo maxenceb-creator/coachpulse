@@ -329,7 +329,9 @@ service cloud.firestore {
 
     match /settings/{settingsId} {
       allow read: if canReadData();
-      allow create, update: if canManageCoreData();
+      allow create, update: if settingsId == 'presence-module'
+        ? (permissionLevel() == 'ADMIN' || role() == 'ADMIN')
+        : canManageCoreData();
       allow delete: if noDelete();
     }
 
