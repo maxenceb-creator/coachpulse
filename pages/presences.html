@@ -1393,6 +1393,9 @@
               <select id="sessionType" name="type" required>
                 <option value="entrainement">Entraînement</option>
                 <option value="match">Match</option>
+                <option value="match_championnat">Match de championnat</option>
+                <option value="match_coupe">Match de coupe</option>
+                <option value="match_amical">Match amical</option>
                 <option value="tournoi">Tournoi</option>
                 <option value="futsal">Futsal</option>
                 <option value="test">Test</option>
@@ -2080,7 +2083,7 @@
           `).join("");
           const more = dayEvents.length > 3 ? `<div class="event-more">+${dayEvents.length - 3} autre(s)</div>` : "";
           days.push(`
-            <div class="calendar-day ${date.getMonth() === month ? "" : "muted"} ${sameDay(date,today) ? "today" : ""} ${selectable && dateIso === selectedCalendarDate ? "selected" : ""}" role="button" tabindex="0" data-create-date="${dateIso}" ${selectable ? `data-select-date="${dateIso}"` : ""} title="Créer un événement le ${dateIso}">
+            <div class="calendar-day ${date.getMonth() === month ? "" : "muted"} ${sameDay(date,today) ? "today" : ""} ${selectable && dateIso === selectedCalendarDate ? "selected" : ""}" role="button" tabindex="0" data-create-date="${dateIso}" ${selectable ? `data-select-date="${dateIso}"` : ""} title="Un clic : afficher la journée · Double-clic : créer un événement le ${dateIso}">
               <div class="day-number"><b>${date.getDate()}</b><span>${dayEvents.length ? dayEvents.length : ""}</span></div>
               ${chips}${more}
             </div>
@@ -2330,6 +2333,9 @@
         return ({
           entrainement:"Entraînement",
           match:"Match",
+          match_championnat:"Match de championnat",
+          match_coupe:"Match de coupe",
+          match_amical:"Match amical",
           tournoi:"Tournoi",
           futsal:"Futsal",
           test:"Test"
@@ -3350,12 +3356,25 @@
         document.getElementById("calendarPageNextMonth")?.addEventListener("click", () => shiftMonth("calendarPage", 1));
         document.getElementById("calendarPageTodayMonth")?.addEventListener("click", () => resetMonth("calendarPage"));
       }
+      function selectCalendarDate(dateValue){
+        selectedCalendarDate = dateValue;
+        document.querySelectorAll("#calendarPageGrid [data-select-date]").forEach(day => {
+          day.classList.toggle("selected", day.dataset.selectDate === dateValue);
+        });
+        const events = filteredEvents(loadEvents());
+        renderCalendarPageKpis(events);
+        renderCalendarDayDetail(events);
+      }
       document.getElementById("calendarPageGrid")?.addEventListener("click", event => {
         const day = event.target.closest("[data-select-date]");
         if(!day) return;
-        selectedCalendarDate = day.dataset.selectDate;
-        render();
-        if(event.target.closest(".event-chip") || day.querySelector(".event-chip")) return;
+        selectCalendarDate(day.dataset.selectDate);
+      });
+      document.getElementById("calendarPageGrid")?.addEventListener("dblclick", event => {
+        const day = event.target.closest("[data-select-date]");
+        if(!day) return;
+        event.preventDefault();
+        selectCalendarDate(day.dataset.selectDate);
         openSessionCreationForDate(day.dataset.selectDate);
       });
       document.getElementById("calendarPageGrid")?.addEventListener("keydown", event => {
@@ -3363,8 +3382,7 @@
         const day = event.target.closest("[data-select-date]");
         if(!day) return;
         event.preventDefault();
-        selectedCalendarDate = day.dataset.selectDate;
-        render();
+        selectCalendarDate(day.dataset.selectDate);
       });
       ["calendarPageTeamFilters","reportsTeamFilters","preventionTeamFilters"].forEach(bindTeamFilter);
       document.getElementById("calendarDayList")?.addEventListener("click", event => {

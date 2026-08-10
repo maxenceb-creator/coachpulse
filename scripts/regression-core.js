@@ -599,6 +599,11 @@ function testPresenceInteractionsStayNonBlocking(){
   assert(presenceSource.includes('return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent);'), 'Les séances déjà présentes dans le cloud ne doivent pas être réenvoyées au chargement.');
   assert(presenceSource.includes('requestIdleCallback(persist, {timeout:3000})'), 'La persistance locale volumineuse doit attendre une période inactive du navigateur.');
   assert(presenceSource.includes('updateAttendanceDetailUi(events[index], playerId, patch);'), 'Un clic de présence doit mettre à jour uniquement la ligne concernée.');
+  assert(presenceSource.includes('addEventListener("dblclick", event =>'), 'Le calendrier doit réserver le double-clic à la création d’un événement.');
+  assert(presenceSource.includes('selectCalendarDate(day.dataset.selectDate);'), 'Le clic simple du calendrier doit uniquement sélectionner et afficher la journée.');
+  ['match_championnat','match_coupe','match_amical'].forEach(type => {
+    assert(presenceSource.includes(`value="${type}"`), `Le type ${type} doit être proposé dans le formulaire.`);
+  });
 }
 
 testPlayerIdsAndSeasons();
