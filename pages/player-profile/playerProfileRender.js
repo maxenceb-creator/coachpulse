@@ -158,15 +158,15 @@
     const actionMax = Math.max(1, ...Object.values(summary.actions));
     return `<section class="player-sheet">
       <nav class="sheet-tabs" aria-label="Sections fiche">
-        <a href="#resume">Résumé</a>
-        <a href="#presences">Présences</a>
-        <a href="#matchs">Matchs</a>
-        <a href="#technique">Tests techniques</a>
-        <a href="#athletique">Tests athlétiques</a>
-        <a href="#blessures">Blessures</a>
-        <a href="#evolution">Évolution</a>
+        <a href="#resume" class="active" data-sheet-target="resume">Résumé</a>
+        <a href="#presences" data-sheet-target="presences">Présences</a>
+        <a href="#matchs" data-sheet-target="matchs">Matchs</a>
+        <a href="#technique" data-sheet-target="technique">Tests techniques</a>
+        <a href="#athletique" data-sheet-target="athletique">Tests athlétiques</a>
+        <a href="#blessures" data-sheet-target="blessures">Blessures</a>
+        <a href="#evolution" data-sheet-target="evolution">Évolution</a>
       </nav>
-      <section id="resume" class="sheet-layout">
+      <section id="resume" class="sheet-layout sheet-section" data-sheet-section="resume">
         <article class="panel season-summary">
           <div>
             <p class="eyebrow">Résumé de saison</p>
@@ -186,12 +186,12 @@
         </article>
       </section>
       <section class="sheet-grid">
-        <article id="presences" class="panel stat-section"><h2>Présences</h2>${renderAttendanceSummary(summary)}${renderAttendanceTable(summary.attendance)}</article>
-        <article id="matchs" class="panel stat-section"><h2>Matchs</h2>${renderMatchStats(summary.matchEvents)}</article>
-        <article id="technique" class="panel stat-section wide"><h2>Tests techniques</h2>${summary.technicalTests.length ? renderTechnicalTests(summary.technicalTests) : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
-        <article id="athletique" class="panel stat-section wide"><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderPhysicalTests(summary.physicalTests) : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
-        <article id="blessures" class="panel stat-section"><h2>Blessures</h2>${renderInjuryTable(summary.injuries)}</article>
-        <article id="evolution" class="panel stat-section"><h2>Évolution</h2>${renderEvolution(summary)}</article>
+        <article id="presences" class="panel stat-section wide sheet-section" data-sheet-section="presences" hidden><h2>Présences</h2>${renderAttendanceSummary(summary)}${renderAttendanceTable(summary.attendance)}</article>
+        <article id="matchs" class="panel stat-section sheet-section" data-sheet-section="matchs" hidden><h2>Matchs</h2>${renderMatchStats(summary.matchEvents)}</article>
+        <article id="technique" class="panel stat-section wide sheet-section" data-sheet-section="technique" hidden><h2>Tests techniques</h2>${summary.technicalTests.length ? renderTechnicalTests(summary.technicalTests) : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
+        <article id="athletique" class="panel stat-section wide sheet-section" data-sheet-section="athletique" hidden><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderPhysicalTests(summary.physicalTests) : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
+        <article id="blessures" class="panel stat-section sheet-section" data-sheet-section="blessures" hidden><h2>Blessures</h2>${renderInjuryTable(summary.injuries)}</article>
+        <article id="evolution" class="panel stat-section sheet-section" data-sheet-section="evolution" hidden><h2>Évolution</h2>${renderEvolution(summary)}</article>
       </section>
     </section>`;
   }
@@ -249,8 +249,10 @@
     </div>`;
   }
   function renderAttendanceTable(rows=[]){
-    const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,8);
-    return table(['Date','Statut','Minutes'], sorted.map(row => `<tr><td>${esc(formatDate(row))}</td><td>${esc(attendanceStatusLabel(row.status || row.code || row.statusCode || '-'))}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`), 'Aucune présence sur cette période.');
+    const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a)));
+    const body = sorted.map(row => `<tr><td>${esc(formatDate(row))}</td><td>${esc(attendanceStatusLabel(row.status || row.code || row.statusCode || '-'))}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`).join('');
+    if(!body) return '<div class="empty-state">Aucune présence sur cette période.</div>';
+    return `<div class="table-wrap attendance-table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Statut</th><th>Minutes</th></tr></thead><tbody>${body}</tbody></table></div>`;
   }
   function renderMatchStats(rows=[]){
     const grouped = Object.entries(rows.reduce((out,row) => {

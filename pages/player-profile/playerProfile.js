@@ -221,6 +221,15 @@
     document.getElementById('startDate')?.addEventListener('change', async event => { state.filters.startDate = event.target.value; await render(); });
     document.getElementById('endDate')?.addEventListener('change', async event => { state.filters.endDate = event.target.value; await render(); });
     document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', async () => { state.view = btn.dataset.view; await render(); }));
+    document.querySelectorAll('[data-sheet-target]').forEach(tab => tab.addEventListener('click', event => {
+      event.preventDefault();
+      const target = tab.dataset.sheetTarget;
+      document.querySelectorAll('[data-sheet-target]').forEach(item => item.classList.toggle('active', item === tab));
+      document.querySelectorAll('[data-sheet-section]').forEach(section => {
+        section.hidden = section.dataset.sheetSection !== target;
+      });
+      document.getElementById(target)?.scrollIntoView({block:'nearest'});
+    }));
     document.getElementById('compareSeasonA')?.addEventListener('change', async event => { state.filters.compareSeasonA = event.target.value; await render(); });
     document.getElementById('compareSeasonB')?.addEventListener('change', async event => { state.filters.compareSeasonB = event.target.value; await render(); });
     document.querySelectorAll('[data-compare-player]').forEach(input => input.addEventListener('change', async () => {
