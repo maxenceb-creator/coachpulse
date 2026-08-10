@@ -1813,6 +1813,27 @@
         if(service?.displayName) return service.displayName(player);
         return [player.prenom || player.firstName || "", player.nom || player.lastName || ""].filter(Boolean).join(" ") || player.displayName || player.name || "Joueuse";
       }
+      function playerNameFromId(playerId){
+        return String(playerId || "")
+          .replace(/^player-/i, "")
+          .replace(/-\d{1,2}-\d{1,2}-\d{4}$/i, "")
+          .split("-")
+          .filter(Boolean)
+          .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ") || "Joueuse";
+      }
+      function attendanceSnapshot(event, playerId){
+        const raw = event?.attendance?.[playerId];
+        return raw && typeof raw === "object" ? raw.playerSnapshot || null : null;
+      }
+      function playerDisplayName(player, snapshot, playerId){
+        if(player) return playerName(player);
+        const snapshotName = snapshot ? playerName(snapshot) : "";
+        return snapshotName && snapshotName !== "Joueuse" ? snapshotName : playerNameFromId(playerId);
+      }
+      function playerDisplayTeam(player, snapshot, event){
+        return player?.team || snapshot?.team || eventTeamLabel(event) || event?.team || "";
+      }
       function displayDate(dateValue){
         const date = parseDate(dateValue);
         if(!date) return String(dateValue || "-");
@@ -2498,10 +2519,11 @@
           attendanceEntries(event).forEach(entry => {
             if(!entry.playerId || players.has(entry.playerId)) return;
             const player = playerById(entry.playerId, event.date);
+            const snapshot = attendanceSnapshot(event, entry.playerId);
             players.set(entry.playerId, {
               playerId:entry.playerId,
-              name:player ? playerName(player) : entry.playerId,
-              team:player?.team || eventTeamLabel(event) || ""
+              name:playerDisplayName(player, snapshot, entry.playerId),
+              team:playerDisplayTeam(player, snapshot, event)
             });
           });
         });
@@ -2675,8 +2697,17 @@
         const playerMap = new Map();
         entries.forEach(entry => {
           const player = playerById(entry.playerId, entry.event.date);
+          const snapshot = attendanceSnapshot(entry.event, entry.playerId);
           const key = entry.playerId;
-          const row = playerMap.get(key) || {playerId:key, name:player ? playerName(player) : key, team:player?.team || entry.event.team || "", present:0, absent:0, total:0, minutes:0};
+          const row = playerMap.get(key) || {
+            playerId:key,
+            name:playerDisplayName(player, snapshot, key),
+            team:playerDisplayTeam(player, snapshot, entry.event),
+            present:0,
+            absent:0,
+            total:0,
+            minutes:0
+          };
           row.total += 1;
           row.minutes += Number(entry.minutes || 0);
           if(isPresentStatus(entry.status)) row.present += 1;
