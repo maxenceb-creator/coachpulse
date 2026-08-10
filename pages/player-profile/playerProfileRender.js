@@ -181,6 +181,10 @@
           </div>
         </article>
         <article class="panel">
+          <h2>Présences</h2>
+          ${renderAttendanceSummary(summary)}
+        </article>
+        <article class="panel">
           <h2>Statistiques de match</h2>
           <div class="bar-list">${Object.keys(summary.actions).length ? Object.entries(summary.actions).map(([k,v]) => bar(k,v,actionMax)).join('') : '<div class="empty-state">Aucune statistique match sur cette période.</div>'}</div>
         </article>
