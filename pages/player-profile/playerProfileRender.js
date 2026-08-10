@@ -213,7 +213,7 @@
   }
   function renderInjuryTable(rows=[]){
     const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,6);
-    return table(['Date','Type','Statut'], sorted.map(row => `<tr><td>${esc(Filters.dateOf(row) || '-')}</td><td>${esc(row.injuryType || row.bodyZone || '-')}</td><td>${esc(row.status || row.availability || '-')}</td></tr>`), 'Aucune blessure sur cette période.');
+    return table(['Date','Type','Statut'], sorted.map(row => `<tr><td>${esc(formatDate(row))}</td><td>${esc(row.injuryType || row.bodyZone || '-')}</td><td>${esc(row.status || row.availability || '-')}</td></tr>`), 'Aucune blessure sur cette période.');
   }
   function renderEvolution(summary){
     const items = [
@@ -267,11 +267,11 @@
       <div class="technical-summary">${highlights.map(item => `<div class="technical-score">
         <span>${esc(item.group)}</span>
         <b>${esc(item.value)}</b>
-        <small>${esc(item.label)}${item.date ? ` · ${esc(item.date)}` : ''}</small>
+        <small>${esc(item.label)}${item.date ? ` · ${esc(formatDate(item.date))}` : ''}</small>
       </div>`).join('')}</div>
       <div class="table-wrap"><table class="data-table technical-table">
         <thead><tr><th>Date</th>${primaryKeys.map(key => `<th>${esc(labelMap[key])}</th>`).join('')}</tr></thead>
-        <tbody>${sorted.map(row => `<tr><td><b>${esc(Filters.dateOf(row) || '-')}</b></td>${primaryKeys.map(key => {
+        <tbody>${sorted.map(row => `<tr><td><b>${esc(formatDate(row))}</b></td>${primaryKeys.map(key => {
           const value = technicalValue(row, key);
           return `<td>${Number.isFinite(value) ? esc(value) : '<span class="muted-dash">-</span>'}</td>`;
         }).join('')}</tr>`).join('')}</tbody>
@@ -331,7 +331,7 @@
           .map(([key, meta]) => [meta, physicalValue(row, key)])
           .filter(([,value]) => Number.isFinite(value));
         const note = row.comment || row.commentaire || row.note || '';
-        return `<div class="event technical-event"><div class="event-head"><b>${esc(Filters.dateOf(row) || 'Sans date')}</b><span class="mini-source">${esc(row.season || row.saison || row.source || 'Tests athlétiques')}</span></div><div class="chips">${entries.map(([meta,value]) => `<span class="chip">${esc(meta.label)} <strong>${esc(formatMetric(value, meta.unit))}</strong></span>`).join('')}${note ? `<span class="chip">${esc(note)}</span>` : ''}</div></div>`;
+        return `<div class="event technical-event"><div class="event-head"><b>${esc(formatDate(row))}</b><span class="mini-source">${esc(row.season || row.saison || row.source || 'Tests athlétiques')}</span></div><div class="chips">${entries.map(([meta,value]) => `<span class="chip">${esc(meta.label)} <strong>${esc(formatMetric(value, meta.unit))}</strong></span>`).join('')}${note ? `<span class="chip">${esc(note)}</span>` : ''}</div></div>`;
       }).join('')}</div>
     </div>`;
   }

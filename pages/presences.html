@@ -3114,7 +3114,7 @@
           <header class="attendance-detail-header">
             <div>
               <h2>Feuille de présence</h2>
-              <p>${esc(event.date)} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min · ${esc(event.team || "")}</p>
+              <p>${esc(displayDate(event.date))} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min · ${esc(event.team || "")}</p>
               ${procedureSummary(event.procedure || event.sessionProcedure) ? `<p>${esc(procedureSummary(event.procedure || event.sessionProcedure))}</p>` : ""}
             </div>
             <span class="attendance-event-pill">${esc(typeLabel(event.type))}</span>

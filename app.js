@@ -4996,8 +4996,11 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
     ...(Array.isArray(session.teamIds) ? session.teamIds : []),
     ...(Array.isArray(session.teamSnapshot?.teamIds) ? session.teamSnapshot.teamIds : [])
   ].map(value => String(value || '').trim()).filter(Boolean))];
-  const attendance = firestoreSafeData(session.attendance || {});
-  attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId && presenceUiStatusFromCode(row.status)).forEach(row => {
+  const rowsForSession = attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId && presenceUiStatusFromCode(row.status));
+  const attendance = rowsForSession.length
+    ? {}
+    : session.embeddedAttendanceVersion === 1 ? {} : firestoreSafeData(session.attendance || {});
+  rowsForSession.forEach(row => {
     attendance[row.playerId] = {
       status:presenceUiStatusFromCode(row.status),
       minutes:Number(row.minutes ?? row.duration ?? 0) || 0,
@@ -5130,7 +5133,6 @@ async function presenceListEvents(options={}){
       .filter(row => row.sessionId || row.id)
       .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true);
     const sessionIdsNeedingAttendance = sessions
-      .filter(row => row.embeddedAttendanceVersion !== 1)
       .map(row => row.sessionId || row.id)
       .filter(Boolean);
     const sessionChunks = [];
