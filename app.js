@@ -41,6 +41,11 @@ let applyingCloud = false;
 let lastCloudItemsHash = '';
 let adminAccessChoiceCache = null;
 let appRefreshInProgress = false;
+let localChangeSnapshotTimer = null;
+const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
+  'coachpulse:presenceEvents:v1',
+  'coachpulse:presenceSettings:v1'
+]);
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
@@ -65,7 +70,10 @@ function firestoreSafeValue(value){
   if(value === undefined || typeof value === 'function' || typeof value === 'symbol') return undefined;
   if(value === null || typeof value !== 'object') return value;
   if(value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toISOString();
-  if(Array.isArray(value)) return value.map(firestoreSafeValue).filter(item => item !== undefined);
+  // Array.prototype.map conserve l'espèce du tableau source. Pour une valeur
+  // venant d'une iframe, cela produit un Array d'un autre realm que Firestore
+  // refuse comme "custom Array object". Array.from recrée un tableau local.
+  if(Array.isArray(value)) return Array.from(value, firestoreSafeValue).filter(item => item !== undefined);
   const out = {};
   Object.entries(value).forEach(([key, item]) => {
     const safe = firestoreSafeValue(item);
@@ -1075,6 +1083,11 @@ function snapshotLocalData(options={}){
   updateCloudKpis();
   updateDashboard();
   if(lastSave) lastSave.textContent = new Date(payload.savedAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+}
+function scheduleSnapshotForLocalChange(key=''){
+  if(FIRESTORE_MANAGED_LOCAL_KEYS.has(String(key || ''))) return;
+  clearTimeout(localChangeSnapshotTimer);
+  localChangeSnapshotTimer = setTimeout(() => snapshotLocalData(), 750);
 }
 
 function isLocalStorageQuotaError(error){
@@ -4938,7 +4951,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
     ...(Array.isArray(session.teamIds) ? session.teamIds : []),
     ...(Array.isArray(session.teamSnapshot?.teamIds) ? session.teamSnapshot.teamIds : [])
   ].map(value => String(value || '').trim()).filter(Boolean))];
-  const attendance = {};
+  const attendance = firestoreSafeData(session.attendance || {});
   attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId).forEach(row => {
     attendance[row.playerId] = {
       status:presenceUiStatusFromCode(row.status),
@@ -4979,7 +4992,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
     source:'Présences'
   };
 }
-async function presenceListEvents(){
+async function presenceListEvents(options={}){
   if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const authorizedTeamIds = getAuthorizedTeamIds();
@@ -4990,6 +5003,8 @@ async function presenceListEvents(){
     authorizedTeamIds.slice().sort().join(',')
   ].join(':');
   if(
+    options.forceRefresh !== true
+    &&
     appDataCache.presenceEvents.rows
     && appDataCache.presenceEvents.key === cacheKey
     && Date.now() - appDataCache.presenceEvents.loadedAt < DATA_CACHE_TTL_MS
@@ -5022,9 +5037,11 @@ async function presenceListEvents(){
   };
   const uniqueRows = rows => [...new Map(rows.map(row => [row.sessionId || row.id || JSON.stringify(row), row])).values()];
   const readPresenceSessionsForAllPlayersScope = async () => {
-    const modernRows = uniqueRows(await readWhereSafe('sessions', [{field:'createdFromPresenceModule', operator:'==', value:true}]));
-    if(modernRows.length) return modernRows;
-    return uniqueRows(await readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}]));
+    const [modernRows, legacyRows] = await Promise.all([
+      readWhereSafe('sessions', [{field:'createdFromPresenceModule', operator:'==', value:true}]),
+      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}])
+    ]);
+    return uniqueRows([...legacyRows, ...modernRows]);
   };
   const readPresenceSessionsForTeams = async chunks => {
     const modernReads = [];
@@ -5038,8 +5055,6 @@ async function presenceListEvents(){
         {field:'teamIds', operator:'array-contains-any', value:chunk}
       ]));
     });
-    const modernRows = uniqueRows((await Promise.all(modernReads)).flat());
-    if(modernRows.length) return modernRows;
     const legacyReads = [];
     chunks.forEach(chunk => {
       legacyReads.push(readWhereSafe('sessions', [
@@ -5051,7 +5066,11 @@ async function presenceListEvents(){
         {field:'teamIds', operator:'array-contains-any', value:chunk}
       ]));
     });
-    return uniqueRows((await Promise.all(legacyReads)).flat());
+    const [modernRows, legacyRows] = await Promise.all([
+      Promise.all(modernReads).then(rows => rows.flat()),
+      Promise.all(legacyReads).then(rows => rows.flat())
+    ]);
+    return uniqueRows([...legacyRows, ...modernRows]);
   };
   if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return [];
   const teamChunks = [];
@@ -5065,9 +5084,12 @@ async function presenceListEvents(){
     const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
       .filter(row => row.sessionId || row.id)
       .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true);
-    const sessionIds = [...new Set(sessions.map(row => row.sessionId || row.id).filter(Boolean))];
+    const sessionIdsNeedingAttendance = sessions
+      .filter(row => row.embeddedAttendanceVersion !== 1)
+      .map(row => row.sessionId || row.id)
+      .filter(Boolean);
     const sessionChunks = [];
-    for(let i=0;i<sessionIds.length;i+=10) sessionChunks.push(sessionIds.slice(i,i+10));
+    for(let i=0;i<sessionIdsNeedingAttendance.length;i+=10) sessionChunks.push(sessionIdsNeedingAttendance.slice(i,i+10));
     const attendanceRows = sessionChunks.length
       ? (await Promise.all(sessionChunks.map(chunk => readWhere('attendance', 'sessionId', 'in', chunk)))).flat()
       : [];
@@ -5084,6 +5106,56 @@ async function presenceListEvents(){
     if(appDataCache.presenceEvents.key === cacheKey) appDataCache.presenceEvents.pending = null;
   });
   return cloneData(await appDataCache.presenceEvents.pending);
+}
+function presenceSettingsAdminAllowed(){
+  return getCurrentPermissionLevel() === 'ADMIN' || getCurrentUserRole() === 'ADMIN';
+}
+async function presenceLoadSettings(){
+  if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const snap = await firebaseFns.getDoc(firebaseFns.doc(db, 'settings', 'presence-module'));
+  return snap.exists() ? firestoreSafeData(snap.data()?.value || {}) : {};
+}
+async function presenceSaveSettings(settings={}){
+  if(!presenceSettingsAdminAllowed()) throw new Error('Paramètres réservés aux comptes administrateurs.');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const value = firestoreSafeData(settings);
+  await firebaseFns.setDoc(firebaseFns.doc(db, 'settings', 'presence-module'), {
+    settingsId:'presence-module',
+    moduleId:'presences',
+    value,
+    updatedAt:firebaseFns.serverTimestamp(),
+    updatedAtIso:new Date().toISOString(),
+    updatedBy:currentUser.uid,
+    updatedByEmail:currentUser.email || ''
+  }, {merge:true});
+  return value;
+}
+function presenceSubscribeEvents(onChange){
+  if(!db || !currentUser || typeof onChange !== 'function') return () => {};
+  const authorizedTeamIds = getAuthorizedTeamIds();
+  if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return () => {};
+  const queries = [];
+  if(isAdmin() || canAccessAllPlayersForModule('presences')){
+    queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true)));
+  }else{
+    for(let i=0;i<authorizedTeamIds.length;i+=10){
+      const chunk = authorizedTeamIds.slice(i,i+10);
+      queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true), firebaseFns.where('teamId', 'in', chunk)));
+    }
+  }
+  let initialized = 0;
+  const unsubs = queries.map(queryRef => firebaseFns.onSnapshot(queryRef, () => {
+    invalidateAppDataCaches('presences');
+    if(initialized++ >= queries.length) onChange();
+  }, error => console.warn('[Présences] Écoute temps réel indisponible', cleanError(error))));
+  return () => unsubs.forEach(unsub => { try{ unsub(); }catch(_error){} });
+}
+function presenceSubscribeSettings(onChange){
+  if(!db || !currentUser || typeof onChange !== 'function') return () => {};
+  return firebaseFns.onSnapshot(firebaseFns.doc(db, 'settings', 'presence-module'), snap => {
+    if(snap.exists()) onChange(firestoreSafeData(snap.data()?.value || {}));
+  }, error => console.warn('[Présences] Écoute paramètres indisponible', cleanError(error)));
 }
 async function presenceSaveEvent(event={}){
   if(!canEditModule('presences')) throw new Error('Modification Présences non autorisée.');
@@ -5108,7 +5180,9 @@ async function presenceSaveEvent(event={}){
       name:session.team || event.team || '',
       category:session.category || event.category || event.categorie || ''
     },
-    procedure:presencePlainProcedure(session.procedure || event.procedure || event.sessionProcedure)
+    procedure:presencePlainProcedure(session.procedure || event.procedure || event.sessionProcedure),
+    attendance:firestoreSafeData(event.attendance || {}),
+    embeddedAttendanceVersion:1
   };
   const safeSessionPayload = firestoreSafeData(sessionPayload);
   await firebaseFns.setDoc(firebaseFns.doc(db, 'sessions', sessionId), {
@@ -5218,7 +5292,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
@@ -5896,17 +5970,19 @@ document.addEventListener('visibilitychange', () => {
   if(!document.hidden && currentUser) refreshCentralPlayersFromCloud({reason:'visible'}).catch(error => console.warn('Actualisation joueuses au retour app indisponible', error));
 });
 window.addEventListener('message', e => {
-  if(e.data?.type === 'coachpulse-local-change') snapshotLocalData();
+  if(e.data?.type === 'coachpulse-local-change'){
+    scheduleSnapshotForLocalChange(e.data.key);
+  }
   if(e.data?.type === 'coachpulse-open-module' && e.data.moduleId){
     if(e.data.playerId) storage.set('coachpulse:playerProfile:selectedPlayerId', e.data.playerId, {recover:true});
     routeTo(e.data.moduleId);
   }
 });
 frame.addEventListener('load', installFrameLocalStorageWatcher);
-setInterval(() => { snapshotLocalData(); if(currentUser && storage.isPendingSync()) scheduleCloudSync(500); }, 5000);
-setInterval(snapshotLocalData, 15000);
+setInterval(() => { if(currentUser && storage.isPendingSync()) scheduleCloudSync(500); }, 5000);
+setInterval(() => snapshotLocalData({fromCloud:true}), 60000);
 window.addEventListener('pagehide', snapshotLocalData);
-window.addEventListener('storage', snapshotLocalData);
+window.addEventListener('storage', event => scheduleSnapshotForLocalChange(event.key));
 
 async function clearAppShellCacheOnLaunch(){
   if(!navigator.onLine || !('caches' in window)) return;
