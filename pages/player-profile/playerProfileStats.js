@@ -81,11 +81,14 @@
   function attendanceStatus(row={}){
     return String(row.status || row.code || row.statusCode || '').trim().toUpperCase();
   }
+  function isCountedAttendance(row={}){
+    return !!attendanceStatus(row) && !['NC','NOT-CONVOKED','NON CONVOQUEE','NON CONVOQUÉE'].includes(attendanceStatus(row));
+  }
   function isPresentAttendance(row={}){
     return ['P','PRESENT','PRÉSENT','PRESENTE','PRÉSENTE','R','RETARD','LATE'].includes(attendanceStatus(row));
   }
   function summarize(player, collections, state){
-    const attendance = Filters.filterRows(collections.attendance, state);
+    const attendance = Filters.filterRows(collections.attendance, state).filter(isCountedAttendance);
     const sessions = Filters.filterRows(collections.sessions, state);
     const matchEvents = Filters.filterRows(collections.matchEvents, state);
     const technicalTests = Filters.filterRows(collections.technicalTests, state);
@@ -143,5 +146,5 @@
     const good = lowerIsBetter ? diff < 0 : diff > 0;
     return {diff, label:diff === 0 ? 'stable' : (good ? 'progression' : 'régression'), className:diff === 0 ? 'trend-flat' : (good ? 'trend-up' : 'trend-down')};
   }
-  global.PlayerProfileStats = {n, latest, countActions, testValue, attendanceStatus, isPresentAttendance, summarize, trend};
+  global.PlayerProfileStats = {n, latest, countActions, testValue, attendanceStatus, isCountedAttendance, isPresentAttendance, summarize, trend};
 })(window);

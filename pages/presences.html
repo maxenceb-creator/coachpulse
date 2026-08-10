@@ -2451,11 +2451,20 @@
         const tone = attendanceStatuses().find(status => status.id === statusId)?.tone || "green";
         return ATTENDANCE_CODE_TONES[tone] || ATTENDANCE_CODE_TONES.green;
       }
+      function normalizedAttendanceStatus(status){
+        return String(status || "").trim();
+      }
+      function isNeutralStatus(status){
+        return ["not-convoked","NC"].includes(normalizedAttendanceStatus(status));
+      }
+      function isCountedStatus(status){
+        return !!normalizedAttendanceStatus(status) && !isNeutralStatus(status);
+      }
       function isPresentStatus(status){
-        return ["present","late","P","R"].includes(String(status || "").trim());
+        return ["present","late","P","R"].includes(normalizedAttendanceStatus(status));
       }
       function isAbsentStatus(status){
-        return !!status && !isPresentStatus(status);
+        return isCountedStatus(status) && !isPresentStatus(status);
       }
       function defaultAttendanceMinutes(status, event){
         return isPresentStatus(status) ? Number(event.duration || 0) : 0;
@@ -2594,21 +2603,22 @@
         return presenceStatsFromEntries(attendanceEntries(event));
       }
       function presenceStatsFromEntries(entries){
-        const present = entries.filter(entry => isPresentStatus(entry.status)).length;
-        const absent = entries.filter(entry => isAbsentStatus(entry.status)).length;
-        const late = entries.filter(entry => ["late","R"].includes(String(entry.status || "").trim())).length;
-        const unavailable = entries.filter(entry => entry.status === "sick" || entry.status === "injured").length;
-        const minutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
-        const playerIds = new Set(entries.map(entry => entry.playerId).filter(Boolean));
+        const countedEntries = entries.filter(entry => isCountedStatus(entry.status));
+        const present = countedEntries.filter(entry => isPresentStatus(entry.status)).length;
+        const absent = countedEntries.filter(entry => isAbsentStatus(entry.status)).length;
+        const late = countedEntries.filter(entry => ["late","R"].includes(normalizedAttendanceStatus(entry.status))).length;
+        const unavailable = countedEntries.filter(entry => entry.status === "sick" || entry.status === "injured").length;
+        const minutes = countedEntries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+        const playerIds = new Set(countedEntries.map(entry => entry.playerId).filter(Boolean));
         return {
           present,
           absent,
           late,
           unavailable,
-          total:entries.length,
+          total:countedEntries.length,
           minutes,
           playerCount:playerIds.size,
-          rate:entries.length ? present / entries.length : 0
+          rate:countedEntries.length ? present / countedEntries.length : 0
         };
       }
       function reportTypeLabel(type){
@@ -2623,7 +2633,7 @@
         const entries = filterEntriesByPlayers(
           presenceEvents.flatMap(event => attendanceEntries(event).map(entry => ({...entry, event}))),
           reportPlayerFilterIds
-        );
+        ).filter(entry => isCountedStatus(entry.status));
         const filteredEventIds = new Set(entries.map(entry => entry.event.id));
         const reportEvents = reportPlayerFilterIds.size
           ? presenceEvents.filter(event => filteredEventIds.has(event.id))
@@ -2762,7 +2772,8 @@
         renderCalendarTeamFilters("preventionTeamFilters");
         const presenceEvents = events.filter(event => event.source === "presences" && event.id);
         renderPlayerFilter("preventionTeamFilters", preventionPlayerFilterIds, presenceEvents);
-        const entries = filterEntriesByPlayers(preventionEntries(events), preventionPlayerFilterIds);
+        const entries = filterEntriesByPlayers(preventionEntries(events), preventionPlayerFilterIds)
+          .filter(entry => isCountedStatus(entry.status));
         const present = entries.filter(entry => isPresentStatus(entry.status)).length;
         const totalMinutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
         const grouped = new Map();
@@ -2772,7 +2783,7 @@
           row.minutes += Number(entry.minutes || 0);
           row.present += isPresentStatus(entry.status) ? 1 : 0;
           row.absent += isAbsentStatus(entry.status) ? 1 : 0;
-          row.late += entry.status === "late" ? 1 : 0;
+          row.late += ["late","R"].includes(normalizedAttendanceStatus(entry.status)) ? 1 : 0;
           row.sick += entry.status === "sick" ? 1 : 0;
           row.injured += entry.status === "injured" ? 1 : 0;
           if(entry.comment) row.comments.push({text:entry.comment, date:entry.event.date, team:entry.team});
@@ -3081,7 +3092,7 @@
           const entry = attendanceEntry(event, player.playerId);
           if(entry.status) counts[entry.status] = (counts[entry.status] || 0) + 1;
         });
-        const selectedCount = players.reduce((sum, player) => sum + (attendanceEntry(event, player.playerId).status ? 1 : 0), 0);
+        const selectedCount = players.reduce((sum, player) => sum + (isCountedStatus(attendanceEntry(event, player.playerId).status) ? 1 : 0), 0);
         const statusKpis = availableStatuses.map(status => `
           <div class="attendance-kpi" data-attendance-kpi="${esc(status.id)}">
             <strong>${counts[status.id] || 0}</strong>
@@ -3150,6 +3161,8 @@
           if(Object.prototype.hasOwnProperty.call(patch, "status")){
             const minutes = row.querySelector('[data-attendance-field="minutes"]');
             if(minutes) minutes.value = entry.minutes;
+            const comment = row.querySelector('[data-attendance-field="comment"]');
+            if(comment) comment.value = entry.comment;
           }
         }
         const players = attendancePlayersForEvent(event);
@@ -3157,7 +3170,10 @@
         let selected = 0;
         players.forEach(player => {
           const status = attendanceEntry(event, player.playerId).status;
-          if(status){ selected++; counts[status] = (counts[status] || 0) + 1; }
+          if(status){
+            if(isCountedStatus(status)) selected++;
+            counts[status] = (counts[status] || 0) + 1;
+          }
         });
         content.querySelectorAll("[data-attendance-kpi]").forEach(kpi => {
           const key = kpi.dataset.attendanceKpi;
@@ -3176,12 +3192,15 @@
           const allowedStatusIds = new Set(attendanceStatusesForTeam(current.teamId).map(status => status.id));
           if(patch.status && !allowedStatusIds.has(patch.status)) patch.status = "";
         }
+        if(Object.prototype.hasOwnProperty.call(patch, "status") && !patch.status){
+          patch.status = "not-convoked";
+        }
         const next = {...previous, ...patch};
         if(Object.prototype.hasOwnProperty.call(patch, "status") && patch.minutes == null && previous.status !== patch.status){
           next.minutes = defaultAttendanceMinutes(patch.status, current);
         }
-        if(Object.prototype.hasOwnProperty.call(patch, "status") && !patch.status){
-          next.status = "";
+        if(Object.prototype.hasOwnProperty.call(patch, "status") && isNeutralStatus(patch.status)){
+          next.status = patch.status;
           next.minutes = 0;
           next.comment = "";
         }
@@ -3390,7 +3409,7 @@
         document.getElementById("attendanceDetail")?.addEventListener("click", event => {
           const button = event.target.closest("[data-attendance-status][data-attendance-event][data-player-id]");
           if(!button) return;
-          const nextStatus = button.classList.contains("active") ? "" : button.dataset.attendanceStatus;
+          const nextStatus = button.classList.contains("active") ? "not-convoked" : button.dataset.attendanceStatus;
           updateAttendanceEntry(button.dataset.attendanceEvent, button.dataset.playerId, {status:nextStatus});
         });
         updateRecurrenceUi();

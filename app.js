@@ -542,9 +542,11 @@ function homeStatusCode(row={}){
 
 function homeAttendanceSummary(session={}, attendance=[]){
   const sessionId = session.sessionId || session.id;
-  const rows = attendance.filter(row => row.sessionId === sessionId || row.eventId === sessionId);
+  const rows = attendance
+    .filter(row => row.sessionId === sessionId || row.eventId === sessionId)
+    .filter(row => !['NC','NOT-CONVOKED','NON CONVOQUEE','NON CONVOQUÉE'].includes(homeStatusCode(row)));
   const total = rows.length;
-  const present = rows.filter(row => ['P','PRESENT','PRESENTE','PRÉSENT','PRÉSENTE'].includes(homeStatusCode(row))).length;
+  const present = rows.filter(row => ['P','PRESENT','PRESENTE','PRÉSENT','PRÉSENTE','R','RETARD','LATE'].includes(homeStatusCode(row))).length;
   const absent = rows.filter(row => ['A','ABSENT','ABSENTE','ANJ','AJ'].includes(homeStatusCode(row))).length;
   const minutes = rows.map(row => Number(row.minutes ?? row.durationMinutes ?? row.sessionMinutes)).filter(Number.isFinite);
   return {
@@ -4978,7 +4980,7 @@ async function technicalDeleteTest(testId){
 function presenceUiStatusFromCode(value=''){
   const code = String(value || '').trim().toUpperCase();
   if(!code) return '';
-  return {P:'present', A:'absent', ANJ:'absent', AJ:'excused', R:'late', M:'sick', B:'injured', PO:'pole', D:'district', D2:'d2'}[code] || String(value || '').trim();
+  return {P:'present', A:'absent', ANJ:'absent', AJ:'excused', R:'late', NC:'not-convoked', M:'sick', B:'injured', PO:'pole', D:'district', D2:'d2'}[code] || String(value || '').trim();
 }
 function presencePlainProcedure(value={}){
   const source = value && typeof value === 'object' ? value : {};
