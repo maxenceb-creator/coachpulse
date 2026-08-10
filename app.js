@@ -70,7 +70,10 @@ function firestoreSafeValue(value){
   if(value === undefined || typeof value === 'function' || typeof value === 'symbol') return undefined;
   if(value === null || typeof value !== 'object') return value;
   if(value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toISOString();
-  if(Array.isArray(value)) return value.map(firestoreSafeValue).filter(item => item !== undefined);
+  // Array.prototype.map conserve l'espèce du tableau source. Pour une valeur
+  // venant d'une iframe, cela produit un Array d'un autre realm que Firestore
+  // refuse comme "custom Array object". Array.from recrée un tableau local.
+  if(Array.isArray(value)) return Array.from(value, firestoreSafeValue).filter(item => item !== undefined);
   const out = {};
   Object.entries(value).forEach(([key, item]) => {
     const safe = firestoreSafeValue(item);

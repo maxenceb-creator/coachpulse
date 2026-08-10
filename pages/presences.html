@@ -3003,7 +3003,7 @@
         });
         const selectedCount = players.reduce((sum, player) => sum + (attendanceEntry(event, player.playerId).status ? 1 : 0), 0);
         const statusKpis = availableStatuses.map(status => `
-          <div class="attendance-kpi">
+          <div class="attendance-kpi" data-attendance-kpi="${esc(status.id)}">
             <strong>${counts[status.id] || 0}</strong>
             <span>${esc(status.label)}</span>
           </div>
@@ -3040,7 +3040,7 @@
             <span class="attendance-event-pill">${esc(typeLabel(event.type))}</span>
           </header>
           <div class="attendance-kpis" aria-label="Résumé des statuts de présence">
-            <div class="attendance-kpi"><strong>${selectedCount}</strong><span>Sur séance</span></div>
+            <div class="attendance-kpi" data-attendance-kpi="selected"><strong>${selectedCount}</strong><span>Sur séance</span></div>
             ${statusKpis}
           </div>
           <div class="attendance-sheet">
@@ -3053,6 +3053,38 @@
             ${rows}
           </div>
         `;
+      }
+      function updateAttendanceDetailUi(event, playerId, patch={}){
+        const content = document.getElementById("attendanceDetailContent");
+        if(!content || !event || event.id !== selectedAttendanceEventId) return;
+        const row = [...content.querySelectorAll(".attendance-row[data-player-id]")]
+          .find(item => item.dataset.playerId === String(playerId));
+        const entry = attendanceEntry(event, playerId);
+        if(row){
+          row.classList.toggle("unselected", !entry.status);
+          row.querySelectorAll("[data-attendance-status]").forEach(button => {
+            const active = button.dataset.attendanceStatus === entry.status;
+            button.classList.toggle("active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+          });
+          if(Object.prototype.hasOwnProperty.call(patch, "status")){
+            const minutes = row.querySelector('[data-attendance-field="minutes"]');
+            if(minutes) minutes.value = entry.minutes;
+          }
+        }
+        const players = playersForTeam(event.teamId, event.date);
+        const counts = {};
+        let selected = 0;
+        players.forEach(player => {
+          const status = attendanceEntry(event, player.playerId).status;
+          if(status){ selected++; counts[status] = (counts[status] || 0) + 1; }
+        });
+        content.querySelectorAll("[data-attendance-kpi]").forEach(kpi => {
+          const key = kpi.dataset.attendanceKpi;
+          const value = key === "selected" ? selected : (counts[key] || 0);
+          const output = kpi.querySelector("strong");
+          if(output) output.textContent = value;
+        });
       }
       function updateAttendanceEntry(eventId, playerId, patch){
         const events = loadPresenceEvents();
@@ -3092,7 +3124,7 @@
           updatedAt:new Date().toISOString()
         };
         presenceEventsMemoryCache = events;
-        renderAttendanceDetail();
+        updateAttendanceDetailUi(events[index], playerId, patch);
         queuePresenceEventsLocalSave(events);
         schedulePresenceEventCloudSave(eventId);
       }

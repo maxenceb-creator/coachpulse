@@ -592,11 +592,13 @@ function testPresenceInteractionsStayNonBlocking(){
   const presenceSource = fs.readFileSync('pages/presences.html', 'utf8');
 
   assert(appSource.includes("FIRESTORE_MANAGED_LOCAL_KEYS.has(String(key || ''))"), 'Les écritures Présence gérées par Firestore ne doivent pas déclencher une sauvegarde globale lourde.');
+  assert(appSource.includes('if(Array.isArray(value)) return Array.from(value, firestoreSafeValue)'), 'Les tableaux provenant des iframes doivent être recréés dans le realm principal avant Firestore.');
   assert(!appSource.includes("setInterval(snapshotLocalData, 15000)"), 'La sauvegarde complète ne doit plus être exécutée toutes les 15 secondes.');
   assert(presenceSource.includes('schedulePresenceEventCloudSave(eventId);'), 'Les clics de présence doivent utiliser une sauvegarde cloud regroupée.');
   assert(!presenceSource.includes('await pushPresenceEventToCloud(events[index]);'), 'Un clic de présence ne doit pas attendre directement l’écriture Firestore complète.');
   assert(presenceSource.includes('return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent);'), 'Les séances déjà présentes dans le cloud ne doivent pas être réenvoyées au chargement.');
   assert(presenceSource.includes('requestIdleCallback(persist, {timeout:3000})'), 'La persistance locale volumineuse doit attendre une période inactive du navigateur.');
+  assert(presenceSource.includes('updateAttendanceDetailUi(events[index], playerId, patch);'), 'Un clic de présence doit mettre à jour uniquement la ligne concernée.');
 }
 
 testPlayerIdsAndSeasons();
