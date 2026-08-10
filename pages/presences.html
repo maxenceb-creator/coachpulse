@@ -1813,6 +1813,27 @@
         if(service?.displayName) return service.displayName(player);
         return [player.prenom || player.firstName || "", player.nom || player.lastName || ""].filter(Boolean).join(" ") || player.displayName || player.name || "Joueuse";
       }
+      function displayDate(dateValue){
+        const date = parseDate(dateValue);
+        if(!date) return String(dateValue || "-");
+        return `${String(date.getDate()).padStart(2,"0")}/${date.getMonth()+1}/${date.getFullYear()}`;
+      }
+      function eventEndDateTime(event){
+        const date = parseDate(event?.iso || event?.date || event?.startDate || event?.day || event?.start);
+        if(!date) return null;
+        const time = String(event?.endTime || event?.startTime || event?.time || "23:59").trim();
+        const match = time.match(/^(\d{1,2}):(\d{2})/);
+        if(match){
+          date.setHours(Number(match[1]), Number(match[2]), 0, 0);
+        }else{
+          date.setHours(23, 59, 59, 999);
+        }
+        return date;
+      }
+      function isPresenceEventElapsed(event, now=new Date()){
+        const end = eventEndDateTime(event);
+        return Boolean(end && end <= now);
+      }
       function eventSeason(dateValue){
         const service = playersService();
         return service?.seasonFromDate ? service.seasonFromDate(parseDate(dateValue) || new Date()) : "";
@@ -2574,7 +2595,9 @@
       }
       function renderReports(events){
         renderCalendarTeamFilters("reportsTeamFilters");
-        const presenceEvents = events.filter(event => event.source === "presences" && event.id);
+        const presenceEvents = events
+          .filter(event => event.source === "presences" && event.id)
+          .filter(event => isPresenceEventElapsed(event));
         renderPlayerFilter("reportsTeamFilters", reportPlayerFilterIds, presenceEvents);
         const entries = filterEntriesByPlayers(
           presenceEvents.flatMap(event => attendanceEntries(event).map(entry => ({...entry, event}))),
@@ -2965,7 +2988,7 @@
             <div>
               <strong>${esc(typeLabel(event.type))}</strong>
               <div class="session-item-meta">
-                ${esc(event.date)} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min
+                ${esc(displayDate(event.date))} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min
                 ${event.team ? " · " + esc(event.team) : ""}
               </div>
               ${procedureSummary(event.procedure || event.sessionProcedure) ? `<div class="session-item-meta">${esc(procedureSummary(event.procedure || event.sessionProcedure))}</div>` : ""}
@@ -3099,7 +3122,7 @@
             if(minutes) minutes.value = entry.minutes;
           }
         }
-        const players = playersForTeam(event.teamId, event.date);
+        const players = attendancePlayersForEvent(event);
         const counts = {};
         let selected = 0;
         players.forEach(player => {
