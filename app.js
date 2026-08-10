@@ -324,6 +324,40 @@ function teamsService(){
 function presenceEventsService(){
   return window.CoachPulsePresenceEventsService || null;
 }
+function profilePresenceParseDate(value){
+  const raw = String(value || '').trim();
+  if(!raw) return null;
+  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(iso){
+    const date = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const fr = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+  if(fr){
+    const date = new Date(Number(fr[3]), Number(fr[2]) - 1, Number(fr[1]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function profilePresenceSessionId(row={}){
+  return String(row.sessionId || row.session?.sessionId || row.sessionSnapshot?.sessionId || row.sessionSnapshot?.id || row.id || '').trim();
+}
+function profilePresenceEndDate(row={}){
+  const snapshot = row.sessionSnapshot || row.session || {};
+  const date = profilePresenceParseDate(row.date || snapshot.date || row.startDate || row.day || row.start);
+  if(!date) return null;
+  const time = String(row.endTime || row.end || snapshot.endTime || snapshot.end || row.startTime || row.start || snapshot.startTime || snapshot.start || '23:59').trim();
+  const match = time.match(/^(\d{1,2}):(\d{2})/);
+  if(match) date.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  else date.setHours(23, 59, 59, 999);
+  return date;
+}
+function isElapsedProfilePresenceRow(row={}, sessionsById=new Map(), now=new Date()){
+  const session = sessionsById.get(profilePresenceSessionId(row)) || {};
+  const end = profilePresenceEndDate({...session, ...row, sessionSnapshot:row.sessionSnapshot || session.sessionSnapshot || session});
+  return !end || end <= now;
+}
 function permissionsService(){
   return window.CoachPulsePermissionsService || null;
 }
@@ -1886,6 +1920,16 @@ async function playerProfileLoadData(options={}){
     ...sessions,
     ...(localPresence.sessions || [])
   ], row => row.id || row.sessionId);
+  const sessionsById = new Map((payload.collections.sessions || [])
+    .map(row => [profilePresenceSessionId(row), row])
+    .filter(([id]) => id));
+  payload.collections.attendance = (payload.collections.attendance || [])
+    .filter(row => isElapsedProfilePresenceRow(row, sessionsById));
+  const elapsedSessionIds = new Set((payload.collections.attendance || [])
+    .map(row => profilePresenceSessionId(row))
+    .filter(Boolean));
+  payload.collections.sessions = (payload.collections.sessions || [])
+    .filter(row => elapsedSessionIds.has(profilePresenceSessionId(row)) && isElapsedProfilePresenceRow(row, sessionsById));
   payload.collections.matches = matches;
   if(cacheKey) appDataCache.playerProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
   return payload;
@@ -4933,7 +4977,8 @@ async function technicalDeleteTest(testId){
 }
 function presenceUiStatusFromCode(value=''){
   const code = String(value || '').trim().toUpperCase();
-  return {P:'present', A:'absent', R:'late', M:'sick', B:'injured'}[code] || String(value || '').trim() || 'absent';
+  if(!code) return '';
+  return {P:'present', A:'absent', ANJ:'absent', AJ:'excused', R:'late', M:'sick', B:'injured', PO:'pole', D:'district', D2:'d2'}[code] || String(value || '').trim();
 }
 function presencePlainProcedure(value={}){
   const source = value && typeof value === 'object' ? value : {};
@@ -4952,7 +4997,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
     ...(Array.isArray(session.teamSnapshot?.teamIds) ? session.teamSnapshot.teamIds : [])
   ].map(value => String(value || '').trim()).filter(Boolean))];
   const attendance = firestoreSafeData(session.attendance || {});
-  attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId).forEach(row => {
+  attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId && presenceUiStatusFromCode(row.status)).forEach(row => {
     attendance[row.playerId] = {
       status:presenceUiStatusFromCode(row.status),
       minutes:Number(row.minutes ?? row.duration ?? 0) || 0,

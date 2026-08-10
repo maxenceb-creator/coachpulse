@@ -3,6 +3,15 @@
   const Filters = global.PlayerProfileFilters;
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function option(value, label, selected){ return `<option value="${esc(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${esc(label || value)}</option>`; }
+  function formatDate(rowOrValue){
+    const raw = typeof rowOrValue === 'object' && rowOrValue !== null ? Filters.dateOf(rowOrValue) : String(rowOrValue || '').slice(0,10);
+    if(!raw) return '-';
+    const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if(iso) return `${String(Number(iso[3])).padStart(2,'0')}/${String(Number(iso[2])).padStart(2,'0')}/${iso[1]}`;
+    const fr = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+    if(fr) return `${String(Number(fr[1])).padStart(2,'0')}/${String(Number(fr[2])).padStart(2,'0')}/${fr[3]}`;
+    return raw;
+  }
   function playerFoot(player={}){
     const value = String(player.foot || player.pied || player.meilleurPiedLabel || player.piedFort || player.preferredFoot || player.strongFoot || '').trim();
     if(!value) return '';
@@ -192,7 +201,7 @@
   }
   function renderAttendanceTable(rows=[]){
     const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,8);
-    return table(['Date','Statut','Minutes'], sorted.map(row => `<tr><td>${esc(Filters.dateOf(row) || '-')}</td><td>${esc(row.status || row.code || '-')}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`), 'Aucune présence sur cette période.');
+    return table(['Date','Statut','Minutes'], sorted.map(row => `<tr><td>${esc(formatDate(row))}</td><td>${esc(row.status || row.code || '-')}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`), 'Aucune présence sur cette période.');
   }
   function renderMatchStats(rows=[]){
     const grouped = Object.entries(rows.reduce((out,row) => {
@@ -221,7 +230,7 @@
       const value = row[valueKey] ?? row.note ?? row.tests ?? row.objectifs ?? '';
       return typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
     }
-    return `<div class="timeline">${rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,12).map(row => `<div class="event"><b>${esc(row[titleKey] || row.theme || row.testName || row.action || row.source || 'Donnée')}</b><small>${esc(Filters.dateOf(row) || 'Sans date')} · ${esc(valueText(row))}</small></div>`).join('')}</div>`;
+    return `<div class="timeline">${rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,12).map(row => `<div class="event"><b>${esc(row[titleKey] || row.theme || row.testName || row.action || row.source || 'Donnée')}</b><small>${esc(formatDate(row))} · ${esc(valueText(row))}</small></div>`).join('')}</div>`;
   }
   function renderTechnicalTests(rows=[]){
     const labels = [

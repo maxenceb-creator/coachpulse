@@ -2452,7 +2452,7 @@
         return ATTENDANCE_CODE_TONES[tone] || ATTENDANCE_CODE_TONES.green;
       }
       function isPresentStatus(status){
-        return ["present","late"].includes(status);
+        return ["present","late","P","R"].includes(String(status || "").trim());
       }
       function isAbsentStatus(status){
         return !!status && !isPresentStatus(status);
@@ -2596,7 +2596,7 @@
       function presenceStatsFromEntries(entries){
         const present = entries.filter(entry => isPresentStatus(entry.status)).length;
         const absent = entries.filter(entry => isAbsentStatus(entry.status)).length;
-        const late = entries.filter(entry => entry.status === "late").length;
+        const late = entries.filter(entry => ["late","R"].includes(String(entry.status || "").trim())).length;
         const unavailable = entries.filter(entry => entry.status === "sick" || entry.status === "injured").length;
         const minutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
         const playerIds = new Set(entries.map(entry => entry.playerId).filter(Boolean));
@@ -3179,6 +3179,11 @@
         const next = {...previous, ...patch};
         if(Object.prototype.hasOwnProperty.call(patch, "status") && patch.minutes == null && previous.status !== patch.status){
           next.minutes = defaultAttendanceMinutes(patch.status, current);
+        }
+        if(Object.prototype.hasOwnProperty.call(patch, "status") && !patch.status){
+          next.status = "";
+          next.minutes = 0;
+          next.comment = "";
         }
         const attendance = {...(current.attendance || {})};
         if(!next.status && !Number(next.minutes || 0) && !String(next.comment || "").trim()){

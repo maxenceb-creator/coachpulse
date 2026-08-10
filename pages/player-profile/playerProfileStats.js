@@ -78,6 +78,12 @@
     }
     return 0;
   }
+  function attendanceStatus(row={}){
+    return String(row.status || row.code || row.statusCode || '').trim().toUpperCase();
+  }
+  function isPresentAttendance(row={}){
+    return ['P','PRESENT','PRÉSENT','PRESENTE','PRÉSENTE','R','RETARD','LATE'].includes(attendanceStatus(row));
+  }
   function summarize(player, collections, state){
     const attendance = Filters.filterRows(collections.attendance, state);
     const sessions = Filters.filterRows(collections.sessions, state);
@@ -89,7 +95,7 @@
     const convocations = Filters.filterRows(collections.convocations || [], state);
     const individualReports = Filters.filterRows(collections.individualReports || [], state);
     const bmi = medicalProfileBmi(player, collections, state);
-    const present = attendance.filter(row => ['P','PRESENT','PRÉSENT'].includes(String(row.status || row.code || '').toUpperCase())).length;
+    const present = attendance.filter(isPresentAttendance).length;
     const minutes = attendance.reduce((sum,row) => sum + n(row.minutes || row.duration || row.charge), 0);
     const latestPhysical = latest(physicalTests);
     const latestTechnical = latest(technicalTests);
@@ -137,5 +143,5 @@
     const good = lowerIsBetter ? diff < 0 : diff > 0;
     return {diff, label:diff === 0 ? 'stable' : (good ? 'progression' : 'régression'), className:diff === 0 ? 'trend-flat' : (good ? 'trend-up' : 'trend-down')};
   }
-  global.PlayerProfileStats = {n, latest, countActions, testValue, summarize, trend};
+  global.PlayerProfileStats = {n, latest, countActions, testValue, attendanceStatus, isPresentAttendance, summarize, trend};
 })(window);
