@@ -87,6 +87,53 @@
   function isPresentAttendance(row={}){
     return ['P','PRESENT','PRÉSENT','PRESENTE','PRÉSENTE','R','RETARD','LATE'].includes(attendanceStatus(row));
   }
+  function attendanceBreakdown(attendance=[], sessions=[]){
+    const statusCounts = {
+      present:0,
+      late:0,
+      absenceNonJustifiee:0,
+      absenceJustifiee:0,
+      malade:0,
+      blessee:0,
+      poleEspoir:0,
+      selection:0,
+      groupePro:0,
+      autresAbsences:0
+    };
+    attendance.forEach(row => {
+      const status = attendanceStatus(row);
+      if(!isCountedAttendance(row)) return;
+      if(['P','PRESENT','PRÉSENT','PRESENTE','PRÉSENTE'].includes(status)) statusCounts.present += 1;
+      else if(['R','RETARD','LATE'].includes(status)){
+        statusCounts.present += 1;
+        statusCounts.late += 1;
+      }else if(['A','ANJ','ABSENT','ABSENTE','ABSENCE NON JUSTIFIEE','ABSENCE NON JUSTIFIÉE'].includes(status)) statusCounts.absenceNonJustifiee += 1;
+      else if(['AJ','EXCUSED','ABSENCE JUSTIFIEE','ABSENCE JUSTIFIÉE'].includes(status)) statusCounts.absenceJustifiee += 1;
+      else if(['M','MALADE','SICK'].includes(status)) statusCounts.malade += 1;
+      else if(['B','BLESSEE','BLESSÉE','INJURED'].includes(status)) statusCounts.blessee += 1;
+      else if(['PO','POLE','PÔLE','PÔLE ESPOIR','POLE ESPOIR'].includes(status)) statusCounts.poleEspoir += 1;
+      else if(['D','S','DISTRICT','SELECTION','SÉLECTION'].includes(status)) statusCounts.selection += 1;
+      else if(['D2','GROUPE PRO','ENTRAINEMENT GROUPE PRO','ENTRAÎNEMENT GROUPE PRO'].includes(status)) statusCounts.groupePro += 1;
+      else if(status) statusCounts.autresAbsences += 1;
+    });
+    const absenceTotal = statusCounts.absenceNonJustifiee
+      + statusCounts.absenceJustifiee
+      + statusCounts.malade
+      + statusCounts.blessee
+      + statusCounts.poleEspoir
+      + statusCounts.selection
+      + statusCounts.groupePro
+      + statusCounts.autresAbsences;
+    const totalCategorySessions = Math.max(sessions.length, attendance.length);
+    return {
+      totalCategorySessions,
+      presentSessions:statusCounts.present,
+      lateSessions:statusCounts.late,
+      absenceTotal,
+      statusCounts,
+      presenceRate:totalCategorySessions ? Math.round((statusCounts.present / totalCategorySessions) * 100) : 0
+    };
+  }
   function summarize(player, collections, state){
     const attendance = Filters.filterRows(collections.attendance, state).filter(isCountedAttendance);
     const sessions = Filters.filterRows(collections.sessions, state);
@@ -98,11 +145,11 @@
     const convocations = Filters.filterRows(collections.convocations || [], state);
     const individualReports = Filters.filterRows(collections.individualReports || [], state);
     const bmi = medicalProfileBmi(player, collections, state);
-    const present = attendance.filter(isPresentAttendance).length;
     const minutes = attendance.reduce((sum,row) => sum + n(row.minutes || row.duration || row.charge), 0);
     const latestPhysical = latest(physicalTests);
     const latestTechnical = latest(technicalTests);
     const actions = countActions(matchEvents);
+    const attendanceSummary = attendanceBreakdown(attendance, sessions);
     const linkedCounts = {
       presences:attendance.length,
       seances:sessions.length,
@@ -119,14 +166,15 @@
       attendance, sessions, matchEvents, technicalTests, physicalTests, injuries, medical, convocations, individualReports,
       linkedCounts,
       kpis:{
-        presenceRate:attendance.length ? Math.round((present / attendance.length) * 100) : 0,
-        sessions:attendance.length || sessions.length,
+        presenceRate:attendanceSummary.presenceRate,
+        sessions:attendanceSummary.totalCategorySessions,
         minutes,
         matches:new Set(matchEvents.map(row => row.matchId).filter(Boolean)).size,
         injuries:injuries.length,
         medical:medical.length,
         bmi:bmi?.value || null
       },
+      attendanceSummary,
       medicalProfile:{
         bmi,
         hasBmi:!!bmi
@@ -146,5 +194,5 @@
     const good = lowerIsBetter ? diff < 0 : diff > 0;
     return {diff, label:diff === 0 ? 'stable' : (good ? 'progression' : 'régression'), className:diff === 0 ? 'trend-flat' : (good ? 'trend-up' : 'trend-down')};
   }
-  global.PlayerProfileStats = {n, latest, countActions, testValue, attendanceStatus, isCountedAttendance, isPresentAttendance, summarize, trend};
+  global.PlayerProfileStats = {n, latest, countActions, testValue, attendanceStatus, attendanceBreakdown, isCountedAttendance, isPresentAttendance, summarize, trend};
 })(window);

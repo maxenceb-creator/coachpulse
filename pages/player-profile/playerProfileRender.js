@@ -186,7 +186,7 @@
         </article>
       </section>
       <section class="sheet-grid">
-        <article id="presences" class="panel stat-section"><h2>Présences</h2>${renderAttendanceTable(summary.attendance)}</article>
+        <article id="presences" class="panel stat-section"><h2>Présences</h2>${renderAttendanceSummary(summary)}${renderAttendanceTable(summary.attendance)}</article>
         <article id="matchs" class="panel stat-section"><h2>Matchs</h2>${renderMatchStats(summary.matchEvents)}</article>
         <article id="technique" class="panel stat-section wide"><h2>Tests techniques</h2>${summary.technicalTests.length ? renderTechnicalTests(summary.technicalTests) : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
         <article id="athletique" class="panel stat-section wide"><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderPhysicalTests(summary.physicalTests) : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
@@ -199,9 +199,58 @@
     if(!rows.length) return `<div class="empty-state">${esc(empty)}</div>`;
     return `<div class="table-wrap"><table class="data-table"><thead><tr>${headers.map(header => `<th>${esc(header)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   }
+  function attendanceStatusLabel(value=''){
+    const status = String(value || '').trim().toUpperCase();
+    return {
+      P:'Présente',
+      PRESENT:'Présente',
+      PRESENTE:'Présente',
+      'PRÉSENTE':'Présente',
+      R:'Retard',
+      RETARD:'Retard',
+      LATE:'Retard',
+      A:'Absence non justifiée',
+      ANJ:'Absence non justifiée',
+      AJ:'Absence justifiée',
+      M:'Malade',
+      B:'Blessée',
+      PO:'Pôle Espoir',
+      D:'Sélection',
+      S:'Sélection',
+      D2:'Groupe pro'
+    }[status] || value || '-';
+  }
+  function renderAttendanceSummary(summary={}){
+    const stats = summary.attendanceSummary || {};
+    const counts = stats.statusCounts || {};
+    const main = [
+      ['Séances catégorie', stats.totalCategorySessions || 0],
+      ['Présences', stats.presentSessions || 0],
+      ['Retards', stats.lateSessions || 0],
+      ['Absences', stats.absenceTotal || 0]
+    ];
+    const details = [
+      ['Abs. non justifiées', counts.absenceNonJustifiee || 0],
+      ['Abs. justifiées', counts.absenceJustifiee || 0],
+      ['Malade', counts.malade || 0],
+      ['Blessée', counts.blessee || 0],
+      ['Pôle Espoir', counts.poleEspoir || 0],
+      ['Sélection', counts.selection || 0],
+      ['Groupe pro', counts.groupePro || 0],
+      ['Autres', counts.autresAbsences || 0]
+    ];
+    return `<div class="attendance-summary">
+      <div class="attendance-summary-main">
+        ${main.map(([label,value]) => `<article><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}
+      </div>
+      <div class="attendance-summary-detail" aria-label="Détail des motifs d'absence">
+        ${details.map(([label,value]) => `<span><b>${esc(value)}</b>${esc(label)}</span>`).join('')}
+      </div>
+    </div>`;
+  }
   function renderAttendanceTable(rows=[]){
     const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,8);
-    return table(['Date','Statut','Minutes'], sorted.map(row => `<tr><td>${esc(formatDate(row))}</td><td>${esc(row.status || row.code || '-')}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`), 'Aucune présence sur cette période.');
+    return table(['Date','Statut','Minutes'], sorted.map(row => `<tr><td>${esc(formatDate(row))}</td><td>${esc(attendanceStatusLabel(row.status || row.code || row.statusCode || '-'))}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`), 'Aucune présence sur cette période.');
   }
   function renderMatchStats(rows=[]){
     const grouped = Object.entries(rows.reduce((out,row) => {
