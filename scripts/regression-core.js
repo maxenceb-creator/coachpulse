@@ -595,6 +595,8 @@ function testPresenceInteractionsStayNonBlocking(){
   assert(!appSource.includes("setInterval(snapshotLocalData, 15000)"), 'La sauvegarde complète ne doit plus être exécutée toutes les 15 secondes.');
   assert(presenceSource.includes('schedulePresenceEventCloudSave(eventId);'), 'Les clics de présence doivent utiliser une sauvegarde cloud regroupée.');
   assert(!presenceSource.includes('await pushPresenceEventToCloud(events[index]);'), 'Un clic de présence ne doit pas attendre directement l’écriture Firestore complète.');
+  assert(presenceSource.includes('return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent);'), 'Les séances déjà présentes dans le cloud ne doivent pas être réenvoyées au chargement.');
+  assert(presenceSource.includes('requestIdleCallback(persist, {timeout:3000})'), 'La persistance locale volumineuse doit attendre une période inactive du navigateur.');
 }
 
 testPlayerIdsAndSeasons();

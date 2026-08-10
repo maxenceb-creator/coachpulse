@@ -1712,6 +1712,8 @@
       let stopPresenceEventsSubscription = null;
       let stopPresenceSettingsSubscription = null;
       let realtimeRefreshTimer = null;
+      let presenceEventsMemoryCache = null;
+      let presenceLocalSaveTimer = null;
       const presenceCloudSaveTimers = new Map();
       const presenceCloudWriteChains = new Map();
       function isPresenceAdmin(){
@@ -1924,9 +1926,8 @@
         return calendarTeamFilterIds.size === 1 ? [...calendarTeamFilterIds][0] : "";
       }
       function loadEvents(){
-        const savedPresenceEvents = readJson(PRESENCE_EVENTS_KEY, []);
         const savedMethodoEvents = readJson(EVENT_KEY, []);
-        const presenceEvents = Array.isArray(savedPresenceEvents) ? savedPresenceEvents : [];
+        const presenceEvents = loadPresenceEvents();
         const methodo = Array.isArray(savedMethodoEvents) ? savedMethodoEvents : [];
         const legacy = readJson(LEGACY_PRESENCE_KEY, null);
         const legacySessions = Array.isArray(legacy?.sessions) ? legacy.sessions : [];
@@ -1937,12 +1938,29 @@
         ].filter(Boolean).sort((a,b) => a.date - b.date);
       }
       function loadPresenceEvents(){
+        if(Array.isArray(presenceEventsMemoryCache)) return presenceEventsMemoryCache;
         const events = readJson(PRESENCE_EVENTS_KEY, []);
-        return Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+        presenceEventsMemoryCache = Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+        return presenceEventsMemoryCache;
       }
       function savePresenceEvents(events){
         const normalized = (Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id);
+        presenceEventsMemoryCache = normalized;
         setJson(PRESENCE_EVENTS_KEY, normalized);
+      }
+      function queuePresenceEventsLocalSave(events){
+        presenceEventsMemoryCache = Array.isArray(events) ? events : [];
+        if(presenceLocalSaveTimer != null){
+          if(typeof cancelIdleCallback === "function") cancelIdleCallback(presenceLocalSaveTimer);
+          else clearTimeout(presenceLocalSaveTimer);
+        }
+        const persist = () => {
+          presenceLocalSaveTimer = null;
+          setJson(PRESENCE_EVENTS_KEY, presenceEventsMemoryCache || []);
+        };
+        presenceLocalSaveTimer = typeof requestIdleCallback === "function"
+          ? requestIdleCallback(persist, {timeout:3000})
+          : setTimeout(persist, 750);
       }
       function eventSyncStamp(event={}){
         return Date.parse(event.updatedAt || event.createdAt || "") || 0;
@@ -1969,7 +1987,7 @@
         if(!api?.presenceListEvents) return [];
         const cloudEvents = await api.presenceListEvents();
         const merged = mergePresenceEvents(loadPresenceEvents(), Array.isArray(cloudEvents) ? cloudEvents : []);
-        savePresenceEvents(merged);
+        queuePresenceEventsLocalSave(merged);
         cloudReady = true;
         return {merged, cloudEvents:Array.isArray(cloudEvents) ? cloudEvents : []};
       }
@@ -2001,7 +2019,6 @@
             const latestEvent = loadPresenceEvents().find(item => item.id === eventId);
             if(!latestEvent) return;
             await pushPresenceEventToCloud(latestEvent);
-            markPresenceEventsSynced([eventId]);
             setSessionMessage("Feuille de présence synchronisée.", "success");
           }).catch(error => {
             setSessionMessage(`Sauvegarde cloud impossible : ${error?.message || error}.`, "error");
@@ -2019,15 +2036,13 @@
         const eventsToSync = localEvents.filter(event => {
           if(!event?.id) return false;
           const cloudEvent = cloudById.get(event.id);
-          const syncedAt = Date.parse(event.cloudSyncedAt || "") || 0;
-          return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent) || eventSyncStamp(event) > syncedAt;
+          return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent);
         });
         const syncedIds = [];
         for(const event of eventsToSync){
           await api.presenceSaveEvent(event);
           syncedIds.push(event.id);
         }
-        markPresenceEventsSynced(syncedIds);
         return syncedIds.length;
       }
       async function deletePresenceEventFromCloud(event){
@@ -3076,8 +3091,9 @@
           attendance,
           updatedAt:new Date().toISOString()
         };
-        savePresenceEvents(events);
+        presenceEventsMemoryCache = events;
         renderAttendanceDetail();
+        queuePresenceEventsLocalSave(events);
         schedulePresenceEventCloudSave(eventId);
       }
       function updateDurationFromTimes(){
@@ -3347,10 +3363,12 @@
             pullPresenceEventsFromCloud()
           ]);
           const {cloudEvents=[]} = presenceResult || {};
-          const syncedCount = await syncPresenceEventsToCloud(cloudEvents);
           render();
           renderSessionList();
-          if(cloudReady) setSessionMessage(syncedCount ? `${syncedCount} événement(s) synchronisé(s) avec le cloud.` : "Événements chargés depuis le cloud.", "success");
+          if(cloudReady) setSessionMessage("Événements chargés depuis le cloud.", "success");
+          syncPresenceEventsToCloud(cloudEvents).then(syncedCount => {
+            if(syncedCount) setSessionMessage(`${syncedCount} événement(s) local(aux) synchronisé(s) avec le cloud.`, "success");
+          }).catch(error => console.warn('[Présences] Synchronisation locale différée impossible', error));
           stopPresenceEventsSubscription?.();
           stopPresenceEventsSubscription = api?.presenceSubscribeEvents?.(() => {
             clearTimeout(realtimeRefreshTimer);
