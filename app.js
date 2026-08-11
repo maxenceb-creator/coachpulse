@@ -328,6 +328,40 @@ function teamsService(){
 function presenceEventsService(){
   return window.CoachPulsePresenceEventsService || null;
 }
+function profilePresenceParseDate(value){
+  const raw = String(value || '').trim();
+  if(!raw) return null;
+  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(iso){
+    const date = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const fr = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+  if(fr){
+    const date = new Date(Number(fr[3]), Number(fr[2]) - 1, Number(fr[1]));
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function profilePresenceSessionId(row={}){
+  return String(row.sessionId || row.session?.sessionId || row.sessionSnapshot?.sessionId || row.sessionSnapshot?.id || row.id || '').trim();
+}
+function profilePresenceEndDate(row={}){
+  const snapshot = row.sessionSnapshot || row.session || {};
+  const date = profilePresenceParseDate(row.date || snapshot.date || row.startDate || row.day || row.start);
+  if(!date) return null;
+  const time = String(row.endTime || row.end || snapshot.endTime || snapshot.end || row.startTime || row.start || snapshot.startTime || snapshot.start || '23:59').trim();
+  const match = time.match(/^(\d{1,2}):(\d{2})/);
+  if(match) date.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  else date.setHours(23, 59, 59, 999);
+  return date;
+}
+function isElapsedProfilePresenceRow(row={}, sessionsById=new Map(), now=new Date()){
+  const session = sessionsById.get(profilePresenceSessionId(row)) || {};
+  const end = profilePresenceEndDate({...session, ...row, sessionSnapshot:row.sessionSnapshot || session.sessionSnapshot || session});
+  return !end || end <= now;
+}
 function permissionsService(){
   return window.CoachPulsePermissionsService || null;
 }
@@ -512,9 +546,11 @@ function homeStatusCode(row={}){
 
 function homeAttendanceSummary(session={}, attendance=[]){
   const sessionId = session.sessionId || session.id;
-  const rows = attendance.filter(row => row.sessionId === sessionId || row.eventId === sessionId);
+  const rows = attendance
+    .filter(row => row.sessionId === sessionId || row.eventId === sessionId)
+    .filter(row => !['NC','NOT-CONVOKED','NON CONVOQUEE','NON CONVOQUÉE'].includes(homeStatusCode(row)));
   const total = rows.length;
-  const present = rows.filter(row => ['P','PRESENT','PRESENTE','PRÉSENT','PRÉSENTE'].includes(homeStatusCode(row))).length;
+  const present = rows.filter(row => ['P','PRESENT','PRESENTE','PRÉSENT','PRÉSENTE','R','RETARD','LATE'].includes(homeStatusCode(row))).length;
   const absent = rows.filter(row => ['A','ABSENT','ABSENTE','ANJ','AJ'].includes(homeStatusCode(row))).length;
   const minutes = rows.map(row => Number(row.minutes ?? row.durationMinutes ?? row.sessionMinutes)).filter(Number.isFinite);
   return {
@@ -1954,6 +1990,16 @@ async function playerProfileLoadData(options={}){
     ...sessions,
     ...(localPresence.sessions || [])
   ], row => row.id || row.sessionId);
+  const sessionsById = new Map((payload.collections.sessions || [])
+    .map(row => [profilePresenceSessionId(row), row])
+    .filter(([id]) => id));
+  payload.collections.attendance = (payload.collections.attendance || [])
+    .filter(row => isElapsedProfilePresenceRow(row, sessionsById));
+  const elapsedSessionIds = new Set((payload.collections.attendance || [])
+    .map(row => profilePresenceSessionId(row))
+    .filter(Boolean));
+  payload.collections.sessions = (payload.collections.sessions || [])
+    .filter(row => elapsedSessionIds.has(profilePresenceSessionId(row)) && isElapsedProfilePresenceRow(row, sessionsById));
   payload.collections.matches = matches;
   if(cacheKey) appDataCache.playerProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
   return payload;
@@ -5001,7 +5047,50 @@ async function technicalDeleteTest(testId){
 }
 function presenceUiStatusFromCode(value=''){
   const code = String(value || '').trim().toUpperCase();
-  return {P:'present', A:'absent', R:'late', M:'sick', B:'injured'}[code] || String(value || '').trim() || 'absent';
+  if(!code) return '';
+  return {P:'present', A:'absent', ANJ:'absent', AJ:'excused', R:'late', NC:'not-convoked', M:'sick', B:'injured', PO:'pole', D:'district', D2:'d2'}[code] || String(value || '').trim();
+}
+const RETIRED_PRESENCE_SEASONS = new Set(['2025-2026']);
+function presenceSessionSeason(session={}){
+  const declared = String(session.season || session.saison || session.sessionSnapshot?.season || session.sessionSnapshot?.saison || '').trim();
+  if(declared) return declared;
+  const idDate = String(session.sessionId || session.id || '').match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
+  const raw = String(session.date || session.startDate || session.day || session.start || idDate).trim();
+  if(!raw) return '';
+  const frMatch = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+  const normalized = frMatch
+    ? `${frMatch[3]}-${frMatch[2].padStart(2, '0')}-${frMatch[1].padStart(2, '0')}`
+    : raw;
+  return seasonFromDate(normalized);
+}
+function isRetiredPresenceSeasonSession(session={}){
+  return RETIRED_PRESENCE_SEASONS.has(presenceSessionSeason(session));
+}
+function normalizePresenceSessionText(value=''){
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+function isPresenceModuleSession(session={}){
+  const source = normalizePresenceSessionText(session.source);
+  return session.createdFromPresenceModule === true || source.includes('presence');
+}
+function isRetiredPresenceImportSession(session={}){
+  if(!isRetiredPresenceSeasonSession(session)) return false;
+  const sessionId = normalizePresenceSessionText(session.sessionId || session.id);
+  const source = normalizePresenceSessionText(session.source);
+  const theme = normalizePresenceSessionText(session.theme || session.title);
+  return (
+    sessionId.startsWith('xlsx-')
+    || source.includes('import presence')
+    || theme.includes('import presence')
+    || (source.includes('import') && theme.includes('presence'))
+  );
+}
+function isPresenceSessionVisibleToModule(session={}, options={}){
+  return isPresenceModuleSession(session) || (options.includeRetiredPresenceSeasons === true && isRetiredPresenceImportSession(session));
 }
 function presencePlainProcedure(value={}){
   const source = value && typeof value === 'object' ? value : {};
@@ -5014,13 +5103,18 @@ function presencePlainProcedure(value={}){
 }
 function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   const sessionId = String(session.sessionId || session.id || '').trim();
+  const dateFromId = sessionId.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
+  const eventDate = session.date || session.startDate || session.day || dateFromId || '';
   const teamIds = [...new Set([
     session.teamId,
     ...(Array.isArray(session.teamIds) ? session.teamIds : []),
     ...(Array.isArray(session.teamSnapshot?.teamIds) ? session.teamSnapshot.teamIds : [])
   ].map(value => String(value || '').trim()).filter(Boolean))];
-  const attendance = firestoreSafeData(session.attendance || {});
-  attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId).forEach(row => {
+  const rowsForSession = attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId && presenceUiStatusFromCode(row.status));
+  const attendance = rowsForSession.length
+    ? {}
+    : session.embeddedAttendanceVersion === 1 ? {} : firestoreSafeData(session.attendance || {});
+  rowsForSession.forEach(row => {
     attendance[row.playerId] = {
       status:presenceUiStatusFromCode(row.status),
       minutes:Number(row.minutes ?? row.duration ?? 0) || 0,
@@ -5034,7 +5128,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   return {
     id:sessionId,
     sessionId,
-    date:session.date || '',
+    date:eventDate,
     startTime:session.startTime || session.start || '',
     endTime:session.endTime || session.end || '',
     duration:Number(session.duration || 0),
@@ -5063,12 +5157,14 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
 async function presenceListEvents(options={}){
   if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const includeRetiredPresenceSeasons = options.includeRetiredPresenceSeasons === true;
   const authorizedTeamIds = getAuthorizedTeamIds();
   const cacheKey = [
     currentUser.uid,
     isAdmin() ? 'admin' : 'staff',
     canAccessAllPlayersForModule('presences') ? 'allPlayers' : 'teamScope',
-    authorizedTeamIds.slice().sort().join(',')
+    authorizedTeamIds.slice().sort().join(','),
+    includeRetiredPresenceSeasons ? 'withRetiredPresenceSeasons' : 'activePresenceSeasons'
   ].join(':');
   if(
     options.forceRefresh !== true
@@ -5104,12 +5200,33 @@ async function presenceListEvents(options={}){
     }
   };
   const uniqueRows = rows => [...new Map(rows.map(row => [row.sessionId || row.id || JSON.stringify(row), row])).values()];
+  const readRetiredPresenceImportSessions = async () => {
+    if(!includeRetiredPresenceSeasons) return [];
+    const documentIdReads = firebaseFns.documentId
+      ? [readWhereSafe('sessions', [
+        {field:firebaseFns.documentId(), operator:'>=', value:'xlsx-'},
+        {field:firebaseFns.documentId(), operator:'<=', value:'xlsx-\uf8ff'}
+      ])]
+      : [];
+    const rows = (await Promise.all([
+      ...documentIdReads,
+      readWhereSafe('sessions', [
+        {field:'date', operator:'>=', value:'2025-07-01'},
+        {field:'date', operator:'<=', value:'2026-06-30'}
+      ]),
+      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Import fichier'}]),
+      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Import présence'}]),
+      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Import presence'}])
+    ])).flat();
+    return uniqueRows(rows).filter(row => isRetiredPresenceImportSession(row));
+  };
   const readPresenceSessionsForAllPlayersScope = async () => {
-    const [modernRows, legacyRows] = await Promise.all([
+    const [modernRows, legacyRows, retiredImportRows] = await Promise.all([
       readWhereSafe('sessions', [{field:'createdFromPresenceModule', operator:'==', value:true}]),
-      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}])
+      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}]),
+      readRetiredPresenceImportSessions()
     ]);
-    return uniqueRows([...legacyRows, ...modernRows]);
+    return uniqueRows([...legacyRows, ...modernRows, ...retiredImportRows]);
   };
   const readPresenceSessionsForTeams = async chunks => {
     const modernReads = [];
@@ -5134,11 +5251,12 @@ async function presenceListEvents(options={}){
         {field:'teamIds', operator:'array-contains-any', value:chunk}
       ]));
     });
-    const [modernRows, legacyRows] = await Promise.all([
+    const [modernRows, legacyRows, retiredImportRows] = await Promise.all([
       Promise.all(modernReads).then(rows => rows.flat()),
-      Promise.all(legacyReads).then(rows => rows.flat())
+      Promise.all(legacyReads).then(rows => rows.flat()),
+      readRetiredPresenceImportSessions()
     ]);
-    return uniqueRows([...legacyRows, ...modernRows]);
+    return uniqueRows([...legacyRows, ...modernRows, ...retiredImportRows]);
   };
   if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return [];
   const teamChunks = [];
@@ -5151,9 +5269,9 @@ async function presenceListEvents(options={}){
         : await readPresenceSessionsForTeams(teamChunks);
     const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
       .filter(row => row.sessionId || row.id)
-      .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true);
+      .filter(row => isPresenceSessionVisibleToModule(row, {includeRetiredPresenceSeasons}))
+      .filter(row => includeRetiredPresenceSeasons || !isRetiredPresenceSeasonSession(row));
     const sessionIdsNeedingAttendance = sessions
-      .filter(row => row.embeddedAttendanceVersion !== 1)
       .map(row => row.sessionId || row.id)
       .filter(Boolean);
     const sessionChunks = [];

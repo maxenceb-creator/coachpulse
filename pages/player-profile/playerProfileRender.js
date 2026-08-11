@@ -3,6 +3,15 @@
   const Filters = global.PlayerProfileFilters;
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function option(value, label, selected){ return `<option value="${esc(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${esc(label || value)}</option>`; }
+  function formatDate(rowOrValue){
+    const raw = typeof rowOrValue === 'object' && rowOrValue !== null ? Filters.dateOf(rowOrValue) : String(rowOrValue || '').slice(0,10);
+    if(!raw) return '-';
+    const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if(iso) return `${String(Number(iso[3])).padStart(2,'0')}/${String(Number(iso[2])).padStart(2,'0')}/${iso[1]}`;
+    const fr = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+    if(fr) return `${String(Number(fr[1])).padStart(2,'0')}/${String(Number(fr[2])).padStart(2,'0')}/${fr[3]}`;
+    return raw;
+  }
   function playerFoot(player={}){
     const value = String(player.foot || player.pied || player.meilleurPiedLabel || player.piedFort || player.preferredFoot || player.strongFoot || '').trim();
     if(!value) return '';
@@ -149,15 +158,15 @@
     const actionMax = Math.max(1, ...Object.values(summary.actions));
     return `<section class="player-sheet">
       <nav class="sheet-tabs" aria-label="Sections fiche">
-        <a href="#resume">Résumé</a>
-        <a href="#presences">Présences</a>
-        <a href="#matchs">Matchs</a>
-        <a href="#technique">Tests techniques</a>
-        <a href="#athletique">Tests athlétiques</a>
-        <a href="#blessures">Blessures</a>
-        <a href="#evolution">Évolution</a>
+        <a href="#resume" class="active" data-sheet-target="resume">Résumé</a>
+        <a href="#presences" data-sheet-target="presences">Présences</a>
+        <a href="#matchs" data-sheet-target="matchs">Matchs</a>
+        <a href="#technique" data-sheet-target="technique">Tests techniques</a>
+        <a href="#athletique" data-sheet-target="athletique">Tests athlétiques</a>
+        <a href="#blessures" data-sheet-target="blessures">Blessures</a>
+        <a href="#evolution" data-sheet-target="evolution">Évolution</a>
       </nav>
-      <section id="resume" class="sheet-layout">
+      <section id="resume" class="sheet-layout sheet-section" data-sheet-section="resume">
         <article class="panel season-summary">
           <div>
             <p class="eyebrow">Résumé de saison</p>
@@ -172,17 +181,21 @@
           </div>
         </article>
         <article class="panel">
+          <h2>Présences</h2>
+          ${renderAttendanceSummary(summary)}
+        </article>
+        <article class="panel">
           <h2>Statistiques de match</h2>
           <div class="bar-list">${Object.keys(summary.actions).length ? Object.entries(summary.actions).map(([k,v]) => bar(k,v,actionMax)).join('') : '<div class="empty-state">Aucune statistique match sur cette période.</div>'}</div>
         </article>
       </section>
       <section class="sheet-grid">
-        <article id="presences" class="panel stat-section"><h2>Présences</h2>${renderAttendanceTable(summary.attendance)}</article>
-        <article id="matchs" class="panel stat-section"><h2>Matchs</h2>${renderMatchStats(summary.matchEvents)}</article>
-        <article id="technique" class="panel stat-section wide"><h2>Tests techniques</h2>${summary.technicalTests.length ? renderTechnicalTests(summary.technicalTests) : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
-        <article id="athletique" class="panel stat-section wide"><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderPhysicalTests(summary.physicalTests) : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
-        <article id="blessures" class="panel stat-section"><h2>Blessures</h2>${renderInjuryTable(summary.injuries)}</article>
-        <article id="evolution" class="panel stat-section"><h2>Évolution</h2>${renderEvolution(summary)}</article>
+        <article id="presences" class="panel stat-section wide sheet-section" data-sheet-section="presences" hidden><h2>Présences</h2>${renderAttendanceSummary(summary)}${renderAttendanceTable(summary.attendance)}</article>
+        <article id="matchs" class="panel stat-section sheet-section" data-sheet-section="matchs" hidden><h2>Matchs</h2>${renderMatchStats(summary.matchEvents)}</article>
+        <article id="technique" class="panel stat-section wide sheet-section" data-sheet-section="technique" hidden><h2>Tests techniques</h2>${summary.technicalTests.length ? renderTechnicalTests(summary.technicalTests) : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
+        <article id="athletique" class="panel stat-section wide sheet-section" data-sheet-section="athletique" hidden><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderPhysicalTests(summary.physicalTests) : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
+        <article id="blessures" class="panel stat-section sheet-section" data-sheet-section="blessures" hidden><h2>Blessures</h2>${renderInjuryTable(summary.injuries)}</article>
+        <article id="evolution" class="panel stat-section sheet-section" data-sheet-section="evolution" hidden><h2>Évolution</h2>${renderEvolution(summary)}</article>
       </section>
     </section>`;
   }
@@ -190,9 +203,60 @@
     if(!rows.length) return `<div class="empty-state">${esc(empty)}</div>`;
     return `<div class="table-wrap"><table class="data-table"><thead><tr>${headers.map(header => `<th>${esc(header)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   }
+  function attendanceStatusLabel(value=''){
+    const status = String(value || '').trim().toUpperCase();
+    return {
+      P:'Présente',
+      PRESENT:'Présente',
+      PRESENTE:'Présente',
+      'PRÉSENTE':'Présente',
+      R:'Retard',
+      RETARD:'Retard',
+      LATE:'Retard',
+      A:'Absence non justifiée',
+      ANJ:'Absence non justifiée',
+      AJ:'Absence justifiée',
+      M:'Malade',
+      B:'Blessée',
+      PO:'Pôle Espoir',
+      D:'Sélection',
+      S:'Sélection',
+      D2:'Groupe pro'
+    }[status] || value || '-';
+  }
+  function renderAttendanceSummary(summary={}){
+    const stats = summary.attendanceSummary || {};
+    const counts = stats.statusCounts || {};
+    const main = [
+      ['Séances catégorie', stats.totalCategorySessions || 0],
+      ['Présences', stats.presentSessions || 0],
+      ['Retards', stats.lateSessions || 0],
+      ['Absences', stats.absenceTotal || 0]
+    ];
+    const details = [
+      ['Abs. non justifiées', counts.absenceNonJustifiee || 0],
+      ['Abs. justifiées', counts.absenceJustifiee || 0],
+      ['Malade', counts.malade || 0],
+      ['Blessée', counts.blessee || 0],
+      ['Pôle Espoir', counts.poleEspoir || 0],
+      ['Sélection', counts.selection || 0],
+      ['Groupe pro', counts.groupePro || 0],
+      ['Autres', counts.autresAbsences || 0]
+    ];
+    return `<div class="attendance-summary">
+      <div class="attendance-summary-main">
+        ${main.map(([label,value]) => `<article><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}
+      </div>
+      <div class="attendance-summary-detail" aria-label="Détail des motifs d'absence">
+        ${details.map(([label,value]) => `<span><b>${esc(value)}</b>${esc(label)}</span>`).join('')}
+      </div>
+    </div>`;
+  }
   function renderAttendanceTable(rows=[]){
-    const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,8);
-    return table(['Date','Statut','Minutes'], sorted.map(row => `<tr><td>${esc(Filters.dateOf(row) || '-')}</td><td>${esc(row.status || row.code || '-')}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`), 'Aucune présence sur cette période.');
+    const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a)));
+    const body = sorted.map(row => `<tr><td>${esc(formatDate(row))}</td><td>${esc(attendanceStatusLabel(row.status || row.code || row.statusCode || '-'))}</td><td>${esc(row.minutes || row.duration || '-')}</td></tr>`).join('');
+    if(!body) return '<div class="empty-state">Aucune présence sur cette période.</div>';
+    return `<div class="table-wrap attendance-table-scroll"><table class="data-table"><thead><tr><th>Date</th><th>Statut</th><th>Minutes</th></tr></thead><tbody>${body}</tbody></table></div>`;
   }
   function renderMatchStats(rows=[]){
     const grouped = Object.entries(rows.reduce((out,row) => {
@@ -204,7 +268,7 @@
   }
   function renderInjuryTable(rows=[]){
     const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,6);
-    return table(['Date','Type','Statut'], sorted.map(row => `<tr><td>${esc(Filters.dateOf(row) || '-')}</td><td>${esc(row.injuryType || row.bodyZone || '-')}</td><td>${esc(row.status || row.availability || '-')}</td></tr>`), 'Aucune blessure sur cette période.');
+    return table(['Date','Type','Statut'], sorted.map(row => `<tr><td>${esc(formatDate(row))}</td><td>${esc(row.injuryType || row.bodyZone || '-')}</td><td>${esc(row.status || row.availability || '-')}</td></tr>`), 'Aucune blessure sur cette période.');
   }
   function renderEvolution(summary){
     const items = [
@@ -221,7 +285,7 @@
       const value = row[valueKey] ?? row.note ?? row.tests ?? row.objectifs ?? '';
       return typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
     }
-    return `<div class="timeline">${rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,12).map(row => `<div class="event"><b>${esc(row[titleKey] || row.theme || row.testName || row.action || row.source || 'Donnée')}</b><small>${esc(Filters.dateOf(row) || 'Sans date')} · ${esc(valueText(row))}</small></div>`).join('')}</div>`;
+    return `<div class="timeline">${rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,12).map(row => `<div class="event"><b>${esc(row[titleKey] || row.theme || row.testName || row.action || row.source || 'Donnée')}</b><small>${esc(formatDate(row))} · ${esc(valueText(row))}</small></div>`).join('')}</div>`;
   }
   function renderTechnicalTests(rows=[]){
     const labels = [
@@ -258,11 +322,11 @@
       <div class="technical-summary">${highlights.map(item => `<div class="technical-score">
         <span>${esc(item.group)}</span>
         <b>${esc(item.value)}</b>
-        <small>${esc(item.label)}${item.date ? ` · ${esc(item.date)}` : ''}</small>
+        <small>${esc(item.label)}${item.date ? ` · ${esc(formatDate(item.date))}` : ''}</small>
       </div>`).join('')}</div>
       <div class="table-wrap"><table class="data-table technical-table">
         <thead><tr><th>Date</th>${primaryKeys.map(key => `<th>${esc(labelMap[key])}</th>`).join('')}</tr></thead>
-        <tbody>${sorted.map(row => `<tr><td><b>${esc(Filters.dateOf(row) || '-')}</b></td>${primaryKeys.map(key => {
+        <tbody>${sorted.map(row => `<tr><td><b>${esc(formatDate(row))}</b></td>${primaryKeys.map(key => {
           const value = technicalValue(row, key);
           return `<td>${Number.isFinite(value) ? esc(value) : '<span class="muted-dash">-</span>'}</td>`;
         }).join('')}</tr>`).join('')}</tbody>
@@ -322,7 +386,7 @@
           .map(([key, meta]) => [meta, physicalValue(row, key)])
           .filter(([,value]) => Number.isFinite(value));
         const note = row.comment || row.commentaire || row.note || '';
-        return `<div class="event technical-event"><div class="event-head"><b>${esc(Filters.dateOf(row) || 'Sans date')}</b><span class="mini-source">${esc(row.season || row.saison || row.source || 'Tests athlétiques')}</span></div><div class="chips">${entries.map(([meta,value]) => `<span class="chip">${esc(meta.label)} <strong>${esc(formatMetric(value, meta.unit))}</strong></span>`).join('')}${note ? `<span class="chip">${esc(note)}</span>` : ''}</div></div>`;
+        return `<div class="event technical-event"><div class="event-head"><b>${esc(formatDate(row))}</b><span class="mini-source">${esc(row.season || row.saison || row.source || 'Tests athlétiques')}</span></div><div class="chips">${entries.map(([meta,value]) => `<span class="chip">${esc(meta.label)} <strong>${esc(formatMetric(value, meta.unit))}</strong></span>`).join('')}${note ? `<span class="chip">${esc(note)}</span>` : ''}</div></div>`;
       }).join('')}</div>
     </div>`;
   }
