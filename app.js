@@ -4986,7 +4986,8 @@ const RETIRED_PRESENCE_SEASONS = new Set(['2025-2026']);
 function presenceSessionSeason(session={}){
   const declared = String(session.season || session.saison || session.sessionSnapshot?.season || session.sessionSnapshot?.saison || '').trim();
   if(declared) return declared;
-  const raw = String(session.date || session.startDate || session.day || session.start || '').trim();
+  const idDate = String(session.sessionId || session.id || '').match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
+  const raw = String(session.date || session.startDate || session.day || session.start || idDate).trim();
   if(!raw) return '';
   const frMatch = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
   const normalized = frMatch
@@ -5034,6 +5035,8 @@ function presencePlainProcedure(value={}){
 }
 function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   const sessionId = String(session.sessionId || session.id || '').trim();
+  const dateFromId = sessionId.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
+  const eventDate = session.date || session.startDate || session.day || dateFromId || '';
   const teamIds = [...new Set([
     session.teamId,
     ...(Array.isArray(session.teamIds) ? session.teamIds : []),
@@ -5057,7 +5060,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   return {
     id:sessionId,
     sessionId,
-    date:session.date || '',
+    date:eventDate,
     startTime:session.startTime || session.start || '',
     endTime:session.endTime || session.end || '',
     duration:Number(session.duration || 0),
@@ -5131,7 +5134,14 @@ async function presenceListEvents(options={}){
   const uniqueRows = rows => [...new Map(rows.map(row => [row.sessionId || row.id || JSON.stringify(row), row])).values()];
   const readRetiredPresenceImportSessions = async () => {
     if(!includeRetiredPresenceSeasons) return [];
+    const documentIdReads = firebaseFns.documentId
+      ? [readWhereSafe('sessions', [
+        {field:firebaseFns.documentId(), operator:'>=', value:'xlsx-'},
+        {field:firebaseFns.documentId(), operator:'<=', value:'xlsx-\uf8ff'}
+      ])]
+      : [];
     const rows = (await Promise.all([
+      ...documentIdReads,
       readWhereSafe('sessions', [
         {field:'date', operator:'>=', value:'2025-07-01'},
         {field:'date', operator:'<=', value:'2026-06-30'}
