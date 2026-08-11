@@ -1392,7 +1392,6 @@
               <label for="sessionType">Type d'événement</label>
               <select id="sessionType" name="type" required>
                 <option value="entrainement">Entraînement</option>
-                <option value="match">Match</option>
                 <option value="match_championnat">Match de championnat</option>
                 <option value="match_coupe">Match de coupe</option>
                 <option value="match_amical">Match amical</option>
@@ -1702,6 +1701,8 @@
       const PRESENCE_SETTINGS_KEY = storageKeys.presenceSettings || "coachpulse:presenceSettings:v1";
       const EVENT_KEY = storageKeys.methodologieEvents || "methodo_events_v24";
       const LEGACY_PRESENCE_KEY = storageKeys.legacyPresence || "presenceSeanceV3_6_Excel";
+      const PRESENCE_DELETED_EVENTS_KEY = "coachpulse:presenceEvents:deletedIds:v1";
+      const RETIRED_PRESENCE_SEASONS = new Set(["2025-2026"]);
       let calendarPageMonth = new Date();
       let selectedCalendarDate = isoDate(new Date());
       let selectedAttendanceEventId = "";
@@ -1738,10 +1739,12 @@
         };
       }
       function savePresenceSettings(settings){
+        const deletedEventIds = deletedPresenceEventIdList();
         const next = {
           ...DEFAULT_PRESENCE_SETTINGS,
           ...settings,
-          attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)
+          attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes),
+          deletedEventIds:[...new Set([...(Array.isArray(settings.deletedEventIds) ? settings.deletedEventIds : []), ...deletedEventIds])].sort()
         };
         setJson(PRESENCE_SETTINGS_KEY, next);
         const api = centralDataApi();
@@ -1751,6 +1754,43 @@
             setSettingsMessage('Paramètres enregistrés dans le cloud.', 'success');
           }).catch(error => setSettingsMessage(`Paramètres conservés localement, cloud non synchronisé : ${error?.message || error}`, 'error'));
         }
+      }
+      function deletedPresenceEventIds(){
+        const settings = readJson(PRESENCE_SETTINGS_KEY, {});
+        const localIds = readJson(PRESENCE_DELETED_EVENTS_KEY, []);
+        return new Set([
+          ...(Array.isArray(settings.deletedEventIds) ? settings.deletedEventIds : []),
+          ...(Array.isArray(localIds) ? localIds : [])
+        ].map(value => String(value || "").trim()).filter(Boolean));
+      }
+      function deletedPresenceEventIdList(ids=deletedPresenceEventIds()){
+        return [...ids].filter(Boolean).sort();
+      }
+      function saveDeletedPresenceEventIds(ids, options={}){
+        const list = deletedPresenceEventIdList(ids);
+        setJson(PRESENCE_DELETED_EVENTS_KEY, list);
+        const settings = presenceSettings();
+        const next = {...settings, deletedEventIds:list};
+        setJson(PRESENCE_SETTINGS_KEY, next);
+        if(options.syncCloud === false) return Promise.resolve(list);
+        const api = centralDataApi();
+        if(!isPresenceAdmin() || !api?.presenceSaveSettings) return Promise.resolve(list);
+        return api.presenceSaveSettings(next)
+          .then(() => list)
+          .catch(error => {
+            console.warn("[Présences] Registre de suppression conservé localement", error);
+            return list;
+          });
+      }
+      function markPresenceEventDeleted(eventId, options={}){
+        const id = String(eventId || "").trim();
+        if(!id) return Promise.resolve([]);
+        const ids = deletedPresenceEventIds();
+        ids.add(id);
+        return saveDeletedPresenceEventIds(ids, options);
+      }
+      function isDeletedPresenceEvent(event={}){
+        return deletedPresenceEventIds().has(String(event?.id || event?.sessionId || event?.eventId || "").trim());
       }
       function teamsService(){
         try{
@@ -1813,9 +1853,67 @@
         if(service?.displayName) return service.displayName(player);
         return [player.prenom || player.firstName || "", player.nom || player.lastName || ""].filter(Boolean).join(" ") || player.displayName || player.name || "Joueuse";
       }
+      function playerNameFromId(playerId){
+        return String(playerId || "")
+          .replace(/^player-/i, "")
+          .replace(/-\d{1,2}-\d{1,2}-\d{4}$/i, "")
+          .split("-")
+          .filter(Boolean)
+          .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ") || "Joueuse";
+      }
+      function attendanceSnapshot(event, playerId){
+        const raw = event?.attendance?.[playerId];
+        return raw && typeof raw === "object" ? raw.playerSnapshot || null : null;
+      }
+      function playerDisplayName(player, snapshot, playerId){
+        if(player) return playerName(player);
+        const snapshotName = snapshot ? playerName(snapshot) : "";
+        return snapshotName && snapshotName !== "Joueuse" ? snapshotName : playerNameFromId(playerId);
+      }
+      function playerDisplayTeam(player, snapshot, event){
+        return player?.team || snapshot?.team || eventTeamLabel(event) || event?.team || "";
+      }
+      function displayDate(dateValue){
+        const date = parseDate(dateValue);
+        if(!date) return String(dateValue || "-");
+        return `${String(date.getDate()).padStart(2,"0")}/${date.getMonth()+1}/${date.getFullYear()}`;
+      }
+      function eventEndDateTime(event){
+        const date = parseDate(event?.iso || event?.date || event?.startDate || event?.day || event?.start);
+        if(!date) return null;
+        const time = String(event?.endTime || event?.startTime || event?.time || "23:59").trim();
+        const match = time.match(/^(\d{1,2}):(\d{2})/);
+        if(match){
+          date.setHours(Number(match[1]), Number(match[2]), 0, 0);
+        }else{
+          date.setHours(23, 59, 59, 999);
+        }
+        return date;
+      }
+      function isPresenceEventElapsed(event, now=new Date()){
+        const end = eventEndDateTime(event);
+        return Boolean(end && end <= now);
+      }
       function eventSeason(dateValue){
         const service = playersService();
         return service?.seasonFromDate ? service.seasonFromDate(parseDate(dateValue) || new Date()) : "";
+      }
+      function presenceEventSeason(event){
+        return String(event?.season || event?.saison || event?.sessionSnapshot?.season || event?.sessionSnapshot?.saison || "").trim()
+          || eventSeason(event?.date || event?.startDate || event?.day || event?.start);
+      }
+      function isRetiredPresenceSeasonEvent(event){
+        return RETIRED_PRESENCE_SEASONS.has(presenceEventSeason(event));
+      }
+      function activePresenceSeasonEvents(events){
+        return (Array.isArray(events) ? events : []).filter(event => !isRetiredPresenceSeasonEvent(event));
+      }
+      function splitRetiredPresenceSeasonEvents(events){
+        return (Array.isArray(events) ? events : []).reduce((acc, event) => {
+          acc[isRetiredPresenceSeasonEvent(event) ? "retired" : "active"].push(event);
+          return acc;
+        }, {active:[], retired:[]});
       }
       function playerForEventSeason(player, dateValue){
         const service = playersService();
@@ -1933,7 +2031,7 @@
         const presenceEvents = loadPresenceEvents();
         const methodo = Array.isArray(savedMethodoEvents) ? savedMethodoEvents : [];
         const legacy = readJson(LEGACY_PRESENCE_KEY, null);
-        const legacySessions = Array.isArray(legacy?.sessions) ? legacy.sessions : [];
+        const legacySessions = activePresenceSeasonEvents(Array.isArray(legacy?.sessions) ? legacy.sessions : []);
         return [
           ...presenceEvents.map(event => normalizeEvent(event, "presences")),
           ...methodo.map(event => normalizeEvent(event, "methodologie")),
@@ -1943,11 +2041,18 @@
       function loadPresenceEvents(){
         if(Array.isArray(presenceEventsMemoryCache)) return presenceEventsMemoryCache;
         const events = readJson(PRESENCE_EVENTS_KEY, []);
-        presenceEventsMemoryCache = Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+        const normalized = Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+        const deletedIds = deletedPresenceEventIds();
+        const {active, retired} = splitRetiredPresenceSeasonEvents(normalized);
+        const kept = active.filter(event => !deletedIds.has(event.id));
+        presenceEventsMemoryCache = kept;
+        if(retired.length || kept.length !== active.length) setJson(PRESENCE_EVENTS_KEY, kept);
         return presenceEventsMemoryCache;
       }
       function savePresenceEvents(events){
-        const normalized = (Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id);
+        const deletedIds = deletedPresenceEventIds();
+        const normalized = activePresenceSeasonEvents((Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id))
+          .filter(event => !deletedIds.has(event.id));
         presenceEventsMemoryCache = normalized;
         setJson(PRESENCE_EVENTS_KEY, normalized);
       }
@@ -1959,7 +2064,11 @@
         }
         const persist = () => {
           presenceLocalSaveTimer = null;
-          setJson(PRESENCE_EVENTS_KEY, presenceEventsMemoryCache || []);
+          const deletedIds = deletedPresenceEventIds();
+          const activeEvents = activePresenceSeasonEvents(presenceEventsMemoryCache || [])
+            .filter(event => !deletedIds.has(event.id));
+          presenceEventsMemoryCache = activeEvents;
+          setJson(PRESENCE_EVENTS_KEY, activeEvents);
         };
         presenceLocalSaveTimer = typeof requestIdleCallback === "function"
           ? requestIdleCallback(persist, {timeout:3000})
@@ -1975,9 +2084,11 @@
         savePresenceEvents(loadPresenceEvents().map(event => ids.has(event.id) ? {...event, cloudSyncedAt:syncedAt} : event));
       }
       function mergePresenceEvents(localEvents=[], cloudEvents=[]){
+        const deletedIds = deletedPresenceEventIds();
         const byId = new Map();
         [...localEvents, ...cloudEvents].forEach(event => {
           if(!event?.id) return;
+          if(deletedIds.has(event.id)) return;
           const current = byId.get(event.id);
           const currentTime = Date.parse(current?.updatedAt || current?.createdAt || '') || 0;
           const nextTime = Date.parse(event.updatedAt || event.createdAt || '') || 0;
@@ -1988,21 +2099,31 @@
       async function pullPresenceEventsFromCloud(){
         const api = centralDataApi();
         if(!api?.presenceListEvents) return [];
-        const cloudEvents = await api.presenceListEvents();
-        const merged = mergePresenceEvents(loadPresenceEvents(), Array.isArray(cloudEvents) ? cloudEvents : []);
+        const cloudEvents = await api.presenceListEvents({includeRetiredPresenceSeasons:true});
+        const {active:activeCloudEvents, retired:retiredCloudEvents} = splitRetiredPresenceSeasonEvents(Array.isArray(cloudEvents) ? cloudEvents : []);
+        const deletedIds = deletedPresenceEventIds();
+        const merged = mergePresenceEvents(loadPresenceEvents(), activeCloudEvents.filter(event => !deletedIds.has(event.id)));
         queuePresenceEventsLocalSave(merged);
+        deleteRetiredPresenceEventsFromCloud(retiredCloudEvents);
         cloudReady = true;
-        return {merged, cloudEvents:Array.isArray(cloudEvents) ? cloudEvents : []};
+        return {merged, cloudEvents:activeCloudEvents};
       }
       async function pullPresenceSettingsFromCloud(){
         const api = centralDataApi();
         if(!api?.presenceLoadSettings) return;
         const cloudSettings = await api.presenceLoadSettings();
         if(cloudSettings && Object.keys(cloudSettings).length){
-          const next = {...DEFAULT_PRESENCE_SETTINGS, ...cloudSettings, attendanceCodes:mergeAttendanceCodes(cloudSettings.attendanceCodes)};
+          const deletedIds = deletedPresenceEventIds();
+          (Array.isArray(cloudSettings.deletedEventIds) ? cloudSettings.deletedEventIds : []).forEach(id => {
+            const value = String(id || "").trim();
+            if(value) deletedIds.add(value);
+          });
+          const next = {...DEFAULT_PRESENCE_SETTINGS, ...cloudSettings, attendanceCodes:mergeAttendanceCodes(cloudSettings.attendanceCodes), deletedEventIds:deletedPresenceEventIdList(deletedIds)};
           setJson(PRESENCE_SETTINGS_KEY, next);
+          setJson(PRESENCE_DELETED_EVENTS_KEY, next.deletedEventIds);
           fillSettingsForm();
           applySessionDefaults(false);
+          if(isPresenceAdmin() && api?.presenceSaveSettings) api.presenceSaveSettings(next).catch(error => console.warn("[Présences] Synchronisation des suppressions différée", error));
         }
       }
       async function pushPresenceEventToCloud(event){
@@ -2020,6 +2141,7 @@
           const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve();
           const nextWrite = previousWrite.catch(() => {}).then(async () => {
             const latestEvent = loadPresenceEvents().find(item => item.id === eventId);
+            if(deletedPresenceEventIds().has(eventId)) return;
             if(!latestEvent) return;
             await pushPresenceEventToCloud(latestEvent);
             setSessionMessage("Feuille de présence synchronisée.", "success");
@@ -2035,7 +2157,8 @@
         const api = centralDataApi();
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
         const cloudById = new Map((Array.isArray(cloudEvents) ? cloudEvents : []).map(event => [event.id, event]));
-        const localEvents = loadPresenceEvents();
+        const deletedIds = deletedPresenceEventIds();
+        const localEvents = activePresenceSeasonEvents(loadPresenceEvents()).filter(event => !deletedIds.has(event.id));
         const eventsToSync = localEvents.filter(event => {
           if(!event?.id) return false;
           const cloudEvent = cloudById.get(event.id);
@@ -2052,6 +2175,23 @@
         const api = centralDataApi();
         if(!api?.presenceDeleteEvent) throw new Error("Suppression cloud indisponible.");
         return api.presenceDeleteEvent(event);
+      }
+      function deleteRetiredPresenceEventsFromCloud(events=[]){
+        const api = centralDataApi();
+        const retired = (Array.isArray(events) ? events : []).filter(event => event?.id);
+        if(!retired.length || !api?.presenceDeleteEvent) return;
+        const deletedIds = deletedPresenceEventIds();
+        retired.forEach(event => deletedIds.add(event.id));
+        saveDeletedPresenceEventIds(deletedIds, {syncCloud:true});
+        Promise.allSettled(retired.map(event => api.presenceDeleteEvent(event))).then(results => {
+          const deleted = results.filter(result => result.status === "fulfilled").length;
+          const failed = results.length - deleted;
+          if(deleted) setSessionMessage(`${deleted} événement(s) Présences 2025-2026 supprimé(s).`, "success");
+          if(failed){
+            console.warn("[Présences] Purge 2025-2026 partiellement refusée", results.filter(result => result.status === "rejected").map(result => result.reason));
+            setSessionMessage(`${failed} événement(s) 2025-2026 non supprimé(s) : droits Firebase ou règles à publier.`, "error");
+          }
+        }).catch(error => console.warn("[Présences] Purge 2025-2026 impossible", error));
       }
       function setText(id, value){
         const node = document.getElementById(id);
@@ -2410,11 +2550,20 @@
         const tone = attendanceStatuses().find(status => status.id === statusId)?.tone || "green";
         return ATTENDANCE_CODE_TONES[tone] || ATTENDANCE_CODE_TONES.green;
       }
+      function normalizedAttendanceStatus(status){
+        return String(status || "").trim();
+      }
+      function isNeutralStatus(status){
+        return ["not-convoked","NC"].includes(normalizedAttendanceStatus(status));
+      }
+      function isCountedStatus(status){
+        return !!normalizedAttendanceStatus(status) && !isNeutralStatus(status);
+      }
       function isPresentStatus(status){
-        return ["present","late"].includes(status);
+        return ["present","late","P","R"].includes(normalizedAttendanceStatus(status));
       }
       function isAbsentStatus(status){
-        return !!status && !isPresentStatus(status);
+        return isCountedStatus(status) && !isPresentStatus(status);
       }
       function defaultAttendanceMinutes(status, event){
         return isPresentStatus(status) ? Number(event.duration || 0) : 0;
@@ -2477,10 +2626,11 @@
           attendanceEntries(event).forEach(entry => {
             if(!entry.playerId || players.has(entry.playerId)) return;
             const player = playerById(entry.playerId, event.date);
+            const snapshot = attendanceSnapshot(event, entry.playerId);
             players.set(entry.playerId, {
               playerId:entry.playerId,
-              name:player ? playerName(player) : entry.playerId,
-              team:player?.team || eventTeamLabel(event) || ""
+              name:playerDisplayName(player, snapshot, entry.playerId),
+              team:playerDisplayTeam(player, snapshot, event)
             });
           });
         });
@@ -2552,21 +2702,22 @@
         return presenceStatsFromEntries(attendanceEntries(event));
       }
       function presenceStatsFromEntries(entries){
-        const present = entries.filter(entry => isPresentStatus(entry.status)).length;
-        const absent = entries.filter(entry => isAbsentStatus(entry.status)).length;
-        const late = entries.filter(entry => entry.status === "late").length;
-        const unavailable = entries.filter(entry => entry.status === "sick" || entry.status === "injured").length;
-        const minutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
-        const playerIds = new Set(entries.map(entry => entry.playerId).filter(Boolean));
+        const countedEntries = entries.filter(entry => isCountedStatus(entry.status));
+        const present = countedEntries.filter(entry => isPresentStatus(entry.status)).length;
+        const absent = countedEntries.filter(entry => isAbsentStatus(entry.status)).length;
+        const late = countedEntries.filter(entry => ["late","R"].includes(normalizedAttendanceStatus(entry.status))).length;
+        const unavailable = countedEntries.filter(entry => entry.status === "sick" || entry.status === "injured").length;
+        const minutes = countedEntries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+        const playerIds = new Set(countedEntries.map(entry => entry.playerId).filter(Boolean));
         return {
           present,
           absent,
           late,
           unavailable,
-          total:entries.length,
+          total:countedEntries.length,
           minutes,
           playerCount:playerIds.size,
-          rate:entries.length ? present / entries.length : 0
+          rate:countedEntries.length ? present / countedEntries.length : 0
         };
       }
       function reportTypeLabel(type){
@@ -2574,12 +2725,14 @@
       }
       function renderReports(events){
         renderCalendarTeamFilters("reportsTeamFilters");
-        const presenceEvents = events.filter(event => event.source === "presences" && event.id);
+        const presenceEvents = events
+          .filter(event => event.source === "presences" && event.id)
+          .filter(event => isPresenceEventElapsed(event));
         renderPlayerFilter("reportsTeamFilters", reportPlayerFilterIds, presenceEvents);
         const entries = filterEntriesByPlayers(
           presenceEvents.flatMap(event => attendanceEntries(event).map(entry => ({...entry, event}))),
           reportPlayerFilterIds
-        );
+        ).filter(entry => isCountedStatus(entry.status));
         const filteredEventIds = new Set(entries.map(entry => entry.event.id));
         const reportEvents = reportPlayerFilterIds.size
           ? presenceEvents.filter(event => filteredEventIds.has(event.id))
@@ -2652,8 +2805,17 @@
         const playerMap = new Map();
         entries.forEach(entry => {
           const player = playerById(entry.playerId, entry.event.date);
+          const snapshot = attendanceSnapshot(entry.event, entry.playerId);
           const key = entry.playerId;
-          const row = playerMap.get(key) || {playerId:key, name:player ? playerName(player) : key, team:player?.team || entry.event.team || "", present:0, absent:0, total:0, minutes:0};
+          const row = playerMap.get(key) || {
+            playerId:key,
+            name:playerDisplayName(player, snapshot, key),
+            team:playerDisplayTeam(player, snapshot, entry.event),
+            present:0,
+            absent:0,
+            total:0,
+            minutes:0
+          };
           row.total += 1;
           row.minutes += Number(entry.minutes || 0);
           if(isPresentStatus(entry.status)) row.present += 1;
@@ -2679,12 +2841,13 @@
         return events.filter(event => event.source === "presences" && event.id)
           .flatMap(event => attendanceEntries(event).map(entry => {
             const player = playerById(entry.playerId, event.date);
+            const snapshot = attendanceSnapshot(event, entry.playerId);
             return {
               ...entry,
               event,
               player,
-              playerName:player ? playerName(player) : entry.playerId,
-              team:player?.team || event.team || ""
+              playerName:playerDisplayName(player, snapshot, entry.playerId),
+              team:playerDisplayTeam(player, snapshot, event)
             };
           }));
       }
@@ -2709,7 +2872,8 @@
         renderCalendarTeamFilters("preventionTeamFilters");
         const presenceEvents = events.filter(event => event.source === "presences" && event.id);
         renderPlayerFilter("preventionTeamFilters", preventionPlayerFilterIds, presenceEvents);
-        const entries = filterEntriesByPlayers(preventionEntries(events), preventionPlayerFilterIds);
+        const entries = filterEntriesByPlayers(preventionEntries(events), preventionPlayerFilterIds)
+          .filter(entry => isCountedStatus(entry.status));
         const present = entries.filter(entry => isPresentStatus(entry.status)).length;
         const totalMinutes = entries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
         const grouped = new Map();
@@ -2719,7 +2883,7 @@
           row.minutes += Number(entry.minutes || 0);
           row.present += isPresentStatus(entry.status) ? 1 : 0;
           row.absent += isAbsentStatus(entry.status) ? 1 : 0;
-          row.late += entry.status === "late" ? 1 : 0;
+          row.late += ["late","R"].includes(normalizedAttendanceStatus(entry.status)) ? 1 : 0;
           row.sick += entry.status === "sick" ? 1 : 0;
           row.injured += entry.status === "injured" ? 1 : 0;
           if(entry.comment) row.comments.push({text:entry.comment, date:entry.event.date, team:entry.team});
@@ -2785,6 +2949,10 @@
           setSessionMessage(`Suppression cloud impossible : ${error?.message || error}.`, "error");
           return;
         }
+        await markPresenceEventDeleted(eventId, {syncCloud:true});
+        clearTimeout(presenceCloudSaveTimers.get(eventId));
+        presenceCloudSaveTimers.delete(eventId);
+        presenceCloudWriteChains.delete(eventId);
         savePresenceEvents(events.filter(item => item.id !== eventId));
         if(selectedAttendanceEventId === eventId) selectedAttendanceEventId = "";
         render();
@@ -2965,7 +3133,7 @@
             <div>
               <strong>${esc(typeLabel(event.type))}</strong>
               <div class="session-item-meta">
-                ${esc(event.date)} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min
+                ${esc(displayDate(event.date))} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min
                 ${event.team ? " · " + esc(event.team) : ""}
               </div>
               ${procedureSummary(event.procedure || event.sessionProcedure) ? `<div class="session-item-meta">${esc(procedureSummary(event.procedure || event.sessionProcedure))}</div>` : ""}
@@ -2980,6 +3148,27 @@
         `).join("");
         renderAttendanceDetail();
       }
+      function playerFromAttendanceSnapshot(event, playerId){
+        const raw = event?.attendance?.[playerId];
+        const snapshot = raw?.playerSnapshot || {};
+        const player = playerById(playerId, event?.date);
+        return {
+          ...(player || {}),
+          ...snapshot,
+          playerId,
+          team:snapshot.team || player?.team || event?.team || "",
+          teamId:snapshot.teamId || player?.teamId || event?.teamId || ""
+        };
+      }
+      function attendancePlayersForEvent(event){
+        const attendanceIds = Object.keys(event?.attendance || {}).filter(Boolean);
+        if(attendanceIds.length){
+          return attendanceIds
+            .map(playerId => playerFromAttendanceSnapshot(event, playerId))
+            .sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
+        }
+        return playersForTeam(event.teamId, event.date);
+      }
       function renderAttendanceDetail(){
         const card = document.getElementById("attendanceDetail");
         const content = document.getElementById("attendanceDetailContent");
@@ -2992,7 +3181,7 @@
           return;
         }
         card.hidden = false;
-        const players = playersForTeam(event.teamId, event.date);
+        const players = attendancePlayersForEvent(event);
         if(!event.teamId){
           content.innerHTML = '<div class="empty-state">Aucune équipe reliée à cet événement.</div>';
           return;
@@ -3007,7 +3196,7 @@
           const entry = attendanceEntry(event, player.playerId);
           if(entry.status) counts[entry.status] = (counts[entry.status] || 0) + 1;
         });
-        const selectedCount = players.reduce((sum, player) => sum + (attendanceEntry(event, player.playerId).status ? 1 : 0), 0);
+        const selectedCount = players.reduce((sum, player) => sum + (isCountedStatus(attendanceEntry(event, player.playerId).status) ? 1 : 0), 0);
         const statusKpis = availableStatuses.map(status => `
           <div class="attendance-kpi" data-attendance-kpi="${esc(status.id)}">
             <strong>${counts[status.id] || 0}</strong>
@@ -3040,7 +3229,7 @@
           <header class="attendance-detail-header">
             <div>
               <h2>Feuille de présence</h2>
-              <p>${esc(event.date)} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min · ${esc(event.team || "")}</p>
+              <p>${esc(displayDate(event.date))} · ${esc(event.startTime)} - ${esc(event.endTime)} · ${esc(event.duration)} min · ${esc(event.team || "")}</p>
               ${procedureSummary(event.procedure || event.sessionProcedure) ? `<p>${esc(procedureSummary(event.procedure || event.sessionProcedure))}</p>` : ""}
             </div>
             <span class="attendance-event-pill">${esc(typeLabel(event.type))}</span>
@@ -3076,14 +3265,19 @@
           if(Object.prototype.hasOwnProperty.call(patch, "status")){
             const minutes = row.querySelector('[data-attendance-field="minutes"]');
             if(minutes) minutes.value = entry.minutes;
+            const comment = row.querySelector('[data-attendance-field="comment"]');
+            if(comment) comment.value = entry.comment;
           }
         }
-        const players = playersForTeam(event.teamId, event.date);
+        const players = attendancePlayersForEvent(event);
         const counts = {};
         let selected = 0;
         players.forEach(player => {
           const status = attendanceEntry(event, player.playerId).status;
-          if(status){ selected++; counts[status] = (counts[status] || 0) + 1; }
+          if(status){
+            if(isCountedStatus(status)) selected++;
+            counts[status] = (counts[status] || 0) + 1;
+          }
         });
         content.querySelectorAll("[data-attendance-kpi]").forEach(kpi => {
           const key = kpi.dataset.attendanceKpi;
@@ -3102,16 +3296,26 @@
           const allowedStatusIds = new Set(attendanceStatusesForTeam(current.teamId).map(status => status.id));
           if(patch.status && !allowedStatusIds.has(patch.status)) patch.status = "";
         }
+        if(Object.prototype.hasOwnProperty.call(patch, "status") && !patch.status){
+          patch.status = "not-convoked";
+        }
         const next = {...previous, ...patch};
         if(Object.prototype.hasOwnProperty.call(patch, "status") && patch.minutes == null && previous.status !== patch.status){
           next.minutes = defaultAttendanceMinutes(patch.status, current);
+        }
+        if(Object.prototype.hasOwnProperty.call(patch, "status") && isNeutralStatus(patch.status)){
+          next.status = patch.status;
+          next.minutes = 0;
+          next.comment = "";
         }
         const attendance = {...(current.attendance || {})};
         if(!next.status && !Number(next.minutes || 0) && !String(next.comment || "").trim()){
           delete attendance[playerId];
         }else{
           const player = playerById(playerId, current.date);
-          const playerSnapshot = playerSnapshotForAttendance(player, current.teamId, current.date);
+          const playerSnapshot = player
+            ? playerSnapshotForAttendance(player, current.teamId, current.date)
+            : current.attendance?.[playerId]?.playerSnapshot || {};
           attendance[playerId] = {
             ...next,
             teamId:current.teamId || "",
@@ -3309,7 +3513,7 @@
         document.getElementById("attendanceDetail")?.addEventListener("click", event => {
           const button = event.target.closest("[data-attendance-status][data-attendance-event][data-player-id]");
           if(!button) return;
-          const nextStatus = button.classList.contains("active") ? "" : button.dataset.attendanceStatus;
+          const nextStatus = button.classList.contains("active") ? "not-convoked" : button.dataset.attendanceStatus;
           updateAttendanceEntry(button.dataset.attendanceEvent, button.dataset.playerId, {status:nextStatus});
         });
         updateRecurrenceUi();
@@ -3408,10 +3612,8 @@
       async function initPresenceCloud(){
         try{
           const api = centralDataApi();
-          const [, presenceResult] = await Promise.all([
-            pullPresenceSettingsFromCloud(),
-            pullPresenceEventsFromCloud()
-          ]);
+          await pullPresenceSettingsFromCloud();
+          const presenceResult = await pullPresenceEventsFromCloud();
           const {cloudEvents=[]} = presenceResult || {};
           render();
           renderSessionList();
@@ -3429,8 +3631,14 @@
           }) || null;
           stopPresenceSettingsSubscription?.();
           stopPresenceSettingsSubscription = api?.presenceSubscribeSettings?.(settings => {
-            const next = {...DEFAULT_PRESENCE_SETTINGS, ...settings, attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)};
+            const deletedIds = deletedPresenceEventIds();
+            (Array.isArray(settings.deletedEventIds) ? settings.deletedEventIds : []).forEach(id => {
+              const value = String(id || "").trim();
+              if(value) deletedIds.add(value);
+            });
+            const next = {...DEFAULT_PRESENCE_SETTINGS, ...settings, attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes), deletedEventIds:deletedPresenceEventIdList(deletedIds)};
             setJson(PRESENCE_SETTINGS_KEY, next);
+            setJson(PRESENCE_DELETED_EVENTS_KEY, next.deletedEventIds);
             fillSettingsForm();
             applySessionDefaults(false);
             render();
