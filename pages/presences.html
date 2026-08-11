@@ -2051,7 +2051,7 @@
       async function pullPresenceEventsFromCloud(){
         const api = centralDataApi();
         if(!api?.presenceListEvents) return [];
-        const cloudEvents = await api.presenceListEvents();
+        const cloudEvents = await api.presenceListEvents({includeRetiredPresenceSeasons:true});
         const {active:activeCloudEvents, retired:retiredCloudEvents} = splitRetiredPresenceSeasonEvents(Array.isArray(cloudEvents) ? cloudEvents : []);
         const merged = mergePresenceEvents(loadPresenceEvents(), activeCloudEvents);
         queuePresenceEventsLocalSave(merged);

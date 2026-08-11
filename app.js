@@ -5060,12 +5060,14 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
 async function presenceListEvents(options={}){
   if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const includeRetiredPresenceSeasons = options.includeRetiredPresenceSeasons === true;
   const authorizedTeamIds = getAuthorizedTeamIds();
   const cacheKey = [
     currentUser.uid,
     isAdmin() ? 'admin' : 'staff',
     canAccessAllPlayersForModule('presences') ? 'allPlayers' : 'teamScope',
-    authorizedTeamIds.slice().sort().join(',')
+    authorizedTeamIds.slice().sort().join(','),
+    includeRetiredPresenceSeasons ? 'withRetiredPresenceSeasons' : 'activePresenceSeasons'
   ].join(':');
   if(
     options.forceRefresh !== true
@@ -5149,7 +5151,7 @@ async function presenceListEvents(options={}){
     const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
       .filter(row => row.sessionId || row.id)
       .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true)
-      .filter(row => !isRetiredPresenceSeasonSession(row));
+      .filter(row => includeRetiredPresenceSeasons || !isRetiredPresenceSeasonSession(row));
     const sessionIdsNeedingAttendance = sessions
       .map(row => row.sessionId || row.id)
       .filter(Boolean);
