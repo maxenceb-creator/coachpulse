@@ -1701,6 +1701,7 @@
       const PRESENCE_SETTINGS_KEY = storageKeys.presenceSettings || "coachpulse:presenceSettings:v1";
       const EVENT_KEY = storageKeys.methodologieEvents || "methodo_events_v24";
       const LEGACY_PRESENCE_KEY = storageKeys.legacyPresence || "presenceSeanceV3_6_Excel";
+      const PRESENCE_DELETED_EVENTS_KEY = "coachpulse:presenceEvents:deletedIds:v1";
       const RETIRED_PRESENCE_SEASONS = new Set(["2025-2026"]);
       let calendarPageMonth = new Date();
       let selectedCalendarDate = isoDate(new Date());
@@ -1738,10 +1739,12 @@
         };
       }
       function savePresenceSettings(settings){
+        const deletedEventIds = deletedPresenceEventIdList();
         const next = {
           ...DEFAULT_PRESENCE_SETTINGS,
           ...settings,
-          attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)
+          attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes),
+          deletedEventIds:[...new Set([...(Array.isArray(settings.deletedEventIds) ? settings.deletedEventIds : []), ...deletedEventIds])].sort()
         };
         setJson(PRESENCE_SETTINGS_KEY, next);
         const api = centralDataApi();
@@ -1751,6 +1754,43 @@
             setSettingsMessage('Paramètres enregistrés dans le cloud.', 'success');
           }).catch(error => setSettingsMessage(`Paramètres conservés localement, cloud non synchronisé : ${error?.message || error}`, 'error'));
         }
+      }
+      function deletedPresenceEventIds(){
+        const settings = readJson(PRESENCE_SETTINGS_KEY, {});
+        const localIds = readJson(PRESENCE_DELETED_EVENTS_KEY, []);
+        return new Set([
+          ...(Array.isArray(settings.deletedEventIds) ? settings.deletedEventIds : []),
+          ...(Array.isArray(localIds) ? localIds : [])
+        ].map(value => String(value || "").trim()).filter(Boolean));
+      }
+      function deletedPresenceEventIdList(ids=deletedPresenceEventIds()){
+        return [...ids].filter(Boolean).sort();
+      }
+      function saveDeletedPresenceEventIds(ids, options={}){
+        const list = deletedPresenceEventIdList(ids);
+        setJson(PRESENCE_DELETED_EVENTS_KEY, list);
+        const settings = presenceSettings();
+        const next = {...settings, deletedEventIds:list};
+        setJson(PRESENCE_SETTINGS_KEY, next);
+        if(options.syncCloud === false) return Promise.resolve(list);
+        const api = centralDataApi();
+        if(!isPresenceAdmin() || !api?.presenceSaveSettings) return Promise.resolve(list);
+        return api.presenceSaveSettings(next)
+          .then(() => list)
+          .catch(error => {
+            console.warn("[Présences] Registre de suppression conservé localement", error);
+            return list;
+          });
+      }
+      function markPresenceEventDeleted(eventId, options={}){
+        const id = String(eventId || "").trim();
+        if(!id) return Promise.resolve([]);
+        const ids = deletedPresenceEventIds();
+        ids.add(id);
+        return saveDeletedPresenceEventIds(ids, options);
+      }
+      function isDeletedPresenceEvent(event={}){
+        return deletedPresenceEventIds().has(String(event?.id || event?.sessionId || event?.eventId || "").trim());
       }
       function teamsService(){
         try{
@@ -2002,13 +2042,17 @@
         if(Array.isArray(presenceEventsMemoryCache)) return presenceEventsMemoryCache;
         const events = readJson(PRESENCE_EVENTS_KEY, []);
         const normalized = Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+        const deletedIds = deletedPresenceEventIds();
         const {active, retired} = splitRetiredPresenceSeasonEvents(normalized);
-        presenceEventsMemoryCache = active;
-        if(retired.length) setJson(PRESENCE_EVENTS_KEY, active);
+        const kept = active.filter(event => !deletedIds.has(event.id));
+        presenceEventsMemoryCache = kept;
+        if(retired.length || kept.length !== active.length) setJson(PRESENCE_EVENTS_KEY, kept);
         return presenceEventsMemoryCache;
       }
       function savePresenceEvents(events){
-        const normalized = activePresenceSeasonEvents((Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id));
+        const deletedIds = deletedPresenceEventIds();
+        const normalized = activePresenceSeasonEvents((Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id))
+          .filter(event => !deletedIds.has(event.id));
         presenceEventsMemoryCache = normalized;
         setJson(PRESENCE_EVENTS_KEY, normalized);
       }
@@ -2020,7 +2064,9 @@
         }
         const persist = () => {
           presenceLocalSaveTimer = null;
-          const activeEvents = activePresenceSeasonEvents(presenceEventsMemoryCache || []);
+          const deletedIds = deletedPresenceEventIds();
+          const activeEvents = activePresenceSeasonEvents(presenceEventsMemoryCache || [])
+            .filter(event => !deletedIds.has(event.id));
           presenceEventsMemoryCache = activeEvents;
           setJson(PRESENCE_EVENTS_KEY, activeEvents);
         };
@@ -2038,9 +2084,11 @@
         savePresenceEvents(loadPresenceEvents().map(event => ids.has(event.id) ? {...event, cloudSyncedAt:syncedAt} : event));
       }
       function mergePresenceEvents(localEvents=[], cloudEvents=[]){
+        const deletedIds = deletedPresenceEventIds();
         const byId = new Map();
         [...localEvents, ...cloudEvents].forEach(event => {
           if(!event?.id) return;
+          if(deletedIds.has(event.id)) return;
           const current = byId.get(event.id);
           const currentTime = Date.parse(current?.updatedAt || current?.createdAt || '') || 0;
           const nextTime = Date.parse(event.updatedAt || event.createdAt || '') || 0;
@@ -2053,7 +2101,8 @@
         if(!api?.presenceListEvents) return [];
         const cloudEvents = await api.presenceListEvents({includeRetiredPresenceSeasons:true});
         const {active:activeCloudEvents, retired:retiredCloudEvents} = splitRetiredPresenceSeasonEvents(Array.isArray(cloudEvents) ? cloudEvents : []);
-        const merged = mergePresenceEvents(loadPresenceEvents(), activeCloudEvents);
+        const deletedIds = deletedPresenceEventIds();
+        const merged = mergePresenceEvents(loadPresenceEvents(), activeCloudEvents.filter(event => !deletedIds.has(event.id)));
         queuePresenceEventsLocalSave(merged);
         deleteRetiredPresenceEventsFromCloud(retiredCloudEvents);
         cloudReady = true;
@@ -2064,10 +2113,17 @@
         if(!api?.presenceLoadSettings) return;
         const cloudSettings = await api.presenceLoadSettings();
         if(cloudSettings && Object.keys(cloudSettings).length){
-          const next = {...DEFAULT_PRESENCE_SETTINGS, ...cloudSettings, attendanceCodes:mergeAttendanceCodes(cloudSettings.attendanceCodes)};
+          const deletedIds = deletedPresenceEventIds();
+          (Array.isArray(cloudSettings.deletedEventIds) ? cloudSettings.deletedEventIds : []).forEach(id => {
+            const value = String(id || "").trim();
+            if(value) deletedIds.add(value);
+          });
+          const next = {...DEFAULT_PRESENCE_SETTINGS, ...cloudSettings, attendanceCodes:mergeAttendanceCodes(cloudSettings.attendanceCodes), deletedEventIds:deletedPresenceEventIdList(deletedIds)};
           setJson(PRESENCE_SETTINGS_KEY, next);
+          setJson(PRESENCE_DELETED_EVENTS_KEY, next.deletedEventIds);
           fillSettingsForm();
           applySessionDefaults(false);
+          if(isPresenceAdmin() && api?.presenceSaveSettings) api.presenceSaveSettings(next).catch(error => console.warn("[Présences] Synchronisation des suppressions différée", error));
         }
       }
       async function pushPresenceEventToCloud(event){
@@ -2085,6 +2141,7 @@
           const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve();
           const nextWrite = previousWrite.catch(() => {}).then(async () => {
             const latestEvent = loadPresenceEvents().find(item => item.id === eventId);
+            if(deletedPresenceEventIds().has(eventId)) return;
             if(!latestEvent) return;
             await pushPresenceEventToCloud(latestEvent);
             setSessionMessage("Feuille de présence synchronisée.", "success");
@@ -2100,7 +2157,8 @@
         const api = centralDataApi();
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
         const cloudById = new Map((Array.isArray(cloudEvents) ? cloudEvents : []).map(event => [event.id, event]));
-        const localEvents = activePresenceSeasonEvents(loadPresenceEvents());
+        const deletedIds = deletedPresenceEventIds();
+        const localEvents = activePresenceSeasonEvents(loadPresenceEvents()).filter(event => !deletedIds.has(event.id));
         const eventsToSync = localEvents.filter(event => {
           if(!event?.id) return false;
           const cloudEvent = cloudById.get(event.id);
@@ -2122,6 +2180,9 @@
         const api = centralDataApi();
         const retired = (Array.isArray(events) ? events : []).filter(event => event?.id);
         if(!retired.length || !api?.presenceDeleteEvent) return;
+        const deletedIds = deletedPresenceEventIds();
+        retired.forEach(event => deletedIds.add(event.id));
+        saveDeletedPresenceEventIds(deletedIds, {syncCloud:true});
         Promise.allSettled(retired.map(event => api.presenceDeleteEvent(event))).then(results => {
           const deleted = results.filter(result => result.status === "fulfilled").length;
           if(deleted) setSessionMessage(`${deleted} événement(s) Présences 2025-2026 supprimé(s).`, "success");
@@ -2882,6 +2943,10 @@
           setSessionMessage(`Suppression cloud impossible : ${error?.message || error}.`, "error");
           return;
         }
+        await markPresenceEventDeleted(eventId, {syncCloud:true});
+        clearTimeout(presenceCloudSaveTimers.get(eventId));
+        presenceCloudSaveTimers.delete(eventId);
+        presenceCloudWriteChains.delete(eventId);
         savePresenceEvents(events.filter(item => item.id !== eventId));
         if(selectedAttendanceEventId === eventId) selectedAttendanceEventId = "";
         render();
@@ -3541,10 +3606,8 @@
       async function initPresenceCloud(){
         try{
           const api = centralDataApi();
-          const [, presenceResult] = await Promise.all([
-            pullPresenceSettingsFromCloud(),
-            pullPresenceEventsFromCloud()
-          ]);
+          await pullPresenceSettingsFromCloud();
+          const presenceResult = await pullPresenceEventsFromCloud();
           const {cloudEvents=[]} = presenceResult || {};
           render();
           renderSessionList();
@@ -3562,8 +3625,14 @@
           }) || null;
           stopPresenceSettingsSubscription?.();
           stopPresenceSettingsSubscription = api?.presenceSubscribeSettings?.(settings => {
-            const next = {...DEFAULT_PRESENCE_SETTINGS, ...settings, attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes)};
+            const deletedIds = deletedPresenceEventIds();
+            (Array.isArray(settings.deletedEventIds) ? settings.deletedEventIds : []).forEach(id => {
+              const value = String(id || "").trim();
+              if(value) deletedIds.add(value);
+            });
+            const next = {...DEFAULT_PRESENCE_SETTINGS, ...settings, attendanceCodes:mergeAttendanceCodes(settings.attendanceCodes), deletedEventIds:deletedPresenceEventIdList(deletedIds)};
             setJson(PRESENCE_SETTINGS_KEY, next);
+            setJson(PRESENCE_DELETED_EVENTS_KEY, next.deletedEventIds);
             fillSettingsForm();
             applySessionDefaults(false);
             render();
