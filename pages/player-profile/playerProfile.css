@@ -45,7 +45,7 @@ button.primary{background:linear-gradient(135deg,var(--green),var(--deep));color
 .player-sheet{display:grid;gap:14px}
 .sheet-tabs{position:sticky;top:0;z-index:5;display:flex;gap:6px;flex-wrap:wrap;background:rgba(246,248,245,.94);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:12px;padding:8px;box-shadow:var(--shadow)}
 .sheet-tabs a{border:1px solid rgba(29,153,91,.18);border-radius:8px;background:#fff;color:var(--deep);padding:8px 10px;text-decoration:none;font-size:12px;font-weight:1000}
-.sheet-tabs a:hover{background:var(--green);color:#fff}
+.sheet-tabs a:hover,.sheet-tabs a.active{background:var(--green);color:#fff}
 .kpis{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:10px;margin-bottom:14px}
 .kpi{background:#fff;border:1px solid var(--line);border-left:5px solid var(--green);border-radius:14px;padding:12px;box-shadow:var(--shadow)}
 .kpi span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;font-weight:1000;letter-spacing:.06em}
@@ -87,10 +87,20 @@ button.primary{background:linear-gradient(135deg,var(--green),var(--deep));color
 .metric-row span{color:var(--muted);font-weight:900}
 .metric-row b{color:var(--deep)}
 .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}
+.attendance-table-scroll{max-height:360px;overscroll-behavior:contain}
+.attendance-table-scroll th{position:sticky;top:0;z-index:1}
 .data-table{width:100%;border-collapse:collapse;min-width:420px}
 .data-table th,.data-table td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:12px;vertical-align:middle}
 .data-table th{background:var(--deep);color:#fff;text-transform:uppercase;font-size:10px;letter-spacing:.06em}
 .data-table tr:last-child td{border-bottom:0}
+.attendance-summary{display:grid;gap:10px;margin-bottom:12px}
+.attendance-summary-main{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.attendance-summary-main article{border:1px solid var(--line);border-left:5px solid var(--green);border-radius:12px;background:linear-gradient(180deg,#fff,var(--mint));padding:10px;min-width:0}
+.attendance-summary-main span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:1000;line-height:1.15}
+.attendance-summary-main b{display:block;color:var(--deep);font-size:26px;line-height:1;margin-top:6px}
+.attendance-summary-detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:6px}
+.attendance-summary-detail span{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid rgba(29,153,91,.16);border-radius:999px;background:#fff;padding:7px 9px;color:var(--muted);font-size:11px;font-weight:900}
+.attendance-summary-detail b{color:var(--deep);font-size:14px}
 .bar-list{display:grid;gap:8px}
 .bar-row{display:grid;grid-template-columns:110px 1fr 70px;gap:8px;align-items:center;font-size:12px;font-weight:900}
 .bar-bg{height:12px;border-radius:999px;background:#e7eee9;overflow:hidden}
@@ -105,4 +115,4 @@ button.primary{background:linear-gradient(135deg,var(--green),var(--deep));color
 .empty-state{padding:26px;border:1px dashed #b9c8c1;border-radius:16px;background:#fff;color:var(--muted);font-weight:900;text-align:center}
 .notice{border:1px solid rgba(37,99,235,.18);background:#eff6ff;color:#17356f;border-radius:12px;padding:10px;font-weight:900;margin-bottom:10px}
 @media(max-width:1100px){.profile-topbar,.grid,.sheet-grid,.sheet-layout{grid-template-columns:1fr}.filter-grid,.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.season-summary{grid-template-columns:1fr}.season-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:680px){.player-profile-app{padding:10px}.identity{grid-template-columns:1fr;text-align:center}.avatar{margin:auto}.identity-meta,.filter-grid,.kpis,.season-grid{grid-template-columns:1fr}.bar-row{grid-template-columns:1fr}.sheet-tabs{position:static}.sheet-tabs a{flex:1;text-align:center}.data-table{min-width:360px}}
+@media(max-width:680px){.player-profile-app{padding:10px}.identity{grid-template-columns:1fr;text-align:center}.avatar{margin:auto}.identity-meta,.filter-grid,.kpis,.season-grid,.attendance-summary-main{grid-template-columns:1fr}.bar-row{grid-template-columns:1fr}.sheet-tabs{position:static}.sheet-tabs a{flex:1;text-align:center}.data-table{min-width:360px}}

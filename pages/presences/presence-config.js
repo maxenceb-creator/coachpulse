@@ -2,6 +2,7 @@
   const DEFAULT_ATTENDANCE_CODES = [
     {id:"present", label:"Présente", short:"P", tone:"green"},
     {id:"late", label:"Retard", short:"R", tone:"gold"},
+    {id:"not-convoked", label:"Non convoquée", short:"NC", tone:"gray"},
     {id:"absent", label:"Absence non justifiée", short:"ANJ", tone:"red"},
     {id:"excused", label:"Absence justifiée", short:"AJ", tone:"orange"},
     {id:"sick", label:"Malade", short:"M", tone:"gray"},
