@@ -2841,12 +2841,13 @@
         return events.filter(event => event.source === "presences" && event.id)
           .flatMap(event => attendanceEntries(event).map(entry => {
             const player = playerById(entry.playerId, event.date);
+            const snapshot = attendanceSnapshot(event, entry.playerId);
             return {
               ...entry,
               event,
               player,
-              playerName:player ? playerName(player) : entry.playerId,
-              team:player?.team || event.team || ""
+              playerName:playerDisplayName(player, snapshot, entry.playerId),
+              team:playerDisplayTeam(player, snapshot, event)
             };
           }));
       }
