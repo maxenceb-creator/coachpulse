@@ -4997,6 +4997,32 @@ function presenceSessionSeason(session={}){
 function isRetiredPresenceSeasonSession(session={}){
   return RETIRED_PRESENCE_SEASONS.has(presenceSessionSeason(session));
 }
+function normalizePresenceSessionText(value=''){
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+function isPresenceModuleSession(session={}){
+  const source = normalizePresenceSessionText(session.source);
+  return session.createdFromPresenceModule === true || source.includes('presence');
+}
+function isRetiredPresenceImportSession(session={}){
+  if(!isRetiredPresenceSeasonSession(session)) return false;
+  const sessionId = normalizePresenceSessionText(session.sessionId || session.id);
+  const source = normalizePresenceSessionText(session.source);
+  const theme = normalizePresenceSessionText(session.theme || session.title);
+  return (
+    sessionId.startsWith('xlsx-')
+    || source.includes('import presence')
+    || theme.includes('import presence')
+    || (source.includes('import') && theme.includes('presence'))
+  );
+}
+function isPresenceSessionVisibleToModule(session={}, options={}){
+  return isPresenceModuleSession(session) || (options.includeRetiredPresenceSeasons === true && isRetiredPresenceImportSession(session));
+}
 function presencePlainProcedure(value={}){
   const source = value && typeof value === 'object' ? value : {};
   return {
@@ -5103,12 +5129,26 @@ async function presenceListEvents(options={}){
     }
   };
   const uniqueRows = rows => [...new Map(rows.map(row => [row.sessionId || row.id || JSON.stringify(row), row])).values()];
+  const readRetiredPresenceImportSessions = async () => {
+    if(!includeRetiredPresenceSeasons) return [];
+    const rows = (await Promise.all([
+      readWhereSafe('sessions', [
+        {field:'date', operator:'>=', value:'2025-07-01'},
+        {field:'date', operator:'<=', value:'2026-06-30'}
+      ]),
+      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Import fichier'}]),
+      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Import présence'}]),
+      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Import presence'}])
+    ])).flat();
+    return uniqueRows(rows).filter(row => isRetiredPresenceImportSession(row));
+  };
   const readPresenceSessionsForAllPlayersScope = async () => {
-    const [modernRows, legacyRows] = await Promise.all([
+    const [modernRows, legacyRows, retiredImportRows] = await Promise.all([
       readWhereSafe('sessions', [{field:'createdFromPresenceModule', operator:'==', value:true}]),
-      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}])
+      readWhereSafe('sessions', [{field:'source', operator:'==', value:'Présences'}]),
+      readRetiredPresenceImportSessions()
     ]);
-    return uniqueRows([...legacyRows, ...modernRows]);
+    return uniqueRows([...legacyRows, ...modernRows, ...retiredImportRows]);
   };
   const readPresenceSessionsForTeams = async chunks => {
     const modernReads = [];
@@ -5133,11 +5173,12 @@ async function presenceListEvents(options={}){
         {field:'teamIds', operator:'array-contains-any', value:chunk}
       ]));
     });
-    const [modernRows, legacyRows] = await Promise.all([
+    const [modernRows, legacyRows, retiredImportRows] = await Promise.all([
       Promise.all(modernReads).then(rows => rows.flat()),
-      Promise.all(legacyReads).then(rows => rows.flat())
+      Promise.all(legacyReads).then(rows => rows.flat()),
+      readRetiredPresenceImportSessions()
     ]);
-    return uniqueRows([...legacyRows, ...modernRows]);
+    return uniqueRows([...legacyRows, ...modernRows, ...retiredImportRows]);
   };
   if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return [];
   const teamChunks = [];
@@ -5150,7 +5191,7 @@ async function presenceListEvents(options={}){
         : await readPresenceSessionsForTeams(teamChunks);
     const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
       .filter(row => row.sessionId || row.id)
-      .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true)
+      .filter(row => isPresenceSessionVisibleToModule(row, {includeRetiredPresenceSeasons}))
       .filter(row => includeRetiredPresenceSeasons || !isRetiredPresenceSeasonSession(row));
     const sessionIdsNeedingAttendance = sessions
       .map(row => row.sessionId || row.id)
