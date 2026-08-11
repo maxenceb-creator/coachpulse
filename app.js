@@ -4362,39 +4362,40 @@ async function medicalListData(){
 }
 async function medicalSaveInjury(injury={}){
   if(!guardMedical('write')) return null;
-  if(!injury.playerId) throw new Error('playerId obligatoire.');
+  const rawInjury = firestoreSafeData(injury);
+  if(!rawInjury.playerId) throw new Error('playerId obligatoire.');
   const now = new Date().toISOString();
-  const injuryId = injury.injuryId || injury.id || stableFirestoreId('injury', injury.playerId, injury.declaredAt || now, injury.bodyZone || 'zone');
-  const season = injury.season || seasonFromDate(injury.declaredAt || now);
-  const player = await getPlayer(injury.playerId);
+  const injuryId = rawInjury.injuryId || rawInjury.id || stableFirestoreId('injury', rawInjury.playerId, rawInjury.declaredAt || now, rawInjury.bodyZone || 'zone');
+  const season = rawInjury.season || seasonFromDate(rawInjury.declaredAt || now);
+  const player = await getPlayer(rawInjury.playerId);
   if(!player || !canAccessPlayerRecord(player)) throw new Error('Accès non autorisé à cette joueuse.');
   const seasonalPlayer = player ? playerForSeason(player, season) : null;
-  const playerSnapshot = medicalPlayerSnapshot(player, seasonalPlayer || {}, injury.playerSnapshot || {});
-  const teamIds = medicalTeamIdsFromSources(injury, playerSnapshot, player, seasonalPlayer);
-  const teamId = playerSnapshot.teamId || injury.teamId || teamIds[0] || '';
+  const playerSnapshot = medicalPlayerSnapshot(player, seasonalPlayer || {}, rawInjury.playerSnapshot || {});
+  const teamIds = medicalTeamIdsFromSources(rawInjury, playerSnapshot, player, seasonalPlayer);
+  const teamId = playerSnapshot.teamId || rawInjury.teamId || teamIds[0] || '';
   if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
-  const clean = {
-    ...injury,
+  const clean = firestoreSafeData({
+    ...rawInjury,
     id:injuryId,
     injuryId,
-    playerId:injury.playerId,
+    playerId:rawInjury.playerId,
     teamId,
     teamIds,
     playerSnapshot:{...playerSnapshot, teamIds},
     season,
-    categorie:playerSnapshot.categorie || injury.categorie || '',
-    subCategory:playerSnapshot.subCategory || injury.subCategory || '',
-    team:playerSnapshot.team || injury.team || '',
-    status:injury.status || injury.availability || 'active',
-    bodyZone:injury.bodyZone || '',
-    painLevel:Number(injury.painLevel || 0),
-    createdAt:injury.createdAt || now,
+    categorie:playerSnapshot.categorie || rawInjury.categorie || '',
+    subCategory:playerSnapshot.subCategory || rawInjury.subCategory || '',
+    team:playerSnapshot.team || rawInjury.team || '',
+    status:rawInjury.status || rawInjury.availability || 'active',
+    bodyZone:rawInjury.bodyZone || '',
+    painLevel:Number(rawInjury.painLevel || 0),
+    createdAt:rawInjury.createdAt || now,
     updatedAt:now,
-    createdBy:injury.createdBy || currentUser?.uid || '',
-    createdByEmail:injury.createdByEmail || currentUser?.email || '',
+    createdBy:rawInjury.createdBy || currentUser?.uid || '',
+    createdByEmail:rawInjury.createdByEmail || currentUser?.email || '',
     updatedBy:currentUser?.uid || '',
     updatedByEmail:currentUser?.email || ''
-  };
+  });
   if(db && currentUser){
     await firebaseFns.setDoc(firebaseFns.doc(db, 'injuries', injuryId), {...clean, updatedAtServer:firebaseFns.serverTimestamp()}, {merge:true});
   }
@@ -4409,6 +4410,7 @@ async function medicalSaveInjury(injury={}){
 async function medicalAddUpdate(injuryId, update={}){
   if(!guardMedical('write')) return null;
   if(!injuryId) throw new Error('injuryId obligatoire.');
+  const rawUpdate = firestoreSafeData(update);
   const now = new Date().toISOString();
   const local = localMedicalPayload();
   let parentInjury = local.injuries.find(x => (x.injuryId || x.id) === injuryId) || null;
@@ -4417,15 +4419,16 @@ async function medicalAddUpdate(injuryId, update={}){
     if(injurySnap?.exists?.()) parentInjury = {id:injurySnap.id, ...injurySnap.data()};
   }
   if(!parentInjury) throw new Error('Blessure introuvable.');
-  const playerId = update.playerId || parentInjury.playerId || '';
+  parentInjury = firestoreSafeData(parentInjury);
+  const playerId = rawUpdate.playerId || parentInjury.playerId || '';
   const player = playerId ? await getPlayer(playerId) : null;
   if(player && !canAccessPlayerRecord(player)) throw new Error('Accès non autorisé à cette joueuse.');
-  const teamIds = medicalTeamIdsFromSources(update, parentInjury, parentInjury.playerSnapshot, player);
-  const teamId = update.teamId || parentInjury.teamId || parentInjury.playerSnapshot?.teamId || teamIds[0] || '';
+  const teamIds = medicalTeamIdsFromSources(rawUpdate, parentInjury, parentInjury.playerSnapshot, player);
+  const teamId = rawUpdate.teamId || parentInjury.teamId || parentInjury.playerSnapshot?.teamId || teamIds[0] || '';
   if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
-  const updateId = update.updateId || stableFirestoreId('injuryUpdate', injuryId, now);
-  const clean = {
-    ...update,
+  const updateId = rawUpdate.updateId || stableFirestoreId('injuryUpdate', injuryId, now);
+  const clean = firestoreSafeData({
+    ...rawUpdate,
     id:updateId,
     updateId,
     injuryId,
@@ -4434,18 +4437,18 @@ async function medicalAddUpdate(injuryId, update={}){
     teamIds,
     playerSnapshot:{
       ...(parentInjury.playerSnapshot || {}),
-      ...(update.playerSnapshot || {}),
+      ...(rawUpdate.playerSnapshot || {}),
       playerId,
       teamId,
       teamIds
     },
-    date:update.date || now.slice(0,10),
-    painLevel:Number(update.painLevel || 0),
+    date:rawUpdate.date || now.slice(0,10),
+    painLevel:Number(rawUpdate.painLevel || 0),
     createdAt:now,
     updatedAt:now,
     createdBy:currentUser?.uid || '',
     createdByEmail:currentUser?.email || ''
-  };
+  });
   if(db && currentUser){
     await firebaseFns.setDoc(firebaseFns.doc(db, 'injuryUpdates', updateId), {...clean, updatedAtServer:firebaseFns.serverTimestamp()}, {merge:true});
     const injuryPatch = {updatedAt:now, updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''};
@@ -4467,6 +4470,45 @@ async function medicalAddUpdate(injuryId, update={}){
   saveLocalMedicalPayload(local);
   snapshotLocalData();
   return clean;
+}
+async function medicalDeleteInjuries(injuryIds=[]){
+  if(!guardMedical('write')) return {deleted:0};
+  const ids = [...new Set((Array.isArray(injuryIds) ? injuryIds : [injuryIds]).map(id => String(id || '').trim()).filter(Boolean))];
+  if(!ids.length) return {deleted:0};
+  const local = localMedicalPayload();
+  const injuriesToDelete = local.injuries.filter(injury => ids.includes(injury.injuryId || injury.id));
+  for(const injury of injuriesToDelete){
+    const player = injury.playerId ? await getPlayer(injury.playerId) : null;
+    if(player && !canAccessPlayerRecord(player)) throw new Error('Accès non autorisé à cette joueuse.');
+    const teamIds = medicalTeamIdsFromSources(injury, injury.playerSnapshot, player);
+    const teamId = injury.teamId || injury.playerSnapshot?.teamId || teamIds[0] || '';
+    if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
+  }
+  const linkedCollections = [
+    ['injuryUpdates', row => row.updateId || row.id],
+    ['medicalAppointments', row => row.appointmentId || row.id],
+    ['rehabRoutines', row => row.routineId || row.id],
+    ['medicalFollowUps', row => row.followUpId || row.id]
+  ];
+  if(db && currentUser){
+    const deletePromises = ids.map(id => firebaseFns.deleteDoc(firebaseFns.doc(db, 'injuries', id)));
+    linkedCollections.forEach(([collectionName, getId]) => {
+      (local[collectionName] || [])
+        .filter(row => ids.includes(row.injuryId))
+        .forEach(row => {
+          const docId = getId(row);
+          if(docId) deletePromises.push(firebaseFns.deleteDoc(firebaseFns.doc(db, collectionName, docId)));
+        });
+    });
+    await Promise.all(deletePromises);
+  }
+  local.injuries = local.injuries.filter(injury => !ids.includes(injury.injuryId || injury.id));
+  linkedCollections.forEach(([collectionName]) => {
+    local[collectionName] = (local[collectionName] || []).filter(row => !ids.includes(row.injuryId));
+  });
+  saveLocalMedicalPayload(local);
+  snapshotLocalData();
+  return {deleted:ids.length};
 }
 async function medicalExport(format='json'){
   if(!guardMedical('importExport')) return;
@@ -5410,7 +5452,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
