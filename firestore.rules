@@ -240,6 +240,18 @@ service cloud.firestore {
         );
     }
 
+    function isRetiredPresenceImportSessionId(sessionId) {
+      return sessionId.matches('xlsx-2025-.*')
+        || sessionId.matches('xlsx-2026-0[1-6]-.*');
+    }
+
+    function canDeleteRetiredPresenceImportSession(sessionId, data) {
+      return (permissionLevel() == 'ADMIN' || role() == 'ADMIN')
+        && canAccessModule('presences')
+        && isRetiredPresenceImportSessionId(sessionId)
+        && canAccessScopedDataForModule(data, 'presences');
+    }
+
     function canReadPlayerDoc(playerId, data) {
       return canReadData()
         && canAccessPlayerId(playerId)
@@ -367,6 +379,7 @@ service cloud.firestore {
           && (
             (canAccessModule('methodologie') && canAccessScopedData(resource.data))
             || (canAccessModule('presences') && isPresenceSession(resource.data) && canAccessScopedDataForModule(resource.data, 'presences'))
+            || (canAccessModule('presences') && isRetiredPresenceImportSessionId(sessionId) && canAccessScopedDataForModule(resource.data, 'presences'))
           )
         ) || canReadPlayerProfileData(resource.data);
       allow create: if canWriteSportData()
@@ -379,7 +392,7 @@ service cloud.firestore {
           (canAccessModule('methodologie') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data))
           || (canAccessModule('presences') && isPresenceSession(resource.data) && isPresenceSession(request.resource.data) && canAccessScopedDataForModule(resource.data, 'presences') && canAccessScopedDataForModule(request.resource.data, 'presences'))
         );
-      allow delete: if noDelete();
+      allow delete: if canDeleteRetiredPresenceImportSession(sessionId, resource.data);
     }
 
     match /attendance/{attendanceId} {

@@ -2185,7 +2185,12 @@
         saveDeletedPresenceEventIds(deletedIds, {syncCloud:true});
         Promise.allSettled(retired.map(event => api.presenceDeleteEvent(event))).then(results => {
           const deleted = results.filter(result => result.status === "fulfilled").length;
+          const failed = results.length - deleted;
           if(deleted) setSessionMessage(`${deleted} événement(s) Présences 2025-2026 supprimé(s).`, "success");
+          if(failed){
+            console.warn("[Présences] Purge 2025-2026 partiellement refusée", results.filter(result => result.status === "rejected").map(result => result.reason));
+            setSessionMessage(`${failed} événement(s) 2025-2026 non supprimé(s) : droits Firebase ou règles à publier.`, "error");
+          }
         }).catch(error => console.warn("[Présences] Purge 2025-2026 impossible", error));
       }
       function setText(id, value){

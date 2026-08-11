@@ -345,6 +345,8 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(rulesSource.includes('function moduleScopeAllowsAllPlayers'), 'Les règles Firestore doivent reconnaître les scopes toutes joueuses par module.');
   assert(rulesSource.includes('function canAccessScopedDataForModule'), 'Les règles Firestore doivent appliquer les scopes complets au niveau module.');
   assert(rulesSource.includes("canAccessModule('presences') && isPresenceSession"), 'Les sessions créées par Présences doivent être lisibles via le module Présences.');
+  assert(rulesSource.includes('function canDeleteRetiredPresenceImportSession'), 'Les anciennes sessions Présences importées doivent pouvoir être purgées par un administrateur.');
+  assert(rulesSource.includes("sessionId.matches('xlsx-2025-.*')"), 'Les règles Firestore doivent cibler explicitement les anciens imports xlsx 2025-2026.');
   assert(appSource.includes("canAccessAllPlayersForModule('presences')"), 'La lecture cloud Présences doit gérer le scope complet du module.');
   assert(appSource.includes('readPresenceSessionsForTeams'), 'Le module Présences doit lire les sessions cloud via les teamIds autorisés.');
   assert(appSource.includes("field:'createdFromPresenceModule'"), 'Le module Présences doit cibler les sessions créées depuis Présences.');
