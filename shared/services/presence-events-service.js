@@ -3,6 +3,7 @@
 
 (function(global){
   const STORAGE_KEY = 'coachpulse:presenceEvents:v1';
+  const RETIRED_PRESENCE_SEASONS = new Set(['2025-2026']);
   const STATUS_MAP = {
     present:{code:'P', label:'Présente'},
     absent:{code:'A', label:'Absente'},
@@ -75,6 +76,19 @@
   function isElapsedEvent(event={}, now=new Date()){
     const end = eventEndDateTime(event);
     return !end || end <= now;
+  }
+  function seasonFromDateValue(value){
+    const date = parseDate(value);
+    if(!date) return '';
+    const year = date.getFullYear();
+    return date.getMonth() >= 6 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+  }
+  function eventSeason(event={}){
+    return text(event.season || event.saison || event.sessionSnapshot?.season || event.sessionSnapshot?.saison)
+      || seasonFromDateValue(event.date || event.sessionSnapshot?.date || event.startDate || event.day || event.start);
+  }
+  function isRetiredPresenceSeasonEvent(event={}){
+    return RETIRED_PRESENCE_SEASONS.has(eventSeason(event));
   }
   function uniqueTexts(values=[]){
     return [...new Set(values.map(text).filter(Boolean))];
@@ -204,7 +218,12 @@
   }
   function readEvents(){
     const rows = readJson(STORAGE_KEY, []);
-    return Array.isArray(rows) ? rows.filter(event => eventId(event)) : [];
+    if(!Array.isArray(rows)) return [];
+    const kept = rows.filter(event => eventId(event) && !isRetiredPresenceSeasonEvent(event));
+    if(kept.length !== rows.length){
+      try{ global.localStorage?.setItem(STORAGE_KEY, JSON.stringify(kept)); }catch(_error){}
+    }
+    return kept;
   }
   function uniqueRows(rows=[], keyFn){
     return [...new Map(rows.map(row => [keyFn(row), row])).values()];
@@ -238,6 +257,7 @@
     teamIdsFromEvent,
     attendanceRowsFromEvent,
     isElapsedEvent,
+    isRetiredPresenceSeasonEvent,
     collectionsFromEvents,
     collectionsForTeam,
     collectionsForPlayer

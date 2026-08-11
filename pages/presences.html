@@ -1701,6 +1701,7 @@
       const PRESENCE_SETTINGS_KEY = storageKeys.presenceSettings || "coachpulse:presenceSettings:v1";
       const EVENT_KEY = storageKeys.methodologieEvents || "methodo_events_v24";
       const LEGACY_PRESENCE_KEY = storageKeys.legacyPresence || "presenceSeanceV3_6_Excel";
+      const RETIRED_PRESENCE_SEASONS = new Set(["2025-2026"]);
       let calendarPageMonth = new Date();
       let selectedCalendarDate = isoDate(new Date());
       let selectedAttendanceEventId = "";
@@ -1858,6 +1859,22 @@
         const service = playersService();
         return service?.seasonFromDate ? service.seasonFromDate(parseDate(dateValue) || new Date()) : "";
       }
+      function presenceEventSeason(event){
+        return String(event?.season || event?.saison || event?.sessionSnapshot?.season || event?.sessionSnapshot?.saison || "").trim()
+          || eventSeason(event?.date || event?.startDate || event?.day || event?.start);
+      }
+      function isRetiredPresenceSeasonEvent(event){
+        return RETIRED_PRESENCE_SEASONS.has(presenceEventSeason(event));
+      }
+      function activePresenceSeasonEvents(events){
+        return (Array.isArray(events) ? events : []).filter(event => !isRetiredPresenceSeasonEvent(event));
+      }
+      function splitRetiredPresenceSeasonEvents(events){
+        return (Array.isArray(events) ? events : []).reduce((acc, event) => {
+          acc[isRetiredPresenceSeasonEvent(event) ? "retired" : "active"].push(event);
+          return acc;
+        }, {active:[], retired:[]});
+      }
       function playerForEventSeason(player, dateValue){
         const service = playersService();
         const season = eventSeason(dateValue);
@@ -1974,7 +1991,7 @@
         const presenceEvents = loadPresenceEvents();
         const methodo = Array.isArray(savedMethodoEvents) ? savedMethodoEvents : [];
         const legacy = readJson(LEGACY_PRESENCE_KEY, null);
-        const legacySessions = Array.isArray(legacy?.sessions) ? legacy.sessions : [];
+        const legacySessions = activePresenceSeasonEvents(Array.isArray(legacy?.sessions) ? legacy.sessions : []);
         return [
           ...presenceEvents.map(event => normalizeEvent(event, "presences")),
           ...methodo.map(event => normalizeEvent(event, "methodologie")),
@@ -1984,11 +2001,14 @@
       function loadPresenceEvents(){
         if(Array.isArray(presenceEventsMemoryCache)) return presenceEventsMemoryCache;
         const events = readJson(PRESENCE_EVENTS_KEY, []);
-        presenceEventsMemoryCache = Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+        const normalized = Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+        const {active, retired} = splitRetiredPresenceSeasonEvents(normalized);
+        presenceEventsMemoryCache = active;
+        if(retired.length) setJson(PRESENCE_EVENTS_KEY, active);
         return presenceEventsMemoryCache;
       }
       function savePresenceEvents(events){
-        const normalized = (Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id);
+        const normalized = activePresenceSeasonEvents((Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id));
         presenceEventsMemoryCache = normalized;
         setJson(PRESENCE_EVENTS_KEY, normalized);
       }
@@ -2000,7 +2020,9 @@
         }
         const persist = () => {
           presenceLocalSaveTimer = null;
-          setJson(PRESENCE_EVENTS_KEY, presenceEventsMemoryCache || []);
+          const activeEvents = activePresenceSeasonEvents(presenceEventsMemoryCache || []);
+          presenceEventsMemoryCache = activeEvents;
+          setJson(PRESENCE_EVENTS_KEY, activeEvents);
         };
         presenceLocalSaveTimer = typeof requestIdleCallback === "function"
           ? requestIdleCallback(persist, {timeout:3000})
@@ -2030,10 +2052,12 @@
         const api = centralDataApi();
         if(!api?.presenceListEvents) return [];
         const cloudEvents = await api.presenceListEvents();
-        const merged = mergePresenceEvents(loadPresenceEvents(), Array.isArray(cloudEvents) ? cloudEvents : []);
+        const {active:activeCloudEvents, retired:retiredCloudEvents} = splitRetiredPresenceSeasonEvents(Array.isArray(cloudEvents) ? cloudEvents : []);
+        const merged = mergePresenceEvents(loadPresenceEvents(), activeCloudEvents);
         queuePresenceEventsLocalSave(merged);
+        deleteRetiredPresenceEventsFromCloud(retiredCloudEvents);
         cloudReady = true;
-        return {merged, cloudEvents:Array.isArray(cloudEvents) ? cloudEvents : []};
+        return {merged, cloudEvents:activeCloudEvents};
       }
       async function pullPresenceSettingsFromCloud(){
         const api = centralDataApi();
@@ -2076,7 +2100,7 @@
         const api = centralDataApi();
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
         const cloudById = new Map((Array.isArray(cloudEvents) ? cloudEvents : []).map(event => [event.id, event]));
-        const localEvents = loadPresenceEvents();
+        const localEvents = activePresenceSeasonEvents(loadPresenceEvents());
         const eventsToSync = localEvents.filter(event => {
           if(!event?.id) return false;
           const cloudEvent = cloudById.get(event.id);
@@ -2093,6 +2117,15 @@
         const api = centralDataApi();
         if(!api?.presenceDeleteEvent) throw new Error("Suppression cloud indisponible.");
         return api.presenceDeleteEvent(event);
+      }
+      function deleteRetiredPresenceEventsFromCloud(events=[]){
+        const api = centralDataApi();
+        const retired = (Array.isArray(events) ? events : []).filter(event => event?.id);
+        if(!retired.length || !api?.presenceDeleteEvent) return;
+        Promise.allSettled(retired.map(event => api.presenceDeleteEvent(event))).then(results => {
+          const deleted = results.filter(result => result.status === "fulfilled").length;
+          if(deleted) setSessionMessage(`${deleted} événement(s) Présences 2025-2026 supprimé(s).`, "success");
+        }).catch(error => console.warn("[Présences] Purge 2025-2026 impossible", error));
       }
       function setText(id, value){
         const node = document.getElementById(id);

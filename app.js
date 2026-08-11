@@ -4982,6 +4982,21 @@ function presenceUiStatusFromCode(value=''){
   if(!code) return '';
   return {P:'present', A:'absent', ANJ:'absent', AJ:'excused', R:'late', NC:'not-convoked', M:'sick', B:'injured', PO:'pole', D:'district', D2:'d2'}[code] || String(value || '').trim();
 }
+const RETIRED_PRESENCE_SEASONS = new Set(['2025-2026']);
+function presenceSessionSeason(session={}){
+  const declared = String(session.season || session.saison || session.sessionSnapshot?.season || session.sessionSnapshot?.saison || '').trim();
+  if(declared) return declared;
+  const raw = String(session.date || session.startDate || session.day || session.start || '').trim();
+  if(!raw) return '';
+  const frMatch = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+  const normalized = frMatch
+    ? `${frMatch[3]}-${frMatch[2].padStart(2, '0')}-${frMatch[1].padStart(2, '0')}`
+    : raw;
+  return seasonFromDate(normalized);
+}
+function isRetiredPresenceSeasonSession(session={}){
+  return RETIRED_PRESENCE_SEASONS.has(presenceSessionSeason(session));
+}
 function presencePlainProcedure(value={}){
   const source = value && typeof value === 'object' ? value : {};
   return {
@@ -5133,7 +5148,8 @@ async function presenceListEvents(options={}){
         : await readPresenceSessionsForTeams(teamChunks);
     const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
       .filter(row => row.sessionId || row.id)
-      .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true);
+      .filter(row => String(row.source || '').toLowerCase().includes('présence') || row.createdFromPresenceModule === true)
+      .filter(row => !isRetiredPresenceSeasonSession(row));
     const sessionIdsNeedingAttendance = sessions
       .map(row => row.sessionId || row.id)
       .filter(Boolean);
