@@ -5068,11 +5068,14 @@ function isPresenceSessionVisibleToModule(session={}, options={}){
 }
 function presencePlainProcedure(value={}){
   const source = value && typeof value === 'object' ? value : {};
+  const minutes = raw => Math.max(0, Number(raw ?? 0) || 0);
   return {
-    warmup:Number(source.warmup ?? source.echauffement ?? 0) || 0,
-    technical:Number(source.technical ?? source.technique ?? 0) || 0,
-    situation:Number(source.situation ?? 0) || 0,
-    game:Number(source.game ?? source.jeu ?? 0) || 0
+    warmup:minutes(source.warmup ?? source.echauffement),
+    technical:minutes(source.technical ?? source.technique),
+    athletic:minutes(source.athletic ?? source.athletique),
+    theoretical:minutes(source.theoretical ?? source.theorique),
+    situation:minutes(source.situation),
+    game:minutes(source.game ?? source.jeu)
   };
 }
 function presenceCloudEventFromSession(session={}, attendanceRows=[]){
