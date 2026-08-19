@@ -46,6 +46,36 @@ main{overflow-x:clip!important}
 .select-col input{width:18px;height:18px;accent-color:var(--green)}
 
 </style>
+<style id="medical-tablet-responsive-fix">
+@media (min-width:641px) and (max-width:1180px){
+  main{padding-inline:14px!important}
+  .layout,
+  .body-card{grid-template-columns:minmax(0,1fr)!important;width:100%!important}
+  .layout>*,
+  .body-card>*,
+  .card,
+  .zone-panel,
+  .field,
+  .form-grid,
+  .actions,
+  .profile-grid,
+  .summary-row{min-width:0!important;max-width:100%!important}
+  .form-grid,
+  .profile-grid{grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))!important}
+  .filters{grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr))!important}
+  .actions{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr))!important}
+  .actions button{width:100%!important;min-width:0!important}
+  input,
+  select,
+  textarea{min-width:0!important;max-width:100%!important}
+  .table-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+}
+@media (min-width:641px) and (max-width:820px){
+  .form-grid,
+  .profile-grid,
+  .summary-row{grid-template-columns:minmax(0,1fr)!important}
+}
+</style>
 </head>
 <body>
 <header class="head"><div><h1>Suivi médical</h1><p>Blessures, douleurs, rendez-vous médicaux et reprise, reliés à la base joueuses CoachPulse.</p></div><span class="badge">Module sensible · playerId obligatoire</span></header>
