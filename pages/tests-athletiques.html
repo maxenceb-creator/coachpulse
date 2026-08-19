@@ -37,6 +37,47 @@ main{padding-top:14px!important}
 @media(max-width:760px){main{padding:10px!important}.tabs,.presence-tabs,.tabs.presence-tabs,.tt-nav.tabs,.header-tabs,.coachpulse-charte-header .header-tabs{border-radius:14px 14px 0 0!important;padding:7px!important;gap:7px!important}.tabs .tab,.presence-tabs .tab,.tabs.presence-tabs .tab,.tt-nav.tabs button,.header-tabs .tab,.coachpulse-charte-header .header-tabs .tab{min-width:76px!important;min-height:45px!important;padding:6px 8px!important;font-size:8.5px!important}.tabs .tab span,.presence-tabs .tab span,.tabs.presence-tabs .tab span,.tt-nav.tabs button .nav-ico,.header-tabs .tab .nav-ico,.coachpulse-charte-header .header-tabs .tab .nav-ico{font-size:17px!important}}
 
 </style>
+<style id="athletic-tablet-responsive-fix">
+@media (max-width:1180px){
+  main{max-width:100%!important}
+  main>*:not(.tabs){min-width:0!important;max-width:calc(100% - 40px)!important}
+  .card,
+  .selection,
+  .filter-panel,
+  .compare-panel,
+  .profile,
+  .two,
+  .bilan-grid,
+  .chart-pair,
+  .grid,
+  .entry-grid,
+  .compare-grid-controls,
+  .kpis,
+  .wrap{min-width:0!important;max-width:100%!important}
+  .selection,
+  body[data-athletic-tab="saisie"] .selection,
+  .two,
+  .bilan-grid,
+  .chart-pair{grid-template-columns:minmax(0,1fr)!important}
+  .grid,
+  .entry-grid,
+  .compare-grid-controls,
+  .kpis{grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))!important}
+  .profile{grid-template-columns:minmax(128px,160px) minmax(0,1fr)!important}
+  .avatar{width:min(156px,100%)!important;height:min(156px,42vw)!important}
+  input,
+  select,
+  textarea,
+  canvas{min-width:0!important;max-width:100%!important}
+  .wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+}
+@media (max-width:820px){
+  main>*:not(.tabs){max-width:calc(100% - 20px)!important}
+  .profile{grid-template-columns:minmax(0,1fr)!important;text-align:center!important}
+  .avatar{margin:auto!important}
+  .chips{justify-content:center!important}
+}
+</style>
 </head>
 <body>
 <header>
