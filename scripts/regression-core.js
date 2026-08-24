@@ -7,6 +7,7 @@ const teams = require('../shared/services/teams-service.js');
 const permissions = require('../shared/services/permissions-service.js');
 const modules = require('../shared/utils/module-registry.js');
 const playerDataAudit = require('./audit-player-data.js');
+const measurements = require('../shared/services/player-measurements-service.js');
 
 function loadBrowserScript(filePath, windowOverrides={}){
   const window = {
@@ -157,6 +158,24 @@ function testPermissions(){
   assert.equal(permissions.canAccessTeam(admin, u16Id), true);
   assert.equal(permissions.canAccessPlayer(admin, {playerId:'p2', teamId:u16Id}), true);
   assert.equal(permissions.canPerformAction(admin, {id:'database'}, 'delete'), true);
+}
+function testPlayerMeasurementsAreIndependentAndHistorical(){
+  const first=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:'154',weightKg:'45,2',measuredAt:'2026-09-02'});
+  const second=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:156,weightKg:46.1,measuredAt:'2026-11-10'});
+  const third=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:157,weightKg:47,measuredAt:'2027-01-15'});
+  assert.equal(first.season,'2026-2027');
+  assert.equal(first.weightKg,45.2);
+  assert.equal(measurements.latest([first,third,second]),third);
+  assert.equal(measurements.sortLatest([first,third,second]).length,3);
+  assert(!Object.prototype.hasOwnProperty.call(first,'injuryId'),'Une mesure ne doit jamais dépendre d’une blessure.');
+  assert.equal(measurements.validate({...first,heightCm:20}).success,false);
+  assert.equal(measurements.validate({...first,weightKg:500}).success,false);
+  assert.equal(measurements.validate({...first,measuredAt:''}).success,false);
+  const appSource=fs.readFileSync('app.js','utf8'),medicalSource=fs.readFileSync('pages/suivi-medical.html','utf8'),rules=fs.readFileSync('firestore.rules','utf8');
+  assert(appSource.includes("firebaseFns.collection(db,'playerMeasurements')"));
+  assert(!medicalSource.includes('morphHeight')&&!medicalSource.includes('morphWeight'),'Le médical ne doit plus modifier les données physiques.');
+  assert(medicalSource.includes('CoachPulsePlayerMeasurementsService.getLatest'),'Le médical doit consulter la source de vérité des mesures.');
+  assert(rules.includes('match /playerMeasurements/{measurementId}'),'Les mesures doivent être protégées par les règles Firestore.');
 }
 
 function testPermissionsRespectTeamHistoryAndModuleScope(){
@@ -623,6 +642,7 @@ testManualTeamEditOverridesDefaultCategoryTeam();
 testEditedTeamIdsDoNotReAddRemovedEligibleTeam();
 testPlayerFilteringAndDedupe();
 testPermissions();
+testPlayerMeasurementsAreIndependentAndHistorical();
 testPermissionsRespectTeamHistoryAndModuleScope();
 testModuleAllPlayersScopeStaysModuleSpecific();
 testModuleRegistry();

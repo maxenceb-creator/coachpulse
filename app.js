@@ -1245,7 +1245,7 @@ function downloadText(content, filename, type='text/plain;charset=utf-8'){
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
-const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','physicalTestDeletions','staff_members','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
+const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','physicalTestDeletions','playerMeasurements','staff_members','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
 function parseStoredJson(key, fallback){
   return storage.getJson(key, fallback);
 }
@@ -1804,7 +1804,7 @@ async function playerProfileLoadData(options={}){
   const cacheKey = playerId || aliases.join('|');
   const cached = appDataCache.playerProfiles.get(cacheKey);
   if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS) return cloneData(cached.payload);
-  const directCollections = ['attendance','matchEvents','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps','convocations','individualReports'];
+  const directCollections = ['attendance','matchEvents','technicalTests','physicalTests','playerMeasurements','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps','convocations','individualReports'];
   const payload = {app:'CoachPulse', module:'playerProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), collections:{players:[],sessions:[],matches:[]}};
   directCollections.forEach(name => { payload.collections[name] = []; });
   function chunksForValues(values=[]){
@@ -4291,6 +4291,42 @@ async function getPlayer(playerId){
   const players = await listPlayers();
   return players.find(player => (player.playerId || player.id) === playerId) || null;
 }
+function playerMeasurementsService(){ return window.CoachPulsePlayerMeasurementsService; }
+function playerMeasurementsCapabilities(){
+  return {canRead:canViewModule('playerProfile')||canViewModule('medical'),canWrite:canEditModule('playerProfile'),canDelete:canDeleteData('playerProfile')};
+}
+async function playerMeasurementsList(playerId, options={}){
+  const id=String(playerId||'').trim();
+  if(!id||!playerMeasurementsCapabilities().canRead) return [];
+  const player=await getPlayer(id);
+  const moduleId=canViewModule('playerProfile')?'playerProfile':'medical';
+  if(!player||!canAccessPlayerForModule(player,moduleId)) throw new Error('Accès non autorisé à cette joueuse.');
+  if(!db||!currentUser) throw new Error('Connexion Firebase requise.');
+  const query=firebaseFns.query(firebaseFns.collection(db,'playerMeasurements'),firebaseFns.where('playerId','==',id));
+  const snap=await firebaseFns.getDocs(query),rows=[];
+  snap.forEach(docSnap=>rows.push({measurementId:docSnap.id,id:docSnap.id,...docSnap.data()}));
+  const filtered=rows.filter(canAccessRecord),season=String(options.season||'').trim();
+  return playerMeasurementsService().sortLatest(season&&season!=='all'?filtered.filter(row=>row.season===season):filtered);
+}
+async function savePlayerMeasurement(measurementIdValue,input={},editing=false){
+  if(!playerMeasurementsCapabilities().canWrite) throw new Error('Modification non autorisée.');
+  const clean=playerMeasurementsService().parse(input),player=await getPlayer(clean.playerId);
+  if(!player||!canAccessPlayerForModule(player,'playerProfile')||!canAccessRecord(clean)) throw new Error('Accès non autorisé à cette joueuse.');
+  const measurementId=measurementIdValue||playerMeasurementsService().measurementId(clean.playerId,clean.measuredAt),ref=firebaseFns.doc(db,'playerMeasurements',measurementId),existing=await firebaseFns.getDoc(ref);
+  if(!editing&&existing.exists()) throw new Error('Une mesure existe déjà pour cette joueuse à cette date. Modifie la mesure existante.');
+  const payload={...clean,measurementId,updatedAtIso:new Date().toISOString(),updatedBy:currentUser.uid,updatedByEmail:currentUser.email||''};
+  if(!existing.exists()) payload.createdAtIso=payload.updatedAtIso;
+  await firebaseFns.setDoc(ref,{...payload,updatedAt:firebaseFns.serverTimestamp()},{merge:editing});
+  invalidateAppDataCaches('all');return payload;
+}
+function playerMeasurementsAdd(input={}){ return savePlayerMeasurement('',input,false); }
+function playerMeasurementsUpdate(measurementId,input={}){ if(!measurementId)throw new Error('Mesure introuvable.');return savePlayerMeasurement(measurementId,input,true); }
+async function playerMeasurementsDelete(measurementId){
+  if(!playerMeasurementsCapabilities().canDelete) throw new Error('Suppression non autorisée.');
+  const ref=firebaseFns.doc(db,'playerMeasurements',measurementId),snap=await firebaseFns.getDoc(ref);
+  if(!snap.exists()) return false;if(!canAccessRecord(snap.data())) throw new Error('Accès non autorisé à cette joueuse.');
+  await firebaseFns.deleteDoc(ref);invalidateAppDataCaches('all');return true;
+}
 async function medicalListPlayers(){
   if(!guardMedical('read')) return [];
   return listPlayers({moduleId:'medical'});
@@ -5455,7 +5491,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
