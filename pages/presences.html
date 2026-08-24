@@ -1415,6 +1415,16 @@
             </div>
             <div class="form-row">
               <div class="field">
+                <label for="sessionAthleticMinutes">Athlétique</label>
+                <input id="sessionAthleticMinutes" name="athleticMinutes" type="number" min="0" step="1" placeholder="0">
+              </div>
+              <div class="field">
+                <label for="sessionTheoreticalMinutes">Théorique</label>
+                <input id="sessionTheoreticalMinutes" name="theoreticalMinutes" type="number" min="0" step="1" placeholder="0">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
                 <label for="sessionSituationMinutes">Situation</label>
                 <input id="sessionSituationMinutes" name="situationMinutes" type="number" min="0" step="1" placeholder="0">
               </div>
@@ -1966,6 +1976,7 @@
           },
           team:team?.name || event.team || event.equipe || "",
           category:team?.category || event.category || event.categorie || "",
+          procedure:normalizeSessionProcedure(event.procedure || event.sessionProcedure || {}),
           attendance:{}
         };
         Object.entries(event.attendance || {}).forEach(([playerId, raw]) => {
@@ -2969,31 +2980,40 @@
           playerSnapshot:playerSnapshotForAttendance(player, teamId, dateValue)
         }]));
       }
+      function procedureMinutes(value){
+        return Math.max(0, Number(value || 0) || 0);
+      }
       function sessionProcedureFromForm(form){
         return {
-          warmup:Number(form.warmupMinutes?.value || 0),
-          technical:Number(form.technicalMinutes?.value || 0),
-          situation:Number(form.situationMinutes?.value || 0),
-          game:Number(form.gameMinutes?.value || 0)
+          warmup:procedureMinutes(form.warmupMinutes?.value),
+          technical:procedureMinutes(form.technicalMinutes?.value),
+          athletic:procedureMinutes(form.athleticMinutes?.value),
+          theoretical:procedureMinutes(form.theoreticalMinutes?.value),
+          situation:procedureMinutes(form.situationMinutes?.value),
+          game:procedureMinutes(form.gameMinutes?.value)
         };
       }
       function normalizeSessionProcedure(value={}){
         return {
-          warmup:Number(value.warmup || value.echauffement || 0),
-          technical:Number(value.technical || value.technique || 0),
-          situation:Number(value.situation || 0),
-          game:Number(value.game || value.jeu || 0)
+          warmup:procedureMinutes(value.warmup ?? value.echauffement),
+          technical:procedureMinutes(value.technical ?? value.technique),
+          athletic:procedureMinutes(value.athletic ?? value.athletique),
+          theoretical:procedureMinutes(value.theoretical ?? value.theorique),
+          situation:procedureMinutes(value.situation),
+          game:procedureMinutes(value.game ?? value.jeu)
         };
       }
       function procedureTotal(procedure={}){
         const clean = normalizeSessionProcedure(procedure);
-        return clean.warmup + clean.technical + clean.situation + clean.game;
+        return clean.warmup + clean.technical + clean.athletic + clean.theoretical + clean.situation + clean.game;
       }
       function procedureSummary(procedure={}){
         const clean = normalizeSessionProcedure(procedure);
         return [
           clean.warmup ? `Échauffement ${clean.warmup} min` : "",
           clean.technical ? `Technique ${clean.technical} min` : "",
+          clean.athletic ? `Athlétique ${clean.athletic} min` : "",
+          clean.theoretical ? `Théorique ${clean.theoretical} min` : "",
           clean.situation ? `Situation ${clean.situation} min` : "",
           clean.game ? `Jeu ${clean.game} min` : ""
         ].filter(Boolean).join(" · ");
@@ -3061,6 +3081,8 @@
         const procedure = normalizeSessionProcedure(event.procedure || event.sessionProcedure || {});
         form.warmupMinutes.value = procedure.warmup || "";
         form.technicalMinutes.value = procedure.technical || "";
+        form.athleticMinutes.value = procedure.athletic || "";
+        form.theoreticalMinutes.value = procedure.theoretical || "";
         form.situationMinutes.value = procedure.situation || "";
         form.gameMinutes.value = procedure.game || "";
         form.recurrence.value = event.recurrence || "none";
@@ -3414,7 +3436,7 @@
         document.getElementById("sessionStart")?.addEventListener("change", updateDurationFromTimes);
         document.getElementById("sessionEnd")?.addEventListener("change", updateDurationFromTimes);
         document.getElementById("sessionDuration")?.addEventListener("input", updateProcedurePreview);
-        ["sessionWarmupMinutes","sessionTechnicalMinutes","sessionSituationMinutes","sessionGameMinutes"].forEach(id => {
+        ["sessionWarmupMinutes","sessionTechnicalMinutes","sessionAthleticMinutes","sessionTheoreticalMinutes","sessionSituationMinutes","sessionGameMinutes"].forEach(id => {
           document.getElementById(id)?.addEventListener("input", updateProcedurePreview);
         });
         document.getElementById("sessionForm")?.addEventListener("submit", async event => {

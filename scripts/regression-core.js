@@ -468,9 +468,15 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
   assert(presencePageSource.includes('function normalizePresenceEventForStorage'), 'La page Présences doit normaliser les événements avant stockage.');
   assert(presencePageSource.includes('return api.presenceSaveEvent(normalized);'), 'La synchronisation cloud doit envoyer un événement normalisé.');
+  assert(presencePageSource.includes('athletic:procedureMinutes'), 'La procédure Présences doit enregistrer le contenu Athlétique.');
+  assert(presencePageSource.includes('theoretical:procedureMinutes'), 'La procédure Présences doit enregistrer le contenu Théorique.');
+  assert(presencePageSource.includes('value.athletic ?? value.athletique'), 'La procédure Présences doit relire Athlétique avec rétrocompatibilité.');
+  assert(presencePageSource.includes('value.theoretical ?? value.theorique'), 'La procédure Présences doit relire Théorique avec rétrocompatibilité.');
   const appSource = fs.readFileSync('app.js', 'utf8');
   assert(appSource.includes('const safeSessionPayload = firestoreSafeData(sessionPayload);'), 'La sauvegarde des séances Présences doit nettoyer le payload Firestore.');
   assert(appSource.includes('const safeAttendancePayload = firestoreSafeData(row);'), 'La sauvegarde des lignes Présences doit nettoyer le payload Firestore.');
+  assert(appSource.includes('athletic:minutes(source.athletic ?? source.athletique)'), 'Les snapshots cloud Présences doivent conserver Athlétique.');
+  assert(appSource.includes('theoretical:minutes(source.theoretical ?? source.theorique)'), 'Les snapshots cloud Présences doivent conserver Théorique.');
   assert(appSource.includes('procedure:presencePlainProcedure(row.sessionSnapshot?.procedure || sessionPayload.procedure)'), 'Les snapshots Présences doivent conserver une procédure sérialisable.');
 }
 
