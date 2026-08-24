@@ -44,6 +44,7 @@ main{overflow-x:clip!important}
 .selection-note{color:var(--muted);font-size:12px;font-weight:900}
 .select-col{width:46px;text-align:center}
 .select-col input{width:18px;height:18px;accent-color:var(--green)}
+.measurement-save-tile{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.measurement-save-message{color:var(--muted);font-size:12px;font-weight:900;text-transform:none}.measurement-save-tile button:disabled{opacity:.55;cursor:not-allowed}
 
 </style>
 <style id="medical-tablet-responsive-fix">
@@ -249,6 +250,24 @@ function followUpText(active){
     ['Traitement',f.prescription||'-'],['Routine',active.staffComment||'-'],['Retour estimé',active.estimatedReturnDate||'-'],['Statut',active.status||'active']
   ];
 }
+function measurementDraft(player){return{playerId:pid(player),teamId:player.teamId||'',teamIds:player.teamIds||[],heightCm:$('#medicalHeight')?.value,weightKg:$('#medicalWeight')?.value,measuredAt:$('#medicalMeasurementDate')?.value}}
+function updateMedicalBmi(){const box=$('#bmiBox');if(box)box.innerHTML=renderBmi({heightCm:$('#medicalHeight')?.value,weightKg:$('#medicalWeight')?.value})}
+async function saveMedicalMeasurement(player,latest={}){
+  const message=$('#measurementSaveMessage'),button=$('#saveMeasurementBtn');
+  try{
+    const draft=measurementDraft(player),validation=window.CoachPulsePlayerMeasurementsService.validate(draft);
+    if(!validation.success)throw new Error(Object.values(validation.errors)[0]);
+    button.disabled=true;message.textContent='Enregistrement…';
+    const existingId=latest.measuredAt===validation.data.measuredAt?(latest.measurementId||latest.id):'';
+    if(existingId)await window.CoachPulsePlayerMeasurementsService.update(existingId,draft);else await window.CoachPulsePlayerMeasurementsService.add(draft);
+    await renderPlayerMedical();
+    const savedMessage=$('#measurementSaveMessage');if(savedMessage)savedMessage.textContent='Mesures enregistrées.';
+  }catch(error){if(message)message.textContent=error.message||String(error)}finally{if(button?.isConnected)button.disabled=false}
+}
+function bindMeasurementInputs(player,latest){
+  $('#medicalHeight')?.addEventListener('input',updateMedicalBmi);$('#medicalWeight')?.addEventListener('input',updateMedicalBmi);
+  $('#saveMeasurementBtn')?.addEventListener('click',()=>saveMedicalMeasurement(player,latest));
+}
 async function renderPlayerMedical(){
   const id=preferredPlayerId();const p=playerForSeasonView(playerById(id));if(!id){$('#playerMedical').innerHTML='Sélectionne une joueuse.';return}
   const profile=await window.CoachPulsePlayerMeasurementsService.getLatest(id).catch(()=>null)||{};if(id!==preferredPlayerId())return;const injuries=sortByDateDesc(data.injuries.filter(i=>i.playerId===id));
@@ -260,14 +279,16 @@ async function renderPlayerMedical(){
     <div class="profile-grid">
       <div class="profile-tile"><span>Date de naissance</span><b>${esc(formatBirthDate(birth))}</b></div>
       <div class="profile-tile"><span>Âge</span><b>${esc(ageFromBirth(birth))}</b></div>
-      <div class="profile-tile"><span>Taille actuelle</span><b>${profile.heightCm?`${esc(profile.heightCm)} cm`:'-'}</b></div>
-      <div class="profile-tile"><span>Poids actuel</span><b>${profile.weightKg?`${esc(profile.weightKg)} kg`:'-'}</b></div>
-      <div class="profile-tile"><span>Dernière mesure</span><b>${esc(profile.measuredAt||'-')}</b></div>
+      <div class="profile-tile"><label for="medicalHeight">Taille (cm)</label><input id="medicalHeight" type="number" inputmode="decimal" min="80" max="230" step="0.1" value="${esc(profile.heightCm||'')}" placeholder="160"></div>
+      <div class="profile-tile"><label for="medicalWeight">Poids (kg)</label><input id="medicalWeight" type="number" inputmode="decimal" min="15" max="200" step="0.1" value="${esc(profile.weightKg||'')}" placeholder="51,2"></div>
+      <div class="profile-tile"><label for="medicalMeasurementDate">Date de mesure</label><input id="medicalMeasurementDate" type="date" value="${esc(profile.measuredAt||new Date().toISOString().slice(0,10))}"></div>
       <div class="profile-tile" style="grid-column:1/-1"><span>IMC automatique</span><div id="bmiBox">${renderBmi(profile)}</div></div>
+      <div class="profile-tile measurement-save-tile" style="grid-column:1/-1"><button class="primary" id="saveMeasurementBtn" type="button" ${window.CoachPulsePlayerMeasurementsService.capabilities().canWrite?'':'disabled'}>Enregistrer les mesures</button><span id="measurementSaveMessage" class="measurement-save-message" role="status">${profile.measuredAt?`Dernière mesure : ${esc(profile.measuredAt)}`:'Aucune mesure enregistrée.'}</span></div>
     </div>
     <div class="timeline-item"><b>Statut actuel</b><span>${active?`${esc(active.bodyZone)} · ${esc(active.availability)} · ${active.painLevel}/10`:'Aucune blessure active'} · moyenne douleur ${avg}</span></div>
     <div class="medical-summary">${followUpText(active).map(([k,v])=>`<div class="summary-row"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')||'<div class="summary-row"><span>Suivi médical</span><b>Aucune blessure active</b></div>'}</div>
-    <div class="timeline">${injuries.map(i=>`<div class="timeline-item"><b>${esc(i.declaredAt||'')} · ${esc(i.bodyZone||'')}</b><span>${esc(i.injuryType||'Blessure')} · ${i.painLevel||'-'}/10 · retour ${esc(i.estimatedReturnDate||'-')} · ${esc(i.status||'active')}</span></div>`).join('')}${updates.map(u=>`<div class="timeline-item"><b>Mise à jour ${esc(u.date||'')}</b><span>${u.painLevel||'-'}/10 · ${esc(u.status||'')} · ${esc(u.comment||'')} ${u.nextControlDate?`· contrôle ${esc(u.nextControlDate)}`:''}</span></div>`).join('')||(!injuries.length?'<div class="timeline-item"><b>Historique</b><span>Aucune donnée médicale enregistrée.</span></div>':'')}</div>`;
+    <div class="timeline">${injuries.map(i=>`<div class="timeline-item"><b>${esc(i.declaredAt||'')} · ${esc(i.bodyZone||'')}</b><span>${esc(i.injuryType||'Blessure')} · ${i.painLevel||'-'}/10 · retour ${esc(i.estimatedReturnDate||'-')} · ${esc(i.status||'active')}</span></div>`).join('')}${updates.map(u=>`<div class="timeline-item"><b>Mise à jour ${esc(u.date||'')}</b><span>${u.painLevel||'-'}/10 · ${esc(u.status||'')} · ${esc(u.comment||'')} ${u.nextControlDate?`· contrôle ${esc(u.nextControlDate)}`:''}</span></div>`).join('')||(!injuries.length?'<div class="timeline-item"><b>Historique blessures</b><span>Aucune blessure enregistrée.</span></div>':'')}</div>`;
+  bindMeasurementInputs(p,profile);
 }
 function renderFilters(){const seasons=unique([currentSeason(),...data.injuries.map(injurySeason)]);const previous={season:$('#filterSeason')?.value||'',player:$('#filterPlayer')?.value||'',cat:$('#filterCat')?.value||'',team:$('#filterTeam')?.value||''};$('#filterSeason').innerHTML='<option value="">Saison courante</option><option value="all">Toutes saisons</option>'+seasons.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');if([...$('#filterSeason').options].some(o=>o.value===previous.season))$('#filterSeason').value=previous.season;const seasonPlayers=sortedPlayersForSelect();fillPlayerSelect($('#filterPlayer'),{empty:'Joueuse',showCat:false});if([...$('#filterPlayer').options].some(o=>o.value===previous.player))$('#filterPlayer').value=previous.player;fill('#filterCat',unique(seasonPlayers.map(p=>playerMainCategory(p))),'Catégorie');if([...$('#filterCat').options].some(o=>o.value===previous.cat))$('#filterCat').value=previous.cat;fill('#filterTeam',unique(seasonPlayers.map(p=>p.team)),'Équipe');if([...$('#filterTeam').options].some(o=>o.value===previous.team))$('#filterTeam').value=previous.team;fill('#filterZone',zones.map(z=>z[0]),'Zone');fillPlayerSelect($('#playerSelect'),{empty:'Choisir une joueuse',showCat:false})}
 function readForm(){

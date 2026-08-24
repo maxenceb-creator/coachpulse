@@ -173,9 +173,27 @@ function testPlayerMeasurementsAreIndependentAndHistorical(){
   assert.equal(measurements.validate({...first,measuredAt:''}).success,false);
   const appSource=fs.readFileSync('app.js','utf8'),medicalSource=fs.readFileSync('pages/suivi-medical.html','utf8'),rules=fs.readFileSync('firestore.rules','utf8');
   assert(appSource.includes("firebaseFns.collection(db,'playerMeasurements')"));
-  assert(!medicalSource.includes('morphHeight')&&!medicalSource.includes('morphWeight'),'Le médical ne doit plus modifier les données physiques.');
   assert(medicalSource.includes('CoachPulsePlayerMeasurementsService.getLatest'),'Le médical doit consulter la source de vérité des mesures.');
+  assert(medicalSource.includes('id="saveMeasurementBtn"')&&medicalSource.includes('Enregistrer les mesures'),'Le médical doit proposer une action dédiée aux mesures.');
+  const measurementSave=medicalSource.match(/async function saveMedicalMeasurement[\s\S]*?\n}\nfunction bindMeasurementInputs/);
+  assert(measurementSave,'La sauvegarde dédiée des mesures doit rester disponible.');
+  assert(!measurementSave[0].includes('injuryId')&&!measurementSave[0].includes('saveUpdate'),'La sauvegarde des mesures ne doit dépendre d’aucune blessure.');
   assert(rules.includes('match /playerMeasurements/{measurementId}'),'Les mesures doivent être protégées par les règles Firestore.');
+}
+async function testMeasurementSaveWithoutSelectedInjuryPersistsAfterReload(){
+  const stored=[];let injuryWrites=0;
+  global.CoachPulseCentralData={
+    playerMeasurementsAdd:async row=>{stored.push({...row,measurementId:measurements.measurementId(row.playerId,row.measuredAt)});return stored.at(-1)},
+    playerMeasurementsList:async playerId=>stored.filter(row=>row.playerId===playerId),
+    medicalSaveInjury:async()=>{injuryWrites+=1}
+  };
+  await measurements.add({playerId:'player-no-injury',teamId:'team-u13',heightCm:160,weightKg:'51,2',measuredAt:'2026-08-24'});
+  const afterReload=await measurements.getLatest('player-no-injury');
+  assert.equal(afterReload.playerId,'player-no-injury');
+  assert.equal(afterReload.heightCm,160);assert.equal(afterReload.weightKg,51.2);
+  assert.equal(stored.length,1,'La mesure doit être persistée sans écraser un historique inexistant.');
+  assert.equal(injuryWrites,0,'Aucune fausse blessure ne doit être créée.');
+  delete global.CoachPulseCentralData;
 }
 
 function testPermissionsRespectTeamHistoryAndModuleScope(){
@@ -662,6 +680,7 @@ testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
 
 Promise.resolve()
+  .then(testMeasurementSaveWithoutSelectedInjuryPersistsAfterReload)
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)
   .then(() => {
     console.log('Core regression guards OK');
