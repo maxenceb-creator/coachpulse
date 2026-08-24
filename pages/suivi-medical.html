@@ -45,6 +45,7 @@ main{overflow-x:clip!important}
 .select-col{width:46px;text-align:center}
 .select-col input{width:18px;height:18px;accent-color:var(--green)}
 .measurement-save-tile{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.measurement-save-message{color:var(--muted);font-size:12px;font-weight:900;text-transform:none}.measurement-save-tile button:disabled{opacity:.55;cursor:not-allowed}
+.measurement-editor{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;border:1px solid var(--line);border-radius:14px;background:#f8fafc;padding:12px}.measurement-editor[hidden]{display:none}.measurement-editor-actions{display:flex;align-items:end;gap:8px;flex-wrap:wrap}.measurement-editor .measurement-save-message{grid-column:1/-1}@media(max-width:700px){.measurement-editor{grid-template-columns:1fr}.measurement-editor-actions button{flex:1}}
 
 </style>
 <style id="medical-tablet-responsive-fix">
@@ -241,6 +242,7 @@ function renderBmi(profile){
   const bmi=calculateBmi(profile.heightCm,profile.weightKg);const info=bmiInfo(bmi);
   return `<b class="${info.cls}">${bmi?bmi.toFixed(2):'-'}</b><span>${esc(info.label)}</span><div class="bmi-gauge"><i class="bmi-marker" style="left:${info.pct}%"></i></div>`;
 }
+function formatMeasurementDate(value){const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return match?`${match[3]}/${match[2]}/${match[1]}`:(value||'-')}
 function followUpText(active){
   if(!active)return [];
   const f=active.medicalFollowUp||{};
@@ -266,6 +268,8 @@ async function saveMedicalMeasurement(player,latest={}){
 }
 function bindMeasurementInputs(player,latest){
   $('#medicalHeight')?.addEventListener('input',updateMedicalBmi);$('#medicalWeight')?.addEventListener('input',updateMedicalBmi);
+  $('#addMeasurementBtn')?.addEventListener('click',()=>{const editor=$('#measurementEditor');if(editor){editor.hidden=false;$('#addMeasurementBtn').hidden=true;$('#medicalHeight')?.focus()}});
+  $('#cancelMeasurementBtn')?.addEventListener('click',()=>{const editor=$('#measurementEditor');if(editor)editor.hidden=true;const add=$('#addMeasurementBtn');if(add)add.hidden=false});
   $('#saveMeasurementBtn')?.addEventListener('click',()=>saveMedicalMeasurement(player,latest));
 }
 async function renderPlayerMedical(){
@@ -279,11 +283,18 @@ async function renderPlayerMedical(){
     <div class="profile-grid">
       <div class="profile-tile"><span>Date de naissance</span><b>${esc(formatBirthDate(birth))}</b></div>
       <div class="profile-tile"><span>Âge</span><b>${esc(ageFromBirth(birth))}</b></div>
-      <div class="profile-tile"><label for="medicalHeight">Taille (cm)</label><input id="medicalHeight" type="number" inputmode="decimal" min="80" max="230" step="0.1" value="${esc(profile.heightCm||'')}" placeholder="160"></div>
-      <div class="profile-tile"><label for="medicalWeight">Poids (kg)</label><input id="medicalWeight" type="number" inputmode="decimal" min="15" max="200" step="0.1" value="${esc(profile.weightKg||'')}" placeholder="51,2"></div>
-      <div class="profile-tile"><label for="medicalMeasurementDate">Date de mesure</label><input id="medicalMeasurementDate" type="date" value="${esc(profile.measuredAt||new Date().toISOString().slice(0,10))}"></div>
+      <div class="profile-tile"><span>Taille actuelle</span><b>${profile.heightCm?`${esc(profile.heightCm)} cm`:'-'}</b></div>
+      <div class="profile-tile"><span>Poids actuel</span><b>${profile.weightKg?`${esc(profile.weightKg)} kg`:'-'}</b></div>
+      <div class="profile-tile"><span>Dernière mesure</span><b>${esc(formatMeasurementDate(profile.measuredAt))}</b></div>
       <div class="profile-tile" style="grid-column:1/-1"><span>IMC automatique</span><div id="bmiBox">${renderBmi(profile)}</div></div>
-      <div class="profile-tile measurement-save-tile" style="grid-column:1/-1"><button class="primary" id="saveMeasurementBtn" type="button" ${window.CoachPulsePlayerMeasurementsService.capabilities().canWrite?'':'disabled'}>Enregistrer les mesures</button><span id="measurementSaveMessage" class="measurement-save-message" role="status">${profile.measuredAt?`Dernière mesure : ${esc(profile.measuredAt)}`:'Aucune mesure enregistrée.'}</span></div>
+      <div class="profile-tile measurement-save-tile" style="grid-column:1/-1"><button class="primary" id="addMeasurementBtn" type="button" ${window.CoachPulsePlayerMeasurementsService.capabilities().canWrite?'':'disabled'}>Ajouter une mesure</button><span class="measurement-save-message">${window.CoachPulsePlayerMeasurementsService.capabilities().canWrite?'Une nouvelle date conserve l’historique.':'Consultation seule selon vos permissions.'}</span></div>
+      <div id="measurementEditor" class="measurement-editor" style="grid-column:1/-1" hidden>
+        <div class="field"><label for="medicalHeight">Taille (cm)</label><input id="medicalHeight" type="number" inputmode="decimal" min="80" max="230" step="0.1" value="${esc(profile.heightCm||'')}" placeholder="160"></div>
+        <div class="field"><label for="medicalWeight">Poids (kg)</label><input id="medicalWeight" type="number" inputmode="decimal" min="15" max="200" step="0.1" value="${esc(profile.weightKg||'')}" placeholder="51.2"></div>
+        <div class="field"><label for="medicalMeasurementDate">Date de la mesure</label><input id="medicalMeasurementDate" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div class="measurement-editor-actions"><button class="primary" id="saveMeasurementBtn" type="button">Enregistrer la mesure</button><button id="cancelMeasurementBtn" type="button">Annuler</button></div>
+        <span id="measurementSaveMessage" class="measurement-save-message" role="status"></span>
+      </div>
     </div>
     <div class="timeline-item"><b>Statut actuel</b><span>${active?`${esc(active.bodyZone)} · ${esc(active.availability)} · ${active.painLevel}/10`:'Aucune blessure active'} · moyenne douleur ${avg}</span></div>
     <div class="medical-summary">${followUpText(active).map(([k,v])=>`<div class="summary-row"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')||'<div class="summary-row"><span>Suivi médical</span><b>Aucune blessure active</b></div>'}</div>
