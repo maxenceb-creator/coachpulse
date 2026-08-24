@@ -8,6 +8,7 @@ const LINKED_COLLECTIONS = [
   'attendance',
   'technicalTests',
   'physicalTests',
+  'playerMeasurements',
   'injuries',
   'injuryUpdates',
   'medicalAppointments',

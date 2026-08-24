@@ -154,12 +154,10 @@ main{overflow-x:clip!important}
   </section>
 </main>
 <div id="tooltip" class="tooltip"></div>
-<script src="../shared/utils/storage-service.js"></script>
+<script src="../shared/services/player-measurements-service.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const api=()=>window.parent?.CoachPulseCentralData;
-const storage=(()=>{try{return window.CoachPulseStorage||window.parent?.CoachPulseStorage||null}catch(_){return window.CoachPulseStorage||null}})();
-const medicalProfileMemory={};
 const APP_OPEN_DATE=new Date();
 const zones=[
 ['Tête',50,8],['Cou',50,15],['Épaule gauche',36,21],['Épaule droite',64,21],['Bras gauche',27,32],['Bras droit',73,32],['Coude gauche',22,43],['Coude droit',78,43],['Poignet gauche',19,55],['Poignet droit',81,55],['Main gauche',17,64],['Main droite',83,64],['Dos',50,31],['Lombaires',50,45],['Hanche gauche',42,52],['Hanche droite',58,52],['Cuisse gauche',42,65],['Cuisse droite',58,65],['Genou gauche',41,78],['Genou droit',59,78],['Mollet gauche',40,88],['Mollet droit',60,88],['Cheville gauche',39,96],['Cheville droite',61,96],['Pied gauche',35,99],['Pied droit',65,99]];
@@ -179,9 +177,6 @@ function playerById(id,snapshot={}){const direct=players.find(p=>pid(p)===id);if
 function getInjuryId(i){return i?.injuryId||i?.id||''}
 function painBand(v){v=Number(v||0);return v>=7?'high':v>=4?'mid':'low'}
 function pill(v){const band=painBand(v);return `<span class="pill ${band==='high'?'bad':band==='mid'?'warn':''}">${esc(v||'-')}/10</span>`}
-function profileStore(){return storage?.getJson?storage.getJson('coachpulse:medicalProfiles',{})||{}:{...medicalProfileMemory}}
-function getProfile(playerId){return profileStore()[playerId]||{}}
-function saveProfile(playerId,profile){const all=profileStore();all[playerId]={...(all[playerId]||{}),...profile,updatedAt:new Date().toISOString()};if(storage?.setJson)return storage.setJson('coachpulse:medicalProfiles',all,{recover:true});Object.keys(medicalProfileMemory).forEach(key=>delete medicalProfileMemory[key]);Object.assign(medicalProfileMemory,all);return false}
 function calculateBmi(heightCm,weightKg){const h=Number(heightCm||0)/100,w=Number(weightKg||0);return h&&w?Number((w/(h*h)).toFixed(2)):null}
 function bmiInfo(v){if(!v)return{label:'À compléter',cls:'',pct:0};if(v<18.5)return{label:'Insuffisance pondérale',cls:'bmi-blue',pct:Math.max(4,Math.min(24,(v/18.5)*24))};if(v<25)return{label:'Corpulence normale',cls:'bmi-green',pct:25+((v-18.5)/6.5)*30};if(v<30)return{label:'Surpoids',cls:'bmi-orange',pct:55+((v-25)/5)*23};return{label:'Obésité',cls:'bmi-red',pct:Math.min(96,78+((v-30)/12)*18)}}
 function validDate(y,m,d){const date=new Date(Number(y),Number(m)-1,Number(d));return date.getFullYear()===Number(y)&&date.getMonth()===Number(m)-1&&date.getDate()===Number(d)?date:null}
@@ -245,15 +240,6 @@ function renderBmi(profile){
   const bmi=calculateBmi(profile.heightCm,profile.weightKg);const info=bmiInfo(bmi);
   return `<b class="${info.cls}">${bmi?bmi.toFixed(2):'-'}</b><span>${esc(info.label)}</span><div class="bmi-gauge"><i class="bmi-marker" style="left:${info.pct}%"></i></div>`;
 }
-function updateBmiDisplay(playerId){
-  const h=$('#morphHeight'),w=$('#morphWeight'),box=$('#bmiBox');if(!h||!w||!box)return;
-  const player=playerForSeasonView(playerById(playerId),selectedMedicalSeason());
-  const profile={playerId,teamId:player.teamId||'',team:player.team||'',season:selectedMedicalSeason(),heightCm:h.value,weightKg:w.value};
-  saveProfile(playerId,profile);box.innerHTML=renderBmi(profile);
-}
-function bindProfileInputs(playerId){
-  ['morphHeight','morphWeight'].forEach(id=>{$('#'+id)?.addEventListener('input',()=>updateBmiDisplay(playerId))});
-}
 function followUpText(active){
   if(!active)return [];
   const f=active.medicalFollowUp||{};
@@ -263,9 +249,9 @@ function followUpText(active){
     ['Traitement',f.prescription||'-'],['Routine',active.staffComment||'-'],['Retour estimé',active.estimatedReturnDate||'-'],['Statut',active.status||'active']
   ];
 }
-function renderPlayerMedical(){
+async function renderPlayerMedical(){
   const id=preferredPlayerId();const p=playerForSeasonView(playerById(id));if(!id){$('#playerMedical').innerHTML='Sélectionne une joueuse.';return}
-  const profile=getProfile(id);const injuries=sortByDateDesc(data.injuries.filter(i=>i.playerId===id));
+  const profile=await window.CoachPulsePlayerMeasurementsService.getLatest(id).catch(()=>null)||{};if(id!==preferredPlayerId())return;const injuries=sortByDateDesc(data.injuries.filter(i=>i.playerId===id));
   const updates=sortByDateDesc(data.injuryUpdates.filter(u=>injuries.some(i=>(i.injuryId||i.id)===u.injuryId)));
   const active=injuries.find(i=>i.status!=='résolue');const avg=injuries.length?(injuries.reduce((sum,i)=>sum+Number(i.painLevel||0),0)/injuries.length).toFixed(1):'-';
   const birth=p.dateNaissance||p.birthDate||p.dateBirth||'';
@@ -274,14 +260,14 @@ function renderPlayerMedical(){
     <div class="profile-grid">
       <div class="profile-tile"><span>Date de naissance</span><b>${esc(formatBirthDate(birth))}</b></div>
       <div class="profile-tile"><span>Âge</span><b>${esc(ageFromBirth(birth))}</b></div>
-      <div class="profile-tile"><span>Taille (cm)</span><input id="morphHeight" type="number" min="90" max="230" value="${esc(profile.heightCm||'')}" placeholder="162"></div>
-      <div class="profile-tile"><span>Poids (kg)</span><input id="morphWeight" type="number" min="20" max="180" step="0.1" value="${esc(profile.weightKg||'')}" placeholder="55"></div>
+      <div class="profile-tile"><span>Taille actuelle</span><b>${profile.heightCm?`${esc(profile.heightCm)} cm`:'-'}</b></div>
+      <div class="profile-tile"><span>Poids actuel</span><b>${profile.weightKg?`${esc(profile.weightKg)} kg`:'-'}</b></div>
+      <div class="profile-tile"><span>Dernière mesure</span><b>${esc(profile.measuredAt||'-')}</b></div>
       <div class="profile-tile" style="grid-column:1/-1"><span>IMC automatique</span><div id="bmiBox">${renderBmi(profile)}</div></div>
     </div>
     <div class="timeline-item"><b>Statut actuel</b><span>${active?`${esc(active.bodyZone)} · ${esc(active.availability)} · ${active.painLevel}/10`:'Aucune blessure active'} · moyenne douleur ${avg}</span></div>
     <div class="medical-summary">${followUpText(active).map(([k,v])=>`<div class="summary-row"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')||'<div class="summary-row"><span>Suivi médical</span><b>Aucune blessure active</b></div>'}</div>
     <div class="timeline">${injuries.map(i=>`<div class="timeline-item"><b>${esc(i.declaredAt||'')} · ${esc(i.bodyZone||'')}</b><span>${esc(i.injuryType||'Blessure')} · ${i.painLevel||'-'}/10 · retour ${esc(i.estimatedReturnDate||'-')} · ${esc(i.status||'active')}</span></div>`).join('')}${updates.map(u=>`<div class="timeline-item"><b>Mise à jour ${esc(u.date||'')}</b><span>${u.painLevel||'-'}/10 · ${esc(u.status||'')} · ${esc(u.comment||'')} ${u.nextControlDate?`· contrôle ${esc(u.nextControlDate)}`:''}</span></div>`).join('')||(!injuries.length?'<div class="timeline-item"><b>Historique</b><span>Aucune donnée médicale enregistrée.</span></div>':'')}</div>`;
-  bindProfileInputs(id);
 }
 function renderFilters(){const seasons=unique([currentSeason(),...data.injuries.map(injurySeason)]);const previous={season:$('#filterSeason')?.value||'',player:$('#filterPlayer')?.value||'',cat:$('#filterCat')?.value||'',team:$('#filterTeam')?.value||''};$('#filterSeason').innerHTML='<option value="">Saison courante</option><option value="all">Toutes saisons</option>'+seasons.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');if([...$('#filterSeason').options].some(o=>o.value===previous.season))$('#filterSeason').value=previous.season;const seasonPlayers=sortedPlayersForSelect();fillPlayerSelect($('#filterPlayer'),{empty:'Joueuse',showCat:false});if([...$('#filterPlayer').options].some(o=>o.value===previous.player))$('#filterPlayer').value=previous.player;fill('#filterCat',unique(seasonPlayers.map(p=>playerMainCategory(p))),'Catégorie');if([...$('#filterCat').options].some(o=>o.value===previous.cat))$('#filterCat').value=previous.cat;fill('#filterTeam',unique(seasonPlayers.map(p=>p.team)),'Équipe');if([...$('#filterTeam').options].some(o=>o.value===previous.team))$('#filterTeam').value=previous.team;fill('#filterZone',zones.map(z=>z[0]),'Zone');fillPlayerSelect($('#playerSelect'),{empty:'Choisir une joueuse',showCat:false})}
 function readForm(){

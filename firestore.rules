@@ -423,6 +423,22 @@ service cloud.firestore {
       allow delete: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests')) && canAccessScopedDataForModule(resource.data, 'tests-athletiques');
     }
 
+    match /playerMeasurements/{measurementId} {
+      allow read: if canReadData() && (canAccessModule('playerProfile') || canAccessModule('medical')) && canAccessScopedData(resource.data);
+      allow create: if canWriteData() && canAccessModule('playerProfile') && canAccessScopedData(request.resource.data)
+        && request.resource.data.playerId is string && request.resource.data.playerId.size() > 0
+        && request.resource.data.teamId is string && request.resource.data.teamId.size() > 0
+        && request.resource.data.measuredAt is string && request.resource.data.measuredAt.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && request.resource.data.heightCm is number && request.resource.data.heightCm >= 80 && request.resource.data.heightCm <= 230
+        && request.resource.data.weightKg is number && request.resource.data.weightKg >= 15 && request.resource.data.weightKg <= 200;
+      allow update: if canWriteData() && canAccessModule('playerProfile') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data)
+        && request.resource.data.playerId == resource.data.playerId && request.resource.data.teamId == resource.data.teamId
+        && request.resource.data.measuredAt is string && request.resource.data.measuredAt.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && request.resource.data.heightCm is number && request.resource.data.heightCm >= 80 && request.resource.data.heightCm <= 230
+        && request.resource.data.weightKg is number && request.resource.data.weightKg >= 15 && request.resource.data.weightKg <= 200;
+      allow delete: if canEditData() && canAccessModule('playerProfile') && canAccessScopedData(resource.data);
+    }
+
     match /injuries/{injuryId} {
       allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
       allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
