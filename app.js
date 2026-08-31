@@ -5217,7 +5217,8 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   ].map(value => String(value || '').trim()).filter(Boolean))];
   const rowsForSession = attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId && presenceUiStatusFromCode(row.status));
   const embeddedAttendanceIsAuthoritative = Number(session.embeddedAttendanceVersion || 0) >= 2;
-  const attendance = firestoreSafeData(session.attendance || {});
+  const embeddedAttendance = firestoreSafeData(session.attendance || {});
+  const attendance = {...embeddedAttendance};
   if(!embeddedAttendanceIsAuthoritative) rowsForSession.forEach(row => {
     attendance[row.playerId] = {
       status:presenceUiStatusFromCode(row.status),
