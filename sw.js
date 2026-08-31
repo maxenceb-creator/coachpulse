@@ -1,10 +1,11 @@
-const CACHE_NAME = 'coachpulse-v6-4-74-20260811-main-release';
+const CACHE_NAME = 'coachpulse-v6-4-75-20260831-main-release';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
   './shared/services/teams-service.js',
   './shared/services/permissions-service.js',
+  './shared/services/player-measurements-service.js',
   './shared/services/presence-events-service.js',
   './shared/utils/storage-service.js',
   './shared/utils/notifications-service.js',

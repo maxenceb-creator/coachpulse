@@ -8,10 +8,6 @@
     const weight = Number(weightKg || 0);
     return height && weight ? Number((weight / (height * height)).toFixed(2)) : null;
   }
-  function readMedicalProfiles(){
-    try{ return JSON.parse(localStorage.getItem('coachpulse:medicalProfiles') || '{}') || {}; }
-    catch(_e){ return {}; }
-  }
   function valueFrom(row={}, keys=[]){
     for(const key of keys){
       const value = row[key] ?? row.profile?.[key] ?? row.morphology?.[key] ?? row.measurements?.[key] ?? row.medicalProfile?.[key];
@@ -37,30 +33,14 @@
       weightKg,
       teamId:text(row.teamId || row.profile?.teamId || row.playerSnapshot?.teamId || player.teamId),
       season:text(row.season || row.saison || row.profile?.season || row.medicalProfile?.season),
-      date:text(row.date || row.updatedAt || row.updatedAtIso || row.createdAt || row.createdAtIso)
+      date:text(row.measuredAt || row.date || row.updatedAtIso)
     };
   }
   function medicalProfileBmi(player={}, collections={}, state={}){
     const playerId = text(player.playerId || player.id);
-    const stored = readMedicalProfiles();
-    const storedRows = [];
-    const profile = stored[playerId];
-    if(profile) storedRows.push({playerId, ...profile});
-    if(Array.isArray(profile?.history)) storedRows.push(...profile.history.map(row => ({playerId, ...row})));
-    const rows = [
-      ...storedRows,
-      ...(collections.injuries || []),
-      ...(collections.injuryUpdates || []),
-      ...(collections.medicalAppointments || []),
-      ...(collections.rehabRoutines || []),
-      ...(collections.medicalFollowUps || [])
-    ];
+    const rows = (collections.playerMeasurements || []).filter(row => text(row.playerId) === playerId);
     const normalized = rows.map(row => normalizeMedicalProfile(row, player)).filter(Boolean);
-    const inPeriod = normalized.filter(row => {
-      const hasTemporalData = !!(row.season || row.date);
-      return hasTemporalData ? Filters.rowInPeriod(row, Filters.periodFromState(state)) : true;
-    });
-    return latest(inPeriod.length ? inPeriod : normalized);
+    return latest(normalized);
   }
   function countActions(events=[]){
     const out = {};
@@ -144,6 +124,7 @@
     const medical = Filters.filterRows([...(collections.injuryUpdates || []), ...(collections.medicalAppointments || []), ...(collections.rehabRoutines || []), ...(collections.medicalFollowUps || [])], state);
     const convocations = Filters.filterRows(collections.convocations || [], state);
     const individualReports = Filters.filterRows(collections.individualReports || [], state);
+    const playerMeasurements = (collections.playerMeasurements || []).slice().sort((a,b)=>text(b.measuredAt).localeCompare(text(a.measuredAt)));
     const bmi = medicalProfileBmi(player, collections, state);
     const minutes = attendance.reduce((sum,row) => sum + n(row.minutes || row.duration || row.charge), 0);
     const latestPhysical = latest(physicalTests);
@@ -163,7 +144,7 @@
     };
     return {
       player,
-      attendance, sessions, matchEvents, technicalTests, physicalTests, injuries, medical, convocations, individualReports,
+      attendance, sessions, matchEvents, technicalTests, physicalTests, playerMeasurements, injuries, medical, convocations, individualReports,
       linkedCounts,
       kpis:{
         presenceRate:attendanceSummary.presenceRate,

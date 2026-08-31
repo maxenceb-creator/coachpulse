@@ -74,6 +74,7 @@
       matchEvents:[],
       technicalTests:[],
       physicalTests:[],
+      playerMeasurements:[],
       injuries:[],
       injuryUpdates:[],
       medicalAppointments:[],
@@ -117,6 +118,13 @@
     state.seasons = Filters.seasonsFromCollections(state.collections);
     if(!state.filters.compareSeasonA) state.filters.compareSeasonA = state.seasons[0] || Data.currentSeason();
     if(!state.filters.compareSeasonB) state.filters.compareSeasonB = Data.currentSeason();
+  }
+  async function refreshMeasurements(){
+    if(!state.selectedPlayerId||!state.collections) return;
+    const rows=await global.CoachPulsePlayerMeasurementsService.list(state.selectedPlayerId,{season:'all'});
+    state.collections.playerMeasurements=rows;
+    if(state.collectionCache[state.selectedPlayerId]) state.collectionCache[state.selectedPlayerId].collections.playerMeasurements=rows;
+    delete state.filteredCollectionCache[state.selectedPlayerId];
   }
   function teamRank(team=''){
     const numbers = String(team || '').match(/\d+/g)?.map(Number).filter(Number.isFinite) || [];
@@ -236,6 +244,13 @@
       state.filters.comparePlayerIds = [...document.querySelectorAll('[data-compare-player]:checked')].map(option => option.value);
       await render();
     }));
+    const measurementForm=document.getElementById('measurementForm');
+    const showMeasurementForm=(row={})=>{if(!measurementForm)return;measurementForm.hidden=false;document.getElementById('measurementId').value=row.measurementId||row.id||'';document.getElementById('measurementHeight').value=row.heightCm||'';document.getElementById('measurementWeight').value=row.weightKg||'';document.getElementById('measurementDate').value=row.measuredAt||new Date().toISOString().slice(0,10);document.getElementById('measurementMessage').textContent='';measurementForm.scrollIntoView({behavior:'smooth',block:'nearest'});};
+    document.getElementById('addMeasurementBtn')?.addEventListener('click',()=>showMeasurementForm());
+    document.getElementById('cancelMeasurementBtn')?.addEventListener('click',()=>{measurementForm.hidden=true;measurementForm.reset();});
+    document.querySelectorAll('[data-edit-measurement]').forEach(button=>button.addEventListener('click',()=>showMeasurementForm((state.collections?.playerMeasurements||[]).find(row=>(row.measurementId||row.id)===button.dataset.editMeasurement)||{})));
+    document.querySelectorAll('[data-delete-measurement]').forEach(button=>button.addEventListener('click',async()=>{if(!confirm('Supprimer définitivement cette mesure ?'))return;try{await global.CoachPulsePlayerMeasurementsService.remove(button.dataset.deleteMeasurement);await refreshMeasurements();await render();}catch(error){alert(error.message||error);}}));
+    measurementForm?.addEventListener('submit',async event=>{event.preventDefault();const selected=player(),message=document.getElementById('measurementMessage'),id=document.getElementById('measurementId').value;const input={playerId:state.selectedPlayerId,teamId:selected.teamId||'',teamIds:selected.teamIds||[],heightCm:document.getElementById('measurementHeight').value,weightKg:document.getElementById('measurementWeight').value,measuredAt:document.getElementById('measurementDate').value};try{const validation=global.CoachPulsePlayerMeasurementsService.validate(input);if(!validation.success)throw new Error(Object.values(validation.errors)[0]);message.textContent='Enregistrement…';if(id)await global.CoachPulsePlayerMeasurementsService.update(id,input);else await global.CoachPulsePlayerMeasurementsService.add(input);await refreshMeasurements();await render();document.querySelector('[data-sheet-target="donnees-physiques"]')?.click();}catch(error){message.textContent=error.message||String(error);}});
   }
   function collectionsForPlayer(playerId){
     if(state.filteredCollectionCache[playerId]) return state.filteredCollectionCache[playerId];
@@ -249,6 +264,7 @@
       matchEvents:(base.matchEvents || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
       technicalTests:(base.technicalTests || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
       physicalTests:(base.physicalTests || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
+      playerMeasurements:(base.playerMeasurements || []).filter(row => row.playerId === playerId),
       injuries:(base.injuries || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
       injuryUpdates:(base.injuryUpdates || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
       medicalAppointments:(base.medicalAppointments || []).filter(row => Data.rowMatchesPlayer(row, aliases)),

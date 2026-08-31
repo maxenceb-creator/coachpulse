@@ -154,6 +154,14 @@
     const pct = max ? Math.min(100, Math.round(value / max * 100)) : 0;
     return `<div class="bar-row"><b>${esc(label)}</b><div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div><span>${esc(value)}${esc(suffix)}</span></div>`;
   }
+  function renderMeasurements(summary={}){
+    const measurements=summary.playerMeasurements||[],latest=measurements[0]||null,caps=global.CoachPulsePlayerMeasurementsService?.capabilities?.()||{};
+    const rows=measurements.map(row=>`<tr><td>${formatDate(row.measuredAt)}</td><td>${esc(Number(row.heightCm).toLocaleString('fr-FR',{maximumFractionDigits:1}))} cm</td><td>${esc(Number(row.weightKg).toLocaleString('fr-FR',{minimumFractionDigits:1,maximumFractionDigits:1}))} kg</td><td class="measurement-actions">${caps.canWrite?`<button type="button" data-edit-measurement="${esc(row.measurementId||row.id)}">Modifier</button>`:''}${caps.canDelete?`<button type="button" class="danger" data-delete-measurement="${esc(row.measurementId||row.id)}">Supprimer</button>`:''}</td></tr>`);
+    return `<div class="measurement-current"><span><small>Taille actuelle</small><b>${latest?`${esc(Number(latest.heightCm).toLocaleString('fr-FR',{maximumFractionDigits:1}))} cm`:'-'}</b></span><span><small>Poids actuel</small><b>${latest?`${esc(Number(latest.weightKg).toLocaleString('fr-FR',{minimumFractionDigits:1,maximumFractionDigits:1}))} kg`:'-'}</b></span><span><small>Dernière mesure</small><b>${latest?formatDate(latest.measuredAt):'-'}</b></span></div>
+    ${caps.canWrite?'<button type="button" class="primary" id="addMeasurementBtn">Ajouter une mesure</button>':'<p class="readonly-note">Consultation seule selon vos permissions.</p>'}
+    <form id="measurementForm" class="measurement-form" hidden novalidate><input type="hidden" id="measurementId"><div class="field"><label for="measurementHeight">Taille (cm)</label><input id="measurementHeight" type="number" inputmode="decimal" min="80" max="230" step="0.1" required></div><div class="field"><label for="measurementWeight">Poids (kg)</label><input id="measurementWeight" type="number" inputmode="decimal" min="15" max="200" step="0.1" required></div><div class="field"><label for="measurementDate">Date de la mesure</label><input id="measurementDate" type="date" required></div><div class="measurement-form-actions"><button type="submit" class="primary">Enregistrer</button><button type="button" id="cancelMeasurementBtn">Annuler</button></div><p id="measurementMessage" class="form-message" role="status"></p></form>
+    ${table(['Date','Taille','Poids','Actions'],rows,'Aucune mesure physique enregistrée.')}`;
+  }
   function renderOverview(summary){
     const actionMax = Math.max(1, ...Object.values(summary.actions));
     return `<section class="player-sheet">
@@ -163,6 +171,7 @@
         <a href="#matchs" data-sheet-target="matchs">Matchs</a>
         <a href="#technique" data-sheet-target="technique">Tests techniques</a>
         <a href="#athletique" data-sheet-target="athletique">Tests athlétiques</a>
+        <a href="#donnees-physiques" data-sheet-target="donnees-physiques">Données physiques</a>
         <a href="#blessures" data-sheet-target="blessures">Blessures</a>
         <a href="#evolution" data-sheet-target="evolution">Évolution</a>
       </nav>
@@ -194,6 +203,7 @@
         <article id="matchs" class="panel stat-section sheet-section" data-sheet-section="matchs" hidden><h2>Matchs</h2>${renderMatchStats(summary.matchEvents)}</article>
         <article id="technique" class="panel stat-section wide sheet-section" data-sheet-section="technique" hidden><h2>Tests techniques</h2>${summary.technicalTests.length ? renderTechnicalTests(summary.technicalTests) : '<div class="empty-state">Aucun test technique sur cette période.</div>'}</article>
         <article id="athletique" class="panel stat-section wide sheet-section" data-sheet-section="athletique" hidden><h2>Tests athlétiques</h2>${summary.physicalTests.length ? renderPhysicalTests(summary.physicalTests) : '<div class="empty-state">Aucun test athlétique sur cette période.</div>'}</article>
+        <article id="donnees-physiques" class="panel stat-section wide sheet-section" data-sheet-section="donnees-physiques" hidden><h2>Données physiques</h2>${renderMeasurements(summary)}</article>
         <article id="blessures" class="panel stat-section sheet-section" data-sheet-section="blessures" hidden><h2>Blessures</h2>${renderInjuryTable(summary.injuries)}</article>
         <article id="evolution" class="panel stat-section sheet-section" data-sheet-section="evolution" hidden><h2>Évolution</h2>${renderEvolution(summary)}</article>
       </section>

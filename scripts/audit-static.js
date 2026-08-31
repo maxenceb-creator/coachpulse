@@ -11,6 +11,7 @@ const requiredFiles = [
   'pages/team-profile.html',
   'pages/team-profile/teamProfile.js',
   'shared/services/permissions-service.js',
+  'shared/services/player-measurements-service.js',
   'shared/services/players-service.js',
   'shared/services/teams-service.js',
   'scripts/pwa-tablet-check.js',
@@ -92,6 +93,7 @@ const sw = read('sw.js');
   './pages/team-profile.html',
   './pages/team-profile/teamProfile.js',
   './shared/services/permissions-service.js',
+  './shared/services/player-measurements-service.js',
   './css/responsive.css'
 ].forEach(asset => {
   if(!sw.includes(asset)) errors.push(`Asset PWA non precache: ${asset}`);

@@ -148,7 +148,7 @@
       loadedAt:new Date().toISOString(),
       collections:{
         players:playerId ? players.filter(player => idOf(player) === playerId) : players,
-        sessions:localPresence.sessions || [], attendance:localPresence.attendance || [], matches:[], matchEvents:[], technicalTests:[], physicalTests:[],
+        sessions:localPresence.sessions || [], attendance:localPresence.attendance || [], matches:[], matchEvents:[], technicalTests:[], physicalTests:[], playerMeasurements:[],
         injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], workloads:[], medicalFollowUps:[], convocations:[], individualReports:[]
       }
     };
@@ -163,6 +163,7 @@
       matchEvents:c.matchEvents || [],
       technicalTests:c.technicalTests || [],
       physicalTests:c.physicalTests || [],
+      playerMeasurements:c.playerMeasurements || [],
       injuries:c.injuries || [],
       injuryUpdates:c.injuryUpdates || [],
       medicalAppointments:c.medicalAppointments || [],
