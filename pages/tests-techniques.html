@@ -90,7 +90,7 @@ function storageRaw(key,fallback=''){if(storage?.get)return storage.get(key,fall
 function storageJson(key,fallback){if(storage?.getJson)return storage.getJson(key,fallback);const raw=storageRaw(key,JSON.stringify(fallback));try{return typeof raw==='string'?JSON.parse(raw):raw}catch(_){return fallback}}
 function storageSetJson(key,value){storageMemoryRaw[key]=JSON.stringify(value);if(storage?.setJson)return storage.setJson(key,value,{recover:true});return true}
 function storageRemove(key){delete storageMemoryRaw[key];if(storage?.remove)return storage.remove(key);return true}
-let charts={}, familyState={max:true,reg:true,mouv:true}, hideEmpty=false, editingTechnicalTestId='';
+let charts={}, familyState={max:true,reg:true,mouv:true}, hideEmpty=false, editingTechnicalTestId='', technicalSaveInProgress=false;
 function api(){try{return window.parent?.CoachPulseCentralData||{}}catch(_){return {}}}
 function technicalRowId(row={},fallback=''){return String(row.technicalTestId||row.testId||row.id||fallback||'').trim();}
 function rowFinalized(row={}){return row.finalized===true||row.status==='finalized';}
@@ -146,7 +146,44 @@ function playerFieldValue(player={},keys=[]){for(const key of keys){const value=
 function playerFootValue(player={}){return playerFieldValue(player,['foot','pied','meilleurPiedLabel','preferredFoot','strongFoot']);}
 function playerNationalityValue(player={}){return playerFieldValue(player,['nationalite','nationalité','nationality','country','pays']);}
 function playerSnapshotForTest(player={},seasonPlayer={},extra={}){const source={...player,...seasonPlayer};const foot=playerFootValue(source)||playerFootValue(player);const nationalite=playerNationalityValue(source)||playerNationalityValue(player);const teamIds=teamIdsFromSources(player,seasonPlayer,extra);return {playerId:source.playerId||source.id||extra.playerId||'',id:source.playerId||source.id||extra.playerId||'',displayName:source.label||source.displayName||extra.playerName||'',nom:source.nom||source.lastName||'',prenom:source.prenom||source.firstName||'',categorie:extra.categorie||source.categorie||'',subCategory:extra.subCategory||source.subCategory||source.sousCategorie||'',sousCategorie:extra.subCategory||source.sousCategorie||source.subCategory||'',team:source.team||source.equipe||'',teamId:source.teamId||teamIds[0]||'',teamIds,foot,pied:foot,meilleurPiedLabel:foot,nationalite,nationality:nationalite};}
-async function saveCommon(){if($('commonTestType').value!=='jongles'){$('commonMsg').textContent='Module prêt, champs spécifiques à définir.';return;}const id=$('player').value,d=$('commonDate').value,p=DATA.players.find(x=>x.id===id);if(!id||!d){$('commonMsg').textContent='Choisis une joueuse et une date dans le bandeau de sélection.';return;}const ps=playerForTestSeason(p,d),cat=ps?.categorie||p?.categorie||$('cat').value,sub=ps?.subCategory||ps?.sousCategorie||p?.sousCategorie||cat;const tests={};TESTS.forEach(([k])=>{const f=$('c_'+k);tests[k]=f&&f.value!==''?Number(f.value):'';});if(!Object.values(tests).some(hasValue)){$('commonMsg').textContent='Renseigne au moins une mesure.';return;}const foot=playerFootValue(ps)||playerFootValue(p),nationalite=playerNationalityValue(ps)||playerNationalityValue(p),teamIds=teamIdsFromSources(p,ps),teamId=ps?.teamId||p?.teamId||teamIds[0]||'',wasEditing=!!editingTechnicalTestId;const row={technicalTestId:editingTechnicalTestId,testId:editingTechnicalTestId,playerId:id,joueuse:id,playerName:p?.label||id,teamId,teamIds,categorie:cat,categorieListe:cat,sousCategorie:sub,subCategory:sub,date:d,season:seasonFromDate(d),saison:seasonFromDate(d),foot,pied:foot,meilleurPiedLabel:foot,nationalite,nationality:nationalite,playerSnapshot:playerSnapshotForTest(p,ps,{playerId:id,playerName:p?.label||id,categorie:cat,subCategory:sub,teamId,teamIds}),tests,objectifs:objectives()[cat]||{},testType:'jongles',source:'Tests techniques'};try{if(typeof api().technicalSaveTest==='function'){await api().technicalSaveTest(row);await refreshTechnicalCloudIfNeeded(true);}else{const rows=localRows(),rowId=editingTechnicalTestId||`local-${Date.now()}-${id}`;const idx=rows.findIndex(r=>technicalRowId(r)===rowId);const clean={...row,technicalTestId:rowId,testId:rowId,id:rowId};if(idx>=0)rows[idx]=clean;else rows.push(clean);setLocalRows(rows);}editingTechnicalTestId='';$('commonSave').textContent='Enregistrer le test';$('player').value=id;if(p)$('cat').value=cat;fillPlayerSelect($('player'),{empty:'Toutes les joueuses',cat:$('cat').value,grouped:true,showCat:false});$('player').value=id;fillSeasons();renderCommonHistory();updateJongles();if(document.querySelector('.tab.active')?.dataset.tab==='bilan')renderBilan();$('commonMsg').textContent=wasEditing?'Test modifié.':'Test enregistré. Onglet Jongle mis à jour.';}catch(e){$('commonMsg').textContent=e.message||String(e);}}
+async function saveCommon(){
+if(technicalSaveInProgress)return;
+if($('commonTestType').value!=='jongles'){$('commonMsg').textContent='Module prêt, champs spécifiques à définir.';return;}
+const id=$('player').value,d=$('commonDate').value,p=DATA.players.find(x=>x.id===id);
+if(!id||!d){$('commonMsg').textContent='Choisis une joueuse et une date dans le bandeau de sélection.';return;}
+const ps=playerForTestSeason(p,d),cat=ps?.categorie||p?.categorie||$('cat').value,sub=ps?.subCategory||ps?.sousCategorie||p?.sousCategorie||cat;
+const tests={};TESTS.forEach(([k])=>{const f=$('c_'+k);tests[k]=f&&f.value!==''?Number(f.value):'';});
+if(!Object.values(tests).some(hasValue)){$('commonMsg').textContent='Renseigne au moins une mesure.';return;}
+const foot=playerFootValue(ps)||playerFootValue(p),nationalite=playerNationalityValue(ps)||playerNationalityValue(p),teamIds=teamIdsFromSources(p,ps),teamId=ps?.teamId||p?.teamId||teamIds[0]||'',wasEditing=!!editingTechnicalTestId;
+const row={technicalTestId:editingTechnicalTestId,testId:editingTechnicalTestId,playerId:id,joueuse:id,playerName:p?.label||id,teamId,teamIds,categorie:cat,categorieListe:cat,sousCategorie:sub,subCategory:sub,date:d,season:seasonFromDate(d),saison:seasonFromDate(d),foot,pied:foot,meilleurPiedLabel:foot,nationalite,nationality:nationalite,playerSnapshot:playerSnapshotForTest(p,ps,{playerId:id,playerName:p?.label||id,categorie:cat,subCategory:sub,teamId,teamIds}),tests,objectifs:objectives()[cat]||{},testType:'jongles',source:'Tests techniques',finalized:true,status:'finalized'};
+const saveBtn=$('commonSave');
+technicalSaveInProgress=true;
+if(saveBtn){saveBtn.disabled=true;saveBtn.textContent=wasEditing?'Modification...':'Enregistrement...';}
+$('commonMsg').textContent='Enregistrement en cours...';
+try{
+if(typeof api().technicalSaveTest==='function'){
+await api().technicalSaveTest(row);
+await refreshTechnicalCloudIfNeeded(true);
+}else{
+const rows=localRows(),rowId=editingTechnicalTestId||`local-${Date.now()}-${id}`;
+const idx=rows.findIndex(r=>technicalRowId(r)===rowId);
+const clean={...row,technicalTestId:rowId,testId:rowId,id:rowId,finalized:true,status:'finalized'};
+if(idx>=0)rows[idx]=clean;else rows.push(clean);
+setLocalRows(rows);
+}
+editingTechnicalTestId='';
+if(saveBtn)saveBtn.textContent='Enregistrer le test';
+$('player').value=id;if(p)$('cat').value=cat;
+fillPlayerSelect($('player'),{empty:'Toutes les joueuses',cat:$('cat').value,grouped:true,showCat:false});
+$('player').value=id;fillSeasons();renderCommonHistory();updateJongles();
+if(document.querySelector('.tab.active')?.dataset.tab==='bilan')renderBilan();
+$('commonMsg').textContent=wasEditing?'Test modifié et enregistré dans la base.':'Test enregistré dans la base. Onglet Jongle mis à jour.';
+}catch(e){
+$('commonMsg').textContent=e.message||String(e);
+}finally{
+technicalSaveInProgress=false;
+if(saveBtn){saveBtn.disabled=false;saveBtn.textContent=editingTechnicalTestId?'Modifier le test':'Enregistrer le test';}
+}}
 function clearCommon(){TESTS.forEach(([k])=>{const f=$('c_'+k);if(f)f.value='';});editingTechnicalTestId='';$('commonSave').textContent='Enregistrer le test';if($('seasonFilter'))$('seasonFilter').value='__current';if($('cat'))$('cat').value='';fillPlayerSelect($('player'),{empty:'Toutes les joueuses',grouped:true,showCat:false});if($('player'))$('player').value='';$('commonDate').valueAsDate=new Date();syncCommonSeason();updateProfile([]);updateJongles();renderCommonHistory();$('commonMsg').textContent='Saisie annulée.';}
 function commonHistoryRows(){return localRows().map(sanitizeRow).filter(row=>!rowFinalized(row)).sort((a,b)=>technicalDateTime(b.date)-technicalDateTime(a.date)||String(b.date||'').localeCompare(String(a.date||'')));}
 function ensureCommonHistory(){if($('commonHistoryTable'))return;const section=$('saisie');section?.insertAdjacentHTML('beforeend',`<div class="card"><h2 class="history-title">Historique des tests saisis <span id="commonHistoryCounter" class="history-counter">0</span></h2><div class="wrap"><table id="commonHistoryTable"><thead><tr><th>Joueuse</th><th>Date</th><th>Saison</th><th>Catégorie</th><th>Maximum</th><th>Régularité</th><th>Mouvement</th><th>Actions</th></tr></thead><tbody></tbody></table></div></div>`);}
