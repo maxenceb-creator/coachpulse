@@ -176,6 +176,7 @@ function testPermissionUpdateDoesNotPromoteRole(){
 
   assert.equal(reloaded.role, 'ENTRAINEUR');
   assert.equal(permissions.isAdminRole(reloaded), false);
+  assert.equal(permissions.canManageCoreData(reloaded), false);
   assert.equal(reloaded.permissionLevel, 'SAISIE');
   assert.deepEqual(reloaded.modulePermissions, {presences:{read:true, write:true}});
   assert.deepEqual(
