@@ -408,6 +408,16 @@
     return asText(assignment.teamId || assignment.team_id || assignment.team?.teamId || assignment.teamSnapshot?.teamId);
   }
 
+  function assignmentTeamIds(assignment={}){
+    return [...new Set([
+      assignmentTeamId(assignment),
+      ...(Array.isArray(assignment.teamIds) ? assignment.teamIds : []),
+      ...(Array.isArray(assignment.team_ids) ? assignment.team_ids : []),
+      ...(Array.isArray(assignment.team?.teamIds) ? assignment.team.teamIds : []),
+      ...(Array.isArray(assignment.teamSnapshot?.teamIds) ? assignment.teamSnapshot.teamIds : [])
+    ].map(asText).filter(Boolean))];
+  }
+
   function assignmentContainsDate(assignment={}, dateValue){
     const target = dateKey(dateValue);
     if(!target) return false;
@@ -429,15 +439,15 @@
     if(!targetTeamId || !targetDate) return false;
     const assignments = teamAssignments(player);
     if(assignments.length){
-      return assignments.some(assignment => assignmentTeamId(assignment) === targetTeamId && assignmentContainsDate(assignment, targetDate));
+      return assignments.some(assignment => assignmentTeamIds(assignment).includes(targetTeamId) && assignmentContainsDate(assignment, targetDate));
     }
     const season = seasonFromDate(targetDate);
     const history = player.seasonHistory && typeof player.seasonHistory === 'object' ? player.seasonHistory : {};
     const seasonAssignment = history[season];
-    if(seasonAssignment && assignmentTeamId(seasonAssignment) === targetTeamId){
+    if(seasonAssignment && assignmentTeamIds(seasonAssignment).includes(targetTeamId)){
       return assignmentContainsDate({seasonStart:`${season.slice(0,4)}-07-01`, seasonEnd:`${season.slice(5)}-06-30`, ...seasonAssignment}, targetDate);
     }
-    return assignmentTeamId(player) === targetTeamId && assignmentContainsDate(player, targetDate);
+    return assignmentTeamIds(player).includes(targetTeamId) && assignmentContainsDate(player, targetDate);
   }
 
   function playersForTeamAtDate(rows=[], teamId='', dateValue){
