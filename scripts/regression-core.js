@@ -189,6 +189,30 @@ function testPermissionUpdateDoesNotPromoteRole(){
   assert(adminDetection && !adminDetection.includes('permissionLevel') && !adminDetection.includes('permissionLabel'), 'Une permission ne doit jamais être interprétée comme un rôle Admin.');
   const accessSave = appSource.match(/if\(saveUid\)[\s\S]*?notifySuccess\('Accès utilisateur mis à jour\.'\);/)?.[0] || '';
   assert(accessSave.includes('firebaseFns.updateDoc('), 'La carte modulePermissions doit remplacer l’ancienne valeur Firestore sans conserver des droits retirés.');
+
+  const demoted = {
+    ...permissions.defaultProfile({uid:'former-admin'}, 'ENTRAINEUR', 'LECTEUR'),
+    legacyRole:'ADMIN', businessRole:'ADMIN', userRole:'ADMIN', isAdmin:true, admin:true,
+    allowedModules:['presences'], modulePermissions:{presences:'read'}
+  };
+  assert.equal(permissions.isAdminRole(demoted), false, 'Une permissionLevel explicite non-admin doit primer sur tous les marqueurs admin historiques.');
+  assert.equal(permissions.canPerformAction(demoted, {id:'presences'}, 'read'), true);
+  assert.equal(permissions.canPerformAction(demoted, {id:'presences'}, 'write'), false);
+  demoted.permissionLevel = 'EDITEUR';
+  demoted.modulePermissions.presences = 'edit';
+  assert.equal(permissions.canPerformAction(demoted, {id:'presences'}, 'write'), true, 'Lecteur vers éditeur doit être effectif sans refresh complet.');
+  demoted.allowedModules = [];
+  demoted.modulePermissions = {};
+  assert.equal(permissions.canPerformAction(demoted, {id:'presences'}, 'read'), false, 'La suppression du dernier accès module doit survivre aux anciens rôles.');
+  demoted.permissionLevel = 'ADMIN';
+  assert.equal(permissions.canPerformAction(demoted, {id:'presences'}, 'write'), true, 'Non-admin vers admin doit ouvrir les droits.');
+  demoted.permissionLevel = 'LECTEUR';
+  assert.equal(permissions.canPerformAction(demoted, {id:'presences'}, 'write'), false, 'Admin vers non-admin doit retirer immédiatement les droits élevés.');
+
+  const staleTeams = {authorizedTeamIds:[], teamIds:[], allowedTeamIds:[], authorizedTeams:['team-old'], equipesAutorisees:['team-old']};
+  assert.deepEqual(permissions.getAuthorizedTeamIds(staleTeams), [], 'Les champs équipe historiques ne doivent pas réinjecter un accès supprimé du modèle canonique.');
+  assert(accessSave.includes('legacyRole:role') && accessSave.includes('isAdmin:permissionLevel === \'ADMIN\''), 'La sauvegarde doit neutraliser les marqueurs admin historiques.');
+  assert(appSource.includes('startStaffProfileSubscription();'), 'Le contexte utilisateur doit écouter les modifications Firestore en temps réel.');
 }
 
 function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
@@ -546,6 +570,18 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
 
   const byTeam = window.CoachPulsePresenceEventsService.collectionsForTeam('team-u13-a');
   const byPlayer = window.CoachPulsePresenceEventsService.collectionsForPlayer('player-a');
+  const u13Roster = Array.from({length:12}, (_, index) => ({playerId:`u13-${index + 1}`, teamId:'team-u13-a'}));
+  const otherRoster = Array.from({length:9}, (_, index) => ({playerId:`other-${index + 1}`, teamId:'team-u16-a'}));
+  const partialCloudEvent = {teamId:'team-u13-a', attendance:{'u13-1':{status:'present'}, 'u13-2':{status:'absent'}}};
+  assert.equal(window.CoachPulsePresenceEventsService.attendanceRosterPlayers(u13Roster, partialCloudEvent).length, 12, 'Un refetch partiel ne doit jamais tronquer le roster U13A.');
+  assert.equal(window.CoachPulsePresenceEventsService.attendanceRosterPlayers(otherRoster, partialCloudEvent).length, 9, 'La règle de roster doit rester générique pour les autres Teams.');
+  let rapidEvent = {teamId:'team-u13-a', attendance:{}};
+  ['present','absent','present','injured','present'].forEach((status, index) => {
+    rapidEvent = {...rapidEvent, attendance:{...rapidEvent.attendance, [`u13-${(index % 3) + 1}`]:{status}}};
+    const rendered = window.CoachPulsePresenceEventsService.attendanceRosterPlayers(u13Roster, rapidEvent);
+    assert.equal(rendered.length, 12);
+    assert.equal(new Set(rendered.map(player => player.playerId)).size, 12);
+  });
 
   assert.equal(byTeam.sessions.length, 1);
   assert.equal(byTeam.attendance.length, 2);
@@ -567,6 +603,9 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   assert(appSource.includes('athletic:minutes(source.athletic ?? source.athletique)'), 'Les snapshots cloud Présences doivent conserver Athlétique.');
   assert(appSource.includes('theoretical:minutes(source.theoretical ?? source.theorique)'), 'Les snapshots cloud Présences doivent conserver Théorique.');
   assert(appSource.includes('procedure:presencePlainProcedure(row.sessionSnapshot?.procedure || sessionPayload.procedure)'), 'Les snapshots Présences doivent conserver une procédure sérialisable.');
+  assert(appSource.includes('embeddedAttendanceVersion:2'), 'La séance doit publier atomiquement une assiduité embarquée faisant autorité.');
+  assert(appSource.includes('if(!embeddedAttendanceIsAuthoritative) rowsForSession.forEach'), 'Les lignes attendance partielles ne doivent pas écraser une séance atomique récente.');
+  assert(presencePageSource.includes('const rosterPlayers = playersForTeam(event.teamId, event.date);'), 'Le rendu doit partir du roster de la Team à la date de séance.');
 }
 
 function testPresenceD2CodeStaysScopedToU19(){

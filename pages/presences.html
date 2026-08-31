@@ -3185,13 +3185,12 @@
         };
       }
       function attendancePlayersForEvent(event){
-        const attendanceIds = Object.keys(event?.attendance || {}).filter(Boolean);
-        if(attendanceIds.length){
-          return attendanceIds
-            .map(playerId => playerFromAttendanceSnapshot(event, playerId))
-            .sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
-        }
-        return playersForTeam(event.teamId, event.date);
+        const rosterPlayers = playersForTeam(event.teamId, event.date);
+        const service = window.CoachPulsePresenceEventsService;
+        const players = service?.attendanceRosterPlayers
+          ? service.attendanceRosterPlayers(rosterPlayers, event)
+          : (rosterPlayers.length ? rosterPlayers : Object.keys(event?.attendance || {}).filter(Boolean).map(playerId => playerFromAttendanceSnapshot(event, playerId)));
+        return players.sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
       }
       function renderAttendanceDetail(){
         const card = document.getElementById("attendanceDetail");

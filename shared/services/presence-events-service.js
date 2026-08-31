@@ -216,6 +216,15 @@
       };
     }).filter(row => row.sessionId && row.playerId && row.status);
   }
+  function attendanceRosterPlayers(rosterPlayers=[], event={}){
+    if(Array.isArray(rosterPlayers) && rosterPlayers.length) return [...rosterPlayers];
+    return Object.entries(event.attendance || {}).map(([playerId, raw]) => ({
+      ...(raw?.playerSnapshot || {}),
+      playerId:text(raw?.playerSnapshot?.playerId || playerId),
+      teamId:text(raw?.playerSnapshot?.teamId || raw?.teamId || event.teamId),
+      team:text(raw?.playerSnapshot?.team || event.team)
+    })).filter(player => player.playerId);
+  }
   function readEvents(){
     const rows = readJson(STORAGE_KEY, []);
     if(!Array.isArray(rows)) return [];
@@ -256,6 +265,7 @@
     sessionFromEvent,
     teamIdsFromEvent,
     attendanceRowsFromEvent,
+    attendanceRosterPlayers,
     isElapsedEvent,
     isRetiredPresenceSeasonEvent,
     collectionsFromEvents,
