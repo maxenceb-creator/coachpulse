@@ -2105,7 +2105,8 @@
           const current = byId.get(event.id);
           const currentTime = Date.parse(current?.updatedAt || current?.createdAt || '') || 0;
           const nextTime = Date.parse(event.updatedAt || event.createdAt || '') || 0;
-          byId.set(event.id, !current || nextTime >= currentTime ? {...current, ...event} : current);
+          const attendance = mergeAttendanceMaps(current?.attendance, event.attendance);
+          byId.set(event.id, !current || nextTime >= currentTime ? {...current, ...event, attendance} : {...event, ...current, attendance});
         });
         return [...byId.values()].sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
       }
@@ -2982,6 +2983,52 @@
           playerSnapshot:playerSnapshotForAttendance(player, teamId, dateValue)
         }]));
       }
+      function mergeAttendanceMaps(baseAttendance={}, nextAttendance={}){
+        return {
+          ...(baseAttendance && typeof baseAttendance === "object" ? baseAttendance : {}),
+          ...(nextAttendance && typeof nextAttendance === "object" ? nextAttendance : {})
+        };
+      }
+      function attendanceRosterPlayerIds(event, teamId, dateValue){
+        const ids = new Set();
+        playersForTeam(teamId, dateValue).forEach(player => {
+          if(player?.playerId) ids.add(String(player.playerId));
+        });
+        Object.keys(event?.attendance || {}).forEach(playerId => {
+          if(playerId) ids.add(String(playerId));
+        });
+        return [...ids];
+      }
+      function attendanceEntryWithSnapshot(event, playerId, teamId, dateValue, duration){
+        const previousRaw = event?.attendance?.[playerId];
+        const previous = previousRaw ? attendanceEntry(event, playerId) : null;
+        const player = playerById(playerId, dateValue);
+        const fallbackSnapshot = previousRaw?.playerSnapshot || {};
+        const playerSnapshot = player
+          ? playerSnapshotForAttendance(player, teamId, dateValue)
+          : {
+            ...fallbackSnapshot,
+            playerId,
+            teamId:fallbackSnapshot.teamId || teamId || "",
+            teamIds:fallbackSnapshot.teamIds || (teamId ? [teamId] : [])
+          };
+        return previous ? {
+          ...previous,
+          minutes:isPresentStatus(previous.status)
+            ? Number(previous.minutes || duration || 0)
+            : Number(previous.minutes || 0),
+          teamId:playerSnapshot.teamId || teamId || "",
+          teamIds:playerSnapshot.teamIds || (teamId ? [teamId] : []),
+          playerSnapshot
+        } : {
+          status:"present",
+          minutes:Number(duration || 0),
+          comment:"",
+          teamId,
+          teamIds:[teamId],
+          playerSnapshot
+        };
+      }
       function procedureMinutes(value){
         return Math.max(0, Number(value || 0) || 0);
       }
@@ -3032,26 +3079,10 @@
           : "Aucun procédé renseigné.";
       }
       function mergeAttendanceForEvent(previousEvent, teamId, dateValue, duration){
-        return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => {
-          const previous = previousEvent?.attendance?.[player.playerId] ? attendanceEntry(previousEvent, player.playerId) : null;
-          const playerSnapshot = playerSnapshotForAttendance(player, teamId, dateValue);
-          return [player.playerId, previous ? {
-            ...previous,
-            minutes:isPresentStatus(previous.status)
-              ? Number(previous.minutes || duration || 0)
-              : Number(previous.minutes || 0),
-            teamId,
-            teamIds:[teamId],
-            playerSnapshot
-          } : {
-            status:"present",
-            minutes:Number(duration || 0),
-            comment:"",
-            teamId,
-            teamIds:[teamId],
-            playerSnapshot
-          }];
-        }));
+        return Object.fromEntries(attendanceRosterPlayerIds(previousEvent, teamId, dateValue).map(playerId => [
+          playerId,
+          attendanceEntryWithSnapshot(previousEvent, playerId, teamId, dateValue, duration)
+        ]));
       }
       function setSessionFormMode(eventId=""){
         editingEventId = eventId;
@@ -3185,13 +3216,14 @@
         };
       }
       function attendancePlayersForEvent(event){
-        const attendanceIds = Object.keys(event?.attendance || {}).filter(Boolean);
-        if(attendanceIds.length){
-          return attendanceIds
-            .map(playerId => playerFromAttendanceSnapshot(event, playerId))
-            .sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
-        }
-        return playersForTeam(event.teamId, event.date);
+        const players = new Map();
+        playersForTeam(event.teamId, event.date).forEach(player => {
+          if(player?.playerId) players.set(String(player.playerId), player);
+        });
+        Object.keys(event?.attendance || {}).filter(Boolean).forEach(playerId => {
+          if(!players.has(String(playerId))) players.set(String(playerId), playerFromAttendanceSnapshot(event, playerId));
+        });
+        return [...players.values()].sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
       }
       function renderAttendanceDetail(){
         const card = document.getElementById("attendanceDetail");
