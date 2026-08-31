@@ -139,6 +139,16 @@
     return normalizeRole(profile?.businessRole || profile?.role || profile?.userRole || fallback);
   }
 
+  function isAdminRole(profile={}){
+    const explicitPermission = profile?.permissionLevel ?? profile?.permission ?? profile?.accessLevel;
+    if(explicitPermission != null && asText(explicitPermission)){
+      return normalizePermission(explicitPermission, profile) === 'ADMIN';
+    }
+    if(profile?.isAdmin === true || profile?.admin === true) return true;
+    return [profile?.businessRole, profile?.role, profile?.userRole, profile?.legacyRole]
+      .some(value => ['ADMIN','ADMINISTRATEUR','SUPER_ADMIN'].includes(normalizeKey(value, '')));
+  }
+
   function legacyPermissionFromRole(role){
     const raw = normalizeKey(role, '');
     if(raw === 'ADMIN') return 'ADMIN';
@@ -170,14 +180,12 @@
   }
 
   function teamIds(profile={}){
-    return [
-      ...list(profile?.authorizedTeamIds),
-      ...list(profile?.teamIds),
-      ...list(profile?.allowedTeamIds),
-      ...list(profile?.authorizedTeams),
-      ...list(profile?.equipesAutorisees),
-      ...list(profile?.scope)
-    ].map(v => v.toLowerCase());
+    const hasCanonicalScope = ['authorizedTeamIds','teamIds','allowedTeamIds']
+      .some(key => Object.prototype.hasOwnProperty.call(profile || {}, key));
+    const values = hasCanonicalScope
+      ? [...list(profile?.authorizedTeamIds), ...list(profile?.teamIds), ...list(profile?.allowedTeamIds)]
+      : [...list(profile?.authorizedTeams), ...list(profile?.equipesAutorisees), ...list(profile?.scope)];
+    return [...new Set(values.map(v => v.toLowerCase()))];
   }
 
   function moduleOverrides(profile={}){
@@ -205,7 +213,8 @@
   }
 
   function moduleScopes(profile={}){
-    return profile?.moduleScopes || profile?.moduleAccessScopes || profile?.permissionsScopes || {};
+    if(Object.prototype.hasOwnProperty.call(profile || {}, 'moduleScopes')) return profile.moduleScopes || {};
+    return profile?.moduleAccessScopes || profile?.permissionsScopes || {};
   }
 
   function moduleScope(profile={}, module=''){
@@ -230,8 +239,9 @@
 
   function hasExplicitModuleScope(profile={}){
     if(normalizePermission(null, profile) === 'ADMIN') return false;
-    return list(profile?.allowedModules || profile?.modulesAutorises).length > 0
-      || Object.keys(profile?.modulePermissions || profile?.permissionsSpecifiques || {}).length > 0;
+    return ['allowedModules','modulePermissions'].some(key => Object.prototype.hasOwnProperty.call(profile || {}, key))
+      || list(profile?.modulesAutorises).length > 0
+      || Object.keys(profile?.permissionsSpecifiques || {}).length > 0;
   }
 
   function legacyRoleModules(profile={}){
@@ -427,7 +437,7 @@
   const service = {
     ROLES, ROLE_ALIASES, ROLE_LABELS, PERMISSIONS, PERMISSION_LABELS, PERMISSION_RANK,
     MODULE_PERMISSIONS, MODULE_ALIASES, LEGACY_ROLE_MODULES,
-    normalizeRole, roleLabel, getRole, normalizePermission, permissionLabel, hasPermission, isActive,
+    normalizeRole, roleLabel, getRole, isAdminRole, normalizePermission, permissionLabel, hasPermission, isActive,
     moduleIdOf, moduleKeys, moduleScopes, moduleScope, scopeAllowsAllPlayers,
     canUseModule, canViewModule, canEditModule, canDeleteData,
     canReadModule, canPerformAction,

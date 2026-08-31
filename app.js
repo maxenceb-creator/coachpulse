@@ -32,6 +32,7 @@ let tools = buildTools();
 
 let deferredPrompt = null;
 let firebaseFns = null, fbApp = null, auth = null, db = null, currentUser = null, currentProfile = null, authReady = false, signingIn = false;
+let staffProfileUnsub = null;
 // Prévu pour évoluer avec Firebase Auth custom claims. Aujourd'hui, le rôle vient du document staff_members.
 let currentUserRole = 'STAFF';
 let syncTimer = null;
@@ -246,6 +247,16 @@ function normalizeProfileAccessFields(profile={}){
   profile.teamIds = teams;
   profile.allowedTeamIds = teams;
   return profile;
+}
+function normalizeLoadedStaffProfile(profile={}){
+  const service = permissionsService();
+  const normalized = normalizeProfileAccessFields({...profile});
+  const legacyRole = normalized.legacyRole || normalized.role || currentUserRole;
+  normalized.role = service?.normalizeRole ? service.normalizeRole(normalized.businessRole || normalized.role) : normalized.role;
+  normalized.roleLabel = service?.roleLabel ? service.roleLabel(normalized.role) : normalized.role;
+  normalized.permissionLevel = service?.normalizePermission ? service.normalizePermission(normalized.permissionLevel, {...normalized, legacyRole}) : (normalized.permissionLevel || 'LECTEUR');
+  normalized.permissionLabel = service?.permissionLabel ? service.permissionLabel(normalized.permissionLevel) : normalized.permissionLevel;
+  return normalized;
 }
 function accessContext(){
   const profile = accessProfile();
@@ -938,26 +949,18 @@ function isSeedAdminEmail(email=''){
 }
 
 function isAdminLikeProfile(profile={}){
+  const service = permissionsService();
+  if(service?.isAdminRole) return service.isAdminRole(profile);
   if(profile?.isAdmin === true || profile?.admin === true) return true;
-  const values = [
-    profile?.role,
-    profile?.legacyRole,
-    profile?.businessRole,
-    profile?.userRole,
-    profile?.permissionLevel,
-    profile?.permission,
-    profile?.accessLevel,
-    profile?.roleLabel,
-    profile?.permissionLabel
-  ];
-  return values.some(value => /^(ADMIN|ADMINISTRATEUR|SUPER_ADMIN)$/i.test(String(value || '').trim()));
+  return [profile?.role, profile?.legacyRole, profile?.businessRole, profile?.userRole]
+    .some(value => /^(ADMIN|ADMINISTRATEUR|SUPER_ADMIN)$/i.test(String(value || '').trim()));
 }
 
 function applyAdminProfileRepair(profile, service){
   const modules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
   profile.legacyRole = 'ADMIN';
-  profile.role = 'ADMIN';
-  profile.roleLabel = 'Admin';
+  profile.role = service?.normalizeRole ? service.normalizeRole(profile.businessRole || profile.role || 'DIRIGEANT') : (profile.role || 'DIRIGEANT');
+  profile.roleLabel = service?.roleLabel ? service.roleLabel(profile.role) : profile.role;
   profile.permissionLevel = 'ADMIN';
   profile.permissionLabel = service?.permissionLabel ? service.permissionLabel('ADMIN') : 'Admin';
   profile.allowedModules = modules;
@@ -971,13 +974,8 @@ async function ensureUserProfile(user){
   const service = permissionsService();
   const seedAdmin = isSeedAdminEmail(user.email);
   if(snap.exists()){
-    currentProfile = normalizeProfileAccessFields({uid:user.uid, ...snap.data()});
+    currentProfile = normalizeLoadedStaffProfile({uid:user.uid, ...snap.data()});
     const legacyRole = currentProfile.legacyRole || currentProfile.role || currentUserRole;
-    currentProfile.legacyRole = legacyRole;
-    currentProfile.role = service?.normalizeRole ? service.normalizeRole(currentProfile.businessRole || currentProfile.role) : currentProfile.role;
-    currentProfile.roleLabel = service?.roleLabel ? service.roleLabel(currentProfile.role) : currentProfile.role;
-    currentProfile.permissionLevel = service?.normalizePermission ? service.normalizePermission(currentProfile.permissionLevel, {...currentProfile, legacyRole}) : (currentProfile.permissionLevel || 'LECTEUR');
-    currentProfile.permissionLabel = service?.permissionLabel ? service.permissionLabel(currentProfile.permissionLevel) : currentProfile.permissionLevel;
     if(seedAdmin || isAdminLikeProfile(currentProfile)) applyAdminProfileRepair(currentProfile, service);
     if(service?.normalizePermission && currentProfile.permissionLevel === 'ADMIN' && (!Array.isArray(currentProfile.allowedModules) || !currentProfile.allowedModules.length)){
       currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
@@ -1005,6 +1003,29 @@ async function ensureUserProfile(user){
   if(isSeedAdmin) applyAdminProfileRepair(currentProfile, service);
   await firebaseFns.setDoc(ref, {...currentProfile, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp(), lastLoginAt:firebaseFns.serverTimestamp()}, {merge:true});
   return currentProfile;
+}
+
+function stopStaffProfileSubscription(){
+  if(staffProfileUnsub){ try{ staffProfileUnsub(); }catch(_error){} }
+  staffProfileUnsub = null;
+}
+function startStaffProfileSubscription(){
+  stopStaffProfileSubscription();
+  if(!db || !currentUser || !firebaseFns?.onSnapshot) return;
+  const uid = currentUser.uid;
+  staffProfileUnsub = firebaseFns.onSnapshot(firebaseFns.doc(db, 'staff_members', uid), snap => {
+    if(!snap.exists() || currentUser?.uid !== uid) return;
+    const next = normalizeLoadedStaffProfile({uid, ...snap.data()});
+    if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(next.status || '').toUpperCase())){
+      logout();
+      return;
+    }
+    currentProfile = next;
+    currentUserRole = getCurrentUserRole();
+    updateRoleUi();
+    notifyFramesAccessUpdated();
+    if(currentTool && !canAccessTool(currentTool)) showHome();
+  }, error => console.warn('Actualisation des autorisations indisponible', cleanError(error)));
 }
 
 async function initFirebase(){
@@ -1035,6 +1056,7 @@ async function initFirebaseInternal(){
           return;
         }
         setLocked(false);
+        startStaffProfileSubscription();
         try{ startRealtimeSync(); }catch(e){ console.warn('Realtime sync unavailable after login', e); }
         await syncCloud(false).catch(e => console.warn('Cloud sync unavailable after login', e));
         await refreshCentralPlayersFromCloud({force:true, reason:'login'}).catch(e => console.warn('Central players pull unavailable after login', e));
@@ -1044,6 +1066,7 @@ async function initFirebaseInternal(){
       } else {
         currentProfile = null;
         stopRealtimeSync();
+        stopStaffProfileSubscription();
         setLocked(true);
       }
     });
@@ -5193,10 +5216,10 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
     ...(Array.isArray(session.teamSnapshot?.teamIds) ? session.teamSnapshot.teamIds : [])
   ].map(value => String(value || '').trim()).filter(Boolean))];
   const rowsForSession = attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId && presenceUiStatusFromCode(row.status));
-  const attendance = rowsForSession.length
-    ? {}
-    : session.embeddedAttendanceVersion === 1 ? {} : firestoreSafeData(session.attendance || {});
-  rowsForSession.forEach(row => {
+  const embeddedAttendanceIsAuthoritative = Number(session.embeddedAttendanceVersion || 0) >= 2;
+  const embeddedAttendance = firestoreSafeData(session.attendance || {});
+  const attendance = {...embeddedAttendance};
+  if(!embeddedAttendanceIsAuthoritative) rowsForSession.forEach(row => {
     attendance[row.playerId] = {
       status:presenceUiStatusFromCode(row.status),
       minutes:Number(row.minutes ?? row.duration ?? 0) || 0,
@@ -5450,7 +5473,7 @@ async function presenceSaveEvent(event={}){
     },
     procedure:presencePlainProcedure(session.procedure || event.procedure || event.sessionProcedure),
     attendance:firestoreSafeData(event.attendance || {}),
-    embeddedAttendanceVersion:1
+    embeddedAttendanceVersion:2
   };
   const safeSessionPayload = firestoreSafeData(sessionPayload);
   await firebaseFns.setDoc(firebaseFns.doc(db, 'sessions', sessionId), {
@@ -5747,6 +5770,7 @@ async function logout(){
   try{ if(auth) await firebaseFns.signOut(auth); }catch(e){ notifyError('Déconnexion impossible : '+cleanError(e)); }
   await clearFirebaseAuthBrowserCache('logout');
   stopRealtimeSync();
+  stopStaffProfileSubscription();
   currentUser = null; currentProfile = null;
   clearSensitiveLocalData();
   storage.clearPendingSync();
@@ -6136,24 +6160,37 @@ async function adminTableClick(e){
       const allowedModules = parseAccessList(document.querySelector(`[data-modules="${saveUid}"]`)?.value || '');
       const moduleScopes = moduleScopesFromSelection(document.querySelector(`[data-module-scopes="${saveUid}"]`)?.value || '');
       const status = String(document.querySelector(`[data-status="${saveUid}"]`)?.value || 'ACTIVE').toUpperCase();
-      await firebaseFns.setDoc(firebaseFns.doc(db,'staff_members',saveUid), {
+      await firebaseFns.updateDoc(firebaseFns.doc(db,'staff_members',saveUid), {
         role,
+        legacyRole:role,
+        businessRole:role,
+        userRole:role,
         roleLabel:service?.roleLabel ? service.roleLabel(role) : role,
         permissionLevel,
+        permission:permissionLevel,
+        accessLevel:permissionLevel,
         permissionLabel:service?.permissionLabel ? service.permissionLabel(permissionLevel) : permissionLevel,
+        isAdmin:permissionLevel === 'ADMIN',
+        admin:permissionLevel === 'ADMIN',
         authorizedTeamIds:teamIds,
         teamIds,
         allowedTeamIds:teamIds,
         allowedModules,
         modulePermissions:modulePermissionsFromSelection(allowedModules, permissionLevel),
+        modulesAutorises:[],
+        permissionsSpecifiques:{},
         moduleScopes,
+        moduleAccessScopes:{},
+        permissionsScopes:{},
+        authorizedTeams:[],
+        equipesAutorisees:[],
         status,
         userType:'staff',
         updatedAt:firebaseFns.serverTimestamp(),
         updatedAtIso:new Date().toISOString(),
         updatedBy:currentUser.uid,
         updatedByEmail:currentUser.email || ''
-      }, {merge:true});
+      });
       notifySuccess('Accès utilisateur mis à jour.');
       await loadMembers();
     }
