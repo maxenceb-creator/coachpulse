@@ -3216,8 +3216,13 @@
         };
       }
       function attendancePlayersForEvent(event){
+        const rosterPlayers = playersForTeam(event.teamId, event.date);
+        const service = window.CoachPulsePresenceEventsService;
+        const servicePlayers = service?.attendanceRosterPlayers
+          ? service.attendanceRosterPlayers(rosterPlayers, event)
+          : [];
         const players = new Map();
-        playersForTeam(event.teamId, event.date).forEach(player => {
+        [...rosterPlayers, ...servicePlayers].forEach(player => {
           if(player?.playerId) players.set(String(player.playerId), player);
         });
         Object.keys(event?.attendance || {}).filter(Boolean).forEach(playerId => {
