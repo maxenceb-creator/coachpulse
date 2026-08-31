@@ -393,6 +393,61 @@
     };
   }
 
+  function dateKey(value){
+    if(value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+    if(value && typeof value.toDate === 'function') return dateKey(value.toDate());
+    const raw = asText(value);
+    if(!raw) return '';
+    const iso = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    if(iso) return iso[1];
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+  }
+
+  function assignmentTeamId(assignment={}){
+    return asText(assignment.teamId || assignment.team_id || assignment.team?.teamId || assignment.teamSnapshot?.teamId);
+  }
+
+  function assignmentContainsDate(assignment={}, dateValue){
+    const target = dateKey(dateValue);
+    if(!target) return false;
+    const start = dateKey(assignment.startDate || assignment.startsAt || assignment.validFrom || assignment.effectiveFrom || assignment.from || assignment.seasonStart);
+    const end = dateKey(assignment.endDate || assignment.endsAt || assignment.validTo || assignment.effectiveTo || assignment.to || assignment.seasonEnd);
+    const status = normalizeUpper(assignment.status || 'ACTIVE');
+    if(['ARCHIVED','INACTIVE','DISABLED','ENDED','TERMINATED'].includes(status)) return false;
+    return (!start || start <= target) && (!end || end >= target);
+  }
+
+  function teamAssignments(player={}){
+    const candidates = [player.teamAssignments, player.assignments, player.teamAffiliations];
+    return candidates.find(Array.isArray) || [];
+  }
+
+  function playerAssignedToTeamAtDate(player={}, teamId='', dateValue){
+    const targetTeamId = asText(teamId);
+    const targetDate = dateKey(dateValue);
+    if(!targetTeamId || !targetDate) return false;
+    const assignments = teamAssignments(player);
+    if(assignments.length){
+      return assignments.some(assignment => assignmentTeamId(assignment) === targetTeamId && assignmentContainsDate(assignment, targetDate));
+    }
+    const season = seasonFromDate(targetDate);
+    const history = player.seasonHistory && typeof player.seasonHistory === 'object' ? player.seasonHistory : {};
+    const seasonAssignment = history[season];
+    if(seasonAssignment && assignmentTeamId(seasonAssignment) === targetTeamId){
+      return assignmentContainsDate({seasonStart:`${season.slice(0,4)}-07-01`, seasonEnd:`${season.slice(5)}-06-30`, ...seasonAssignment}, targetDate);
+    }
+    return assignmentTeamId(player) === targetTeamId && assignmentContainsDate(player, targetDate);
+  }
+
+  function playersForTeamAtDate(rows=[], teamId='', dateValue){
+    const season = seasonFromDate(dateValue);
+    return dedupePlayers(rows)
+      .filter(player => !['archived','inactive','disabled','left'].includes(asText(player.status || 'active').toLowerCase()))
+      .filter(player => playerAssignedToTeamAtDate(player, teamId, dateValue))
+      .map(player => playerForSeason(player, season));
+  }
+
   function dedupePlayers(players=[]){
     const byCanonicalKey = new Map();
     const aliases = new Map();
@@ -578,6 +633,7 @@
     CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
     stableId, canonicalPlayerId, canonicalTeamId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
     categorySnapshotForSeason, playerSeasonSnapshot, playerForSeason, normalizeTeamFromCategory, defaultClubTeamFromSubCategory, resolveClubTeam,
+    dateKey, assignmentTeamId, assignmentContainsDate, teamAssignments, playerAssignedToTeamAtDate, playersForTeamAtDate,
     teamCategoryRuleForSubCategory, teamCategoryRulesForSubCategory, teamCategoryRuleForTeam, displayName, splitName,
     normalizePlayer, normalizePlayerForWrite, identityKey, personKey, dedupePlayers,
     readCachedPlayers, writeCache, filterPlayers,

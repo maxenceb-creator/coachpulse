@@ -1942,10 +1942,12 @@
           ...readJson("coachpulse:centralPlayers", []),
           ...readJson("coachpulse:customPlayers", [])
         ];
-        const normalized = (Array.isArray(rows) ? rows : [])
-          .map(player => playerForEventSeason(player, dateValue))
-          .filter(player => player?.playerId && String(player.status || "active").toLowerCase() !== "archived")
-          .filter(player => playerMatchesTeam(player, teamId, dateValue));
+        const normalized = service?.playersForTeamAtDate
+          ? service.playersForTeamAtDate(Array.isArray(rows) ? rows : [], teamId, dateValue)
+          : (Array.isArray(rows) ? rows : [])
+            .map(player => playerForEventSeason(player, dateValue))
+            .filter(player => player?.playerId && String(player.status || "active").toLowerCase() !== "archived")
+            .filter(player => playerMatchesTeam(player, teamId, dateValue));
         const deduped = service?.dedupePlayers ? service.dedupePlayers(normalized) : normalized;
         return deduped.sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
       }
@@ -3634,6 +3636,8 @@
       async function initPresenceCloud(){
         try{
           const api = centralDataApi();
+          await api?.listPlayers?.({season:"all", includeArchived:true, moduleId:"presences"})
+            .catch(error => console.warn('[Présences] Préchargement effectif indisponible', error));
           await pullPresenceSettingsFromCloud();
           const presenceResult = await pullPresenceEventsFromCloud();
           const {cloudEvents=[]} = presenceResult || {};

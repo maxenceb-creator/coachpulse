@@ -938,26 +938,18 @@ function isSeedAdminEmail(email=''){
 }
 
 function isAdminLikeProfile(profile={}){
+  const service = permissionsService();
+  if(service?.isAdminRole) return service.isAdminRole(profile);
   if(profile?.isAdmin === true || profile?.admin === true) return true;
-  const values = [
-    profile?.role,
-    profile?.legacyRole,
-    profile?.businessRole,
-    profile?.userRole,
-    profile?.permissionLevel,
-    profile?.permission,
-    profile?.accessLevel,
-    profile?.roleLabel,
-    profile?.permissionLabel
-  ];
-  return values.some(value => /^(ADMIN|ADMINISTRATEUR|SUPER_ADMIN)$/i.test(String(value || '').trim()));
+  return [profile?.role, profile?.legacyRole, profile?.businessRole, profile?.userRole]
+    .some(value => /^(ADMIN|ADMINISTRATEUR|SUPER_ADMIN)$/i.test(String(value || '').trim()));
 }
 
 function applyAdminProfileRepair(profile, service){
   const modules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
   profile.legacyRole = 'ADMIN';
-  profile.role = 'ADMIN';
-  profile.roleLabel = 'Admin';
+  profile.role = service?.normalizeRole ? service.normalizeRole(profile.businessRole || profile.role || 'DIRIGEANT') : (profile.role || 'DIRIGEANT');
+  profile.roleLabel = service?.roleLabel ? service.roleLabel(profile.role) : profile.role;
   profile.permissionLevel = 'ADMIN';
   profile.permissionLabel = service?.permissionLabel ? service.permissionLabel('ADMIN') : 'Admin';
   profile.allowedModules = modules;
@@ -6136,7 +6128,7 @@ async function adminTableClick(e){
       const allowedModules = parseAccessList(document.querySelector(`[data-modules="${saveUid}"]`)?.value || '');
       const moduleScopes = moduleScopesFromSelection(document.querySelector(`[data-module-scopes="${saveUid}"]`)?.value || '');
       const status = String(document.querySelector(`[data-status="${saveUid}"]`)?.value || 'ACTIVE').toUpperCase();
-      await firebaseFns.setDoc(firebaseFns.doc(db,'staff_members',saveUid), {
+      await firebaseFns.updateDoc(firebaseFns.doc(db,'staff_members',saveUid), {
         role,
         roleLabel:service?.roleLabel ? service.roleLabel(role) : role,
         permissionLevel,
@@ -6153,7 +6145,7 @@ async function adminTableClick(e){
         updatedAtIso:new Date().toISOString(),
         updatedBy:currentUser.uid,
         updatedByEmail:currentUser.email || ''
-      }, {merge:true});
+      });
       notifySuccess('Accès utilisateur mis à jour.');
       await loadMembers();
     }
