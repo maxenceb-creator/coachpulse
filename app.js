@@ -4293,7 +4293,7 @@ async function getPlayer(playerId){
 }
 function playerMeasurementsService(){ return window.CoachPulsePlayerMeasurementsService; }
 function playerMeasurementsCapabilities(){
-  return {canRead:canViewModule('playerProfile')||canViewModule('medical'),canWrite:canEditModule('playerProfile'),canDelete:canDeleteData('playerProfile')};
+  return {canRead:canViewModule('playerProfile')||canViewModule('medical'),canWrite:canEditModule('playerProfile')||canEditModule('medical'),canDelete:canDeleteData('playerProfile')};
 }
 async function playerMeasurementsList(playerId, options={}){
   const id=String(playerId||'').trim();
@@ -4311,7 +4311,8 @@ async function playerMeasurementsList(playerId, options={}){
 async function savePlayerMeasurement(measurementIdValue,input={},editing=false){
   if(!playerMeasurementsCapabilities().canWrite) throw new Error('Modification non autorisée.');
   const clean=playerMeasurementsService().parse(input),player=await getPlayer(clean.playerId);
-  if(!player||!canAccessPlayerForModule(player,'playerProfile')||!canAccessRecord(clean)) throw new Error('Accès non autorisé à cette joueuse.');
+  const moduleId=canEditModule('playerProfile')?'playerProfile':'medical';
+  if(!player||!canAccessPlayerForModule(player,moduleId)||!canAccessRecord(clean)) throw new Error('Accès non autorisé à cette joueuse.');
   const measurementId=measurementIdValue||playerMeasurementsService().measurementId(clean.playerId,clean.measuredAt),ref=firebaseFns.doc(db,'playerMeasurements',measurementId),existing=await firebaseFns.getDoc(ref);
   if(!editing&&existing.exists()) throw new Error('Une mesure existe déjà pour cette joueuse à cette date. Modifie la mesure existante.');
   const payload={...clean,measurementId,updatedAtIso:new Date().toISOString(),updatedBy:currentUser.uid,updatedByEmail:currentUser.email||''};
