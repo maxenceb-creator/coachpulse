@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-73-20260824-player-measurements';
+const CACHE_NAME = 'coachpulse-v6-4-75-20260831-main-release';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
@@ -6,6 +6,7 @@ const CORE_ASSETS = [
   './shared/services/teams-service.js',
   './shared/services/permissions-service.js',
   './shared/services/player-measurements-service.js',
+  './shared/services/presence-events-service.js',
   './shared/utils/storage-service.js',
   './shared/utils/notifications-service.js',
   './shared/utils/module-registry.js',
@@ -20,7 +21,7 @@ const CORE_ASSETS = [
   './connectors/fichesJoueusesConnector.js', './connectors/presencesConnector.js',
   './connectors/testsConnectorCore.js', './connectors/testsTechniquesConnector.js', './connectors/testsPhysiquesConnector.js'
 ];
-const NETWORK_FIRST_ASSETS = new Set(['./', './index.html', './app.js', './css/responsive.css']);
+const NETWORK_FIRST_ASSETS = new Set(['./', './index.html', './app.js', './css/responsive.css', './manifest.json']);
 const NETWORK_FIRST_EXTENSIONS = /\.(html|js|css|json)$/i;
 
 function assetKey(url) {
@@ -30,13 +31,14 @@ function assetKey(url) {
 
 function cacheResponse(request, response) {
   if(!response || !response.ok) return response;
+  if(response.type && !['basic', 'cors'].includes(response.type)) return response;
   const copy = response.clone();
   caches.open(CACHE_NAME).then(cache => cache.put(request, copy)).catch(() => {});
   return response;
 }
 
 function networkFirst(request) {
-  const freshRequest = new Request(request, {cache: 'reload'});
+  const freshRequest = new Request(request, {cache: 'no-store'});
   return fetch(freshRequest)
     .then(response => cacheResponse(request, response))
     .catch(() => caches.match(request).then(cached => cached || caches.match('./index.html')));
