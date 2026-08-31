@@ -139,6 +139,12 @@
     return normalizeRole(profile?.businessRole || profile?.role || profile?.userRole || fallback);
   }
 
+  function isAdminRole(profile={}){
+    if(profile?.isAdmin === true || profile?.admin === true) return true;
+    return [profile?.businessRole, profile?.role, profile?.userRole, profile?.legacyRole]
+      .some(value => ['ADMIN','ADMINISTRATEUR','SUPER_ADMIN'].includes(normalizeKey(value, '')));
+  }
+
   function legacyPermissionFromRole(role){
     const raw = normalizeKey(role, '');
     if(raw === 'ADMIN') return 'ADMIN';
@@ -427,7 +433,7 @@
   const service = {
     ROLES, ROLE_ALIASES, ROLE_LABELS, PERMISSIONS, PERMISSION_LABELS, PERMISSION_RANK,
     MODULE_PERMISSIONS, MODULE_ALIASES, LEGACY_ROLE_MODULES,
-    normalizeRole, roleLabel, getRole, normalizePermission, permissionLabel, hasPermission, isActive,
+    normalizeRole, roleLabel, getRole, isAdminRole, normalizePermission, permissionLabel, hasPermission, isActive,
     moduleIdOf, moduleKeys, moduleScopes, moduleScope, scopeAllowsAllPlayers,
     canUseModule, canViewModule, canEditModule, canDeleteData,
     canReadModule, canPerformAction,

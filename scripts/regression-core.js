@@ -159,6 +159,51 @@ function testPermissions(){
   assert.equal(permissions.canAccessPlayer(admin, {playerId:'p2', teamId:u16Id}), true);
   assert.equal(permissions.canPerformAction(admin, {id:'database'}, 'delete'), true);
 }
+
+function testPermissionUpdateDoesNotPromoteRole(){
+  const firestore = new Map();
+  const initial = permissions.defaultProfile({uid:'coach-permissions'}, 'ENTRAINEUR', 'SAISIE');
+  initial.allowedModules = ['presences'];
+  initial.modulePermissions = {presences:{read:true, write:false}};
+  firestore.set(initial.uid, structuredClone(initial));
+
+  const before = structuredClone(firestore.get(initial.uid));
+  firestore.set(initial.uid, {
+    ...before,
+    modulePermissions:{presences:{read:true, write:true}}
+  });
+  const reloaded = structuredClone(firestore.get(initial.uid));
+
+  assert.equal(reloaded.role, 'ENTRAINEUR');
+  assert.equal(permissions.isAdminRole(reloaded), false);
+  assert.equal(permissions.canManageCoreData(reloaded), false);
+  assert.equal(reloaded.permissionLevel, 'SAISIE');
+  assert.deepEqual(reloaded.modulePermissions, {presences:{read:true, write:true}});
+  assert.deepEqual(
+    Object.keys(reloaded).filter(key => JSON.stringify(reloaded[key]) !== JSON.stringify(before[key])),
+    ['modulePermissions']
+  );
+
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const adminDetection = appSource.match(/function isAdminLikeProfile[\s\S]*?\n}/)?.[0] || '';
+  assert(adminDetection && !adminDetection.includes('permissionLevel') && !adminDetection.includes('permissionLabel'), 'Une permission ne doit jamais être interprétée comme un rôle Admin.');
+  const accessSave = appSource.match(/if\(saveUid\)[\s\S]*?notifySuccess\('Accès utilisateur mis à jour\.'\);/)?.[0] || '';
+  assert(accessSave.includes('firebaseFns.updateDoc('), 'La carte modulePermissions doit remplacer l’ancienne valeur Firestore sans conserver des droits retirés.');
+}
+
+function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
+  const u13Id = teams.canonicalTeamId('U13 A');
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const sessionDate = '2026-09-15';
+  const roster = players.playersForTeamAtDate([
+    {documentId:'u13-valid', playerId:'u13-valid', nom:'Valid', prenom:'U13', status:'active', teamAssignments:[{teamId:u13Id, startDate:'2026-07-01', endDate:'2027-06-30'}]},
+    {documentId:'other-team', playerId:'other-team', nom:'Other', prenom:'Team', status:'active', teamAssignments:[{teamId:u16Id, startDate:'2026-07-01', endDate:'2027-06-30'}]},
+    {documentId:'no-active-team', playerId:'no-active-team', nom:'No', prenom:'Team', status:'active', teamAssignments:[{teamId:u13Id, startDate:'2026-10-01'}]},
+    {documentId:'ended-assignment', playerId:'ended-assignment', nom:'Ended', prenom:'U13', status:'active', teamAssignments:[{teamId:u13Id, startDate:'2025-07-01', endDate:'2026-06-30'}]},
+    {documentId:'valid-open-ended', playerId:'valid-open-ended', nom:'Open', prenom:'U13', status:'active', teamAssignments:[{teamId:u13Id, effectiveFrom:'2026-08-20'}]}
+  ], u13Id, sessionDate);
+  assert.deepEqual(roster.map(player => player.playerId).sort(), ['u13-valid','valid-open-ended']);
+}
 function testPlayerMeasurementsAreIndependentAndHistorical(){
   const first=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:'154',weightKg:'45,2',measuredAt:'2026-09-02'});
   const second=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:156,weightKg:46.1,measuredAt:'2026-11-10'});
@@ -667,6 +712,8 @@ testManualTeamEditOverridesDefaultCategoryTeam();
 testEditedTeamIdsDoNotReAddRemovedEligibleTeam();
 testPlayerFilteringAndDedupe();
 testPermissions();
+testPermissionUpdateDoesNotPromoteRole();
+testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate();
 testPlayerMeasurementsAreIndependentAndHistorical();
 testPermissionsRespectTeamHistoryAndModuleScope();
 testModuleAllPlayersScopeStaysModuleSpecific();
