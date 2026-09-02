@@ -97,11 +97,13 @@
     const seasonTeam = computedSub ? defaultClubTeamFromSubCategory(subCategory) : '';
     const explicitTeam = resolveClubTeam(fromHistory.team || player.team || player.equipe, subCategory || categorie);
     const team = explicitTeam || rule?.team || seasonTeam || asText(fromHistory.team || player.team || player.equipe || categorie);
-    const teamId = asText(fromHistory.teamId) || canonicalTeamId(team || categorie);
+    const teamId = resolveCanonicalTeamId(fromHistory.teamId || player.teamId || team || categorie);
     const explicitTeamIds = [
+      fromHistory.teamId,
+      player.teamId,
       ...(Array.isArray(fromHistory.teamIds) ? fromHistory.teamIds : []),
       ...(Array.isArray(player.teamIds) ? player.teamIds : [])
-    ].map(asText).filter(Boolean);
+    ].map(resolveCanonicalTeamId).filter(Boolean);
     const automaticTeamIds = teamCategoryRulesForSubCategory(subCategory).map(item => canonicalTeamId(item.team));
     const teamIds = [...new Set([
       teamId,
@@ -176,8 +178,20 @@
   }
 
   function canonicalTeamId(value){
-    const team = resolveClubTeam(value) || asText(value).toUpperCase().replace(/\s+/g, ' ');
-    return stableId('team', team || 'global');
+    return teamService()?.resolveCanonicalTeamId?.(value)
+      || stableId('team', resolveClubTeam(value) || asText(value).toUpperCase().replace(/\s+/g, ' ') || 'global');
+  }
+
+  function teamService(){
+    if(global.CoachPulseTeamsService) return global.CoachPulseTeamsService;
+    if(typeof module !== 'undefined' && module.exports && typeof require === 'function'){
+      try{ return require('./teams-service.js'); }catch(_error){}
+    }
+    return null;
+  }
+
+  function resolveCanonicalTeamId(value){
+    return teamService()?.resolveCanonicalTeamId?.(value) || canonicalTeamId(value);
   }
 
   function displayName(player){
@@ -299,13 +313,13 @@
       categorie: currentSnapshot.categorie || categorie,
       subCategory: currentSnapshot.subCategory || subCategory,
       team: currentSnapshot.team || team,
-      teamId: isOfficialTeamId(raw.teamId) ? asText(raw.teamId) : (currentSnapshot.teamId || canonicalTeamId(currentSnapshot.team || team || categorie || 'global')),
+      teamId: raw.teamId ? resolveCanonicalTeamId(raw.teamId) : (currentSnapshot.teamId || canonicalTeamId(currentSnapshot.team || team || categorie || 'global')),
       teamIds: [...new Set([
-        isOfficialTeamId(raw.teamId) ? asText(raw.teamId) : '',
+        raw.teamId ? resolveCanonicalTeamId(raw.teamId) : '',
         currentSnapshot.teamId,
         ...(Array.isArray(currentSnapshot.teamIds) ? currentSnapshot.teamIds : []),
         ...(Array.isArray(raw.teamIds) ? raw.teamIds : [])
-      ].map(asText).filter(Boolean))],
+      ].map(resolveCanonicalTeamId).filter(Boolean))],
       poste: asText(raw.poste || raw.position),
       numero: asText(raw.numero || raw.number),
       photo: asText(raw.photo || raw.avatar),
@@ -409,13 +423,17 @@
   }
 
   function assignmentTeamIds(assignment={}){
-    return [...new Set([
+    const explicit = [
       assignmentTeamId(assignment),
+      assignment.team, assignment.equipe,
+      assignment.team?.name, assignment.teamSnapshot?.name,
       ...(Array.isArray(assignment.teamIds) ? assignment.teamIds : []),
       ...(Array.isArray(assignment.team_ids) ? assignment.team_ids : []),
       ...(Array.isArray(assignment.team?.teamIds) ? assignment.team.teamIds : []),
       ...(Array.isArray(assignment.teamSnapshot?.teamIds) ? assignment.teamSnapshot.teamIds : [])
-    ].map(asText).filter(Boolean))];
+    ].map(resolveCanonicalTeamId).filter(Boolean);
+    const fallback = explicit.length ? [] : [assignment.category, assignment.categorie, assignment.subCategory, assignment.sousCategorie];
+    return [...new Set([...explicit, ...fallback.map(resolveCanonicalTeamId).filter(Boolean)])];
   }
 
   function assignmentContainsDate(assignment={}, dateValue){
@@ -434,7 +452,7 @@
   }
 
   function playerAssignedToTeamAtDate(player={}, teamId='', dateValue){
-    const targetTeamId = asText(teamId);
+    const targetTeamId = resolveCanonicalTeamId(teamId);
     const targetDate = dateKey(dateValue);
     if(!targetTeamId || !targetDate) return false;
     const assignments = teamAssignments(player);
@@ -501,10 +519,35 @@
     return {firebaseFns, db};
   }
 
+  function chunks(values=[], size=10){
+    const unique = [...new Set(values.map(asText).filter(Boolean))];
+    const out = [];
+    for(let index=0;index<unique.length;index+=size) out.push(unique.slice(index,index+size));
+    return out;
+  }
+
+  async function readScopedPlayerRows(firebaseFns, db, authorizedTeamIds=[]){
+    const canonicalIds = [...new Set(authorizedTeamIds.map(resolveCanonicalTeamId).filter(Boolean))];
+    if(!canonicalIds.length) return [];
+    const reads = [];
+    chunks(canonicalIds).forEach(teamChunk => {
+      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamId', 'in', teamChunk))));
+      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamIds', 'array-contains-any', teamChunk))));
+    });
+    const settled = await Promise.all(reads);
+    const byId = new Map();
+    settled.forEach(snap => snap.forEach(docSnap => byId.set(docSnap.id, normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()}))));
+    return [...byId.values()];
+  }
+
   async function listPlayers(ctx={}, filters={}){
     if(!ctx.firebaseFns || !ctx.db) return filterPlayers(readCachedPlayers(), filters);
     const {firebaseFns, db} = firestoreContext(ctx);
     const now = Date.now();
+    const scoped = ctx.accessAllPlayers === false;
+    const cacheKey = scoped ? [...new Set((ctx.authorizedTeamIds || []).map(resolveCanonicalTeamId).filter(Boolean))].sort().join(',') : '*';
+    if(firestorePlayersCache.key !== cacheKey) invalidatePlayersCache();
+    firestorePlayersCache.key = cacheKey;
     if(!ctx.forceRefresh && firestorePlayersCache.rows && now - firestorePlayersCache.loadedAt < FIRESTORE_CACHE_TTL_MS){
       return filterPlayers(dedupePlayers([...writeFirestoreCache(firestorePlayersCache.rows), ...parseCache(CUSTOM_CACHE_KEY)]), filters);
     }
@@ -512,10 +555,14 @@
       const pendingRows = await firestorePlayersCache.pending;
       return filterPlayers(dedupePlayers([...writeFirestoreCache(pendingRows), ...parseCache(CUSTOM_CACHE_KEY)]), filters);
     }
-    firestorePlayersCache.pending = firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION))
-      .then(snap => {
+    firestorePlayersCache.pending = (scoped
+      ? readScopedPlayerRows(firebaseFns, db, ctx.authorizedTeamIds || [])
+      : firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION)).then(snap => {
         const rows = [];
         snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()})));
+        return rows;
+      }))
+      .then(rows => {
         firestorePlayersCache.rows = rows;
         firestorePlayersCache.loadedAt = Date.now();
         return rows;
@@ -641,7 +688,7 @@
 
   const service = {
     CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
-    stableId, canonicalPlayerId, canonicalTeamId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
+    stableId, canonicalPlayerId, canonicalTeamId, resolveCanonicalTeamId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
     categorySnapshotForSeason, playerSeasonSnapshot, playerForSeason, normalizeTeamFromCategory, defaultClubTeamFromSubCategory, resolveClubTeam,
     dateKey, assignmentTeamId, assignmentContainsDate, teamAssignments, playerAssignedToTeamAtDate, playersForTeamAtDate,
     teamCategoryRuleForSubCategory, teamCategoryRulesForSubCategory, teamCategoryRuleForTeam, displayName, splitName,

@@ -292,8 +292,7 @@ function guardAdminAction(label='Action réservée aux éditeurs autorisés'){
   return false;
 }
 function hasGlobalDataAccess(){
-  return isAdminLikeProfile(currentProfile || {})
-    || isSeedAdminEmail(currentProfile?.email || currentUser?.email || '');
+  return isAdminLikeProfile(currentProfile || {});
 }
 function guardGlobalDataExportAction(label='Export global réservé aux administrateurs complets'){
   if(hasGlobalDataAccess()) return true;
@@ -940,14 +939,6 @@ async function configureAuthPersistence(){
   }
 }
 
-function isSeedAdminEmail(email=''){
-  const value = String(email || '').toLowerCase();
-  return [
-    'maxence.boisdron',
-    'sylvain.ostard@gmail.com'
-  ].some(fragment => value.includes(fragment));
-}
-
 function isAdminLikeProfile(profile={}){
   const service = permissionsService();
   if(service?.isAdminRole) return service.isAdminRole(profile);
@@ -956,51 +947,21 @@ function isAdminLikeProfile(profile={}){
     .some(value => /^(ADMIN|ADMINISTRATEUR|SUPER_ADMIN)$/i.test(String(value || '').trim()));
 }
 
-function applyAdminProfileRepair(profile, service){
-  const modules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
-  profile.legacyRole = 'ADMIN';
-  profile.role = service?.normalizeRole ? service.normalizeRole(profile.businessRole || profile.role || 'DIRIGEANT') : (profile.role || 'DIRIGEANT');
-  profile.roleLabel = service?.roleLabel ? service.roleLabel(profile.role) : profile.role;
-  profile.permissionLevel = 'ADMIN';
-  profile.permissionLabel = service?.permissionLabel ? service.permissionLabel('ADMIN') : 'Admin';
-  profile.allowedModules = modules;
-  profile.status = 'ACTIVE';
-  return profile;
-}
-
 async function ensureUserProfile(user){
   const ref = firebaseFns.doc(db, 'staff_members', user.uid);
   const snap = await firebaseFns.getDoc(ref);
   const service = permissionsService();
-  const seedAdmin = isSeedAdminEmail(user.email);
   if(snap.exists()){
     currentProfile = normalizeLoadedStaffProfile({uid:user.uid, ...snap.data()});
-    const legacyRole = currentProfile.legacyRole || currentProfile.role || currentUserRole;
-    if(seedAdmin || isAdminLikeProfile(currentProfile)) applyAdminProfileRepair(currentProfile, service);
-    if(service?.normalizePermission && currentProfile.permissionLevel === 'ADMIN' && (!Array.isArray(currentProfile.allowedModules) || !currentProfile.allowedModules.length)){
-      currentProfile.allowedModules = moduleRegistry().filter(module => module.id !== 'home').map(module => module.id);
-    }
     if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(currentProfile.status || '').toUpperCase())) throw new Error('Compte inactif. Contacte un administrateur.');
     const loginPatch = {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email};
-    if(seedAdmin || isAdminLikeProfile(currentProfile)){
-      Object.assign(loginPatch, {legacyRole, role:currentProfile.role, roleLabel:currentProfile.roleLabel, permissionLevel:currentProfile.permissionLevel, permissionLabel:currentProfile.permissionLabel, allowedModules:currentProfile.allowedModules || [], status:currentProfile.status || 'ACTIVE'});
-    }else{
-      Object.assign(loginPatch, {
-        authorizedTeamIds:currentProfile.authorizedTeamIds || [],
-        teamIds:currentProfile.teamIds || [],
-        allowedTeamIds:currentProfile.allowedTeamIds || []
-      });
-    }
     await firebaseFns.setDoc(ref, loginPatch, {merge:true});
     return currentProfile;
   }
-  const email = (user.email || '').toLowerCase();
-  const isSeedAdmin = isSeedAdminEmail(email);
-  const role = isSeedAdmin ? 'DIRIGEANT' : 'ENTRAINEUR';
-  const permissionLevel = isSeedAdmin ? 'ADMIN' : 'LECTEUR';
+  const role = 'ENTRAINEUR';
+  const permissionLevel = 'LECTEUR';
   currentProfile = service?.defaultProfile ? service.defaultProfile(user, role, permissionLevel) : {uid:user.uid, email:user.email, name:user.displayName || user.email, role, permissionLevel, scope:'CoachPulse', status:'ACTIVE'};
   normalizeProfileAccessFields(currentProfile);
-  if(isSeedAdmin) applyAdminProfileRepair(currentProfile, service);
   await firebaseFns.setDoc(ref, {...currentProfile, createdAt:firebaseFns.serverTimestamp(), updatedAt:firebaseFns.serverTimestamp(), lastLoginAt:firebaseFns.serverTimestamp()}, {merge:true});
   return currentProfile;
 }
@@ -4327,10 +4288,14 @@ function normalizeAthleticRows(rawRows=[], players=[]){
   });
   return [...grouped.values()].sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
 }
-async function moduleListPlayers(){
+async function moduleListPlayers(filters={}){
   if(!requireAuth()) throw new Error('Connexion Firebase requise.');
   const service = playersService();
-  if(service?.readFirestorePlayers && db && currentUser) return service.readFirestorePlayers({firebaseFns, db});
+  if(service?.readFirestorePlayers && db && currentUser){
+    const moduleId = filters.moduleId || filters.module || '';
+    const accessAllPlayers = isAdmin() || (moduleId && canAccessAllPlayersForModule(moduleId));
+    return service.readFirestorePlayers({firebaseFns, db, accessAllPlayers, authorizedTeamIds:getAuthorizedTeamIds()});
+  }
   if(service?.readCachedPlayers) return service.readCachedPlayers();
   const byId = new Map();
   parseStoredJson('coachpulse:centralPlayers', []).forEach(p => { const id=p.playerId||p.id; if(id) byId.set(id,{...p,playerId:id,id}); });
@@ -4343,7 +4308,7 @@ async function moduleListPlayers(){
 }
 async function listPlayers(filters={}){
   return measureAsync('listPlayers', async () => {
-    const players = await moduleListPlayers();
+    const players = await moduleListPlayers(filters);
     const service = playersService();
     const filtered = service?.filterPlayers ? service.filterPlayers(players, filters) : sortPlayersForApp(players);
     const hints = await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints());
