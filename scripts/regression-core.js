@@ -77,6 +77,52 @@ function testTeamIdsStayShared(){
   assert.equal(teams.categoryForSubCategory('U15'), 'U16');
 }
 
+function testTeamIdNormalizationIsIdempotent(){
+  const officialNames = ['U7 A','U9 A','U11 A','U13 A','U13 B','U16 A','U19','R1'];
+  officialNames.forEach(name => {
+    const expected = `team-${name.toLowerCase().replace(/\s+/g, '-')}`;
+    assert.equal(teams.canonicalTeamId(name), expected);
+    assert.equal(teams.canonicalTeamId(expected), expected);
+    assert.equal(teams.canonicalTeamId(expected.toUpperCase()), expected);
+    let repeated = name;
+    for(let index=0;index<20;index++) repeated = teams.canonicalTeamId(repeated);
+    assert.equal(repeated, expected, `${name} doit rester stable après 20 normalisations.`);
+  });
+  assert.equal(teams.canonicalTeamId('team-team-team-u13-a'), 'team-u13-a');
+  ['global','team-global','team-team-global','team-team-team-global'].forEach(value => {
+    assert.equal(teams.canonicalTeamId(value), '', `${value} ne doit jamais être une équipe valide.`);
+    assert.equal(players.canonicalTeamId(value), '', `${value} doit être supprimé des affectations joueuses.`);
+  });
+
+  const seed = {
+    documentId:'stable-team-player', playerId:'stable-team-player', nom:'DUPONT', prenom:'AVA', birth:'2013-02-01',
+    categorie:'U13', subCategory:'U13', team:'U13 A', teamId:'team-team-u13-a',
+    teamIds:['team-u13-a','team-team-u13-a','team-global','team-team-global'],
+    teamAssignments:[
+      {teamId:'team-team-u13-a', teamIds:['team-u13-a','team-team-u13-a','team-global'], startDate:'2026-07-01'},
+      {teamId:'team-u11-a', teamIds:['TEAM-U11-A'], endDate:'2026-08-31'}
+    ],
+    seasonHistory:{'2026-2027':{categorie:'U13',subCategory:'U13',team:'U13 A',teamId:'team-team-team-u13-a',teamIds:['team-u13-a','team-global']}}
+  };
+  let normalized = players.normalizePlayerForWrite(seed, {nowIso:'2026-09-02T00:00:00.000Z'});
+  const teamState = value => ({teamId:value.teamId, teamIds:value.teamIds, teamAssignments:value.teamAssignments, seasonHistory:value.seasonHistory});
+  const expectedState = structuredClone(teamState(normalized));
+  for(let index=0;index<20;index++){
+    normalized = players.normalizePlayerForWrite(normalized, {nowIso:'2026-09-02T00:00:00.000Z'});
+    assert.deepEqual(teamState(normalized), expectedState, `Les références Team ont changé à la normalisation ${index + 2}.`);
+  }
+  assert.deepEqual(normalized.teamIds, ['team-u13-a']);
+  assert(!JSON.stringify(teamState(normalized)).includes('global'));
+
+  const playersSource = fs.readFileSync('shared/services/players-service.js', 'utf8');
+  const readPath = playersSource.match(/async function listPlayers[\s\S]*?\n  }\n\n  async function readFirestorePlayers/)?.[0] || '';
+  assert(readPath && !readPath.includes('setDoc('), 'Une lecture de players ne doit jamais réécrire Firestore.');
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const migration = appSource.match(/async function adminRepairTeamIds[\s\S]*?\n}\nasync function adminListTeamsAndSettings/)?.[0] || '';
+  assert(migration.includes('normalizePlayerTeamReferences'), 'La migration doit utiliser le normaliseur canonique partagé.');
+  assert(migration.includes('teamAssignments') && migration.includes('seasonHistory'), 'La migration doit réparer les affectations et historiques sans les supprimer.');
+}
+
 function testManualTeamEditOverridesDefaultCategoryTeam(){
   const edited = players.normalizePlayer({
     playerId:'player-u16-surclassement',
@@ -161,6 +207,7 @@ function testPermissions(){
 }
 
 function testPermissionUpdateDoesNotPromoteRole(){
+  const u13Id = teams.canonicalTeamId('U13 A');
   const firestore = new Map();
   const initial = permissions.defaultProfile({uid:'coach-permissions'}, 'ENTRAINEUR', 'SAISIE');
   initial.allowedModules = ['presences'];
@@ -213,6 +260,32 @@ function testPermissionUpdateDoesNotPromoteRole(){
   assert.deepEqual(permissions.getAuthorizedTeamIds(staleTeams), [], 'Les champs équipe historiques ne doivent pas réinjecter un accès supprimé du modèle canonique.');
   assert(accessSave.includes('legacyRole:role') && accessSave.includes('isAdmin:permissionLevel === \'ADMIN\''), 'La sauvegarde doit neutraliser les marqueurs admin historiques.');
   assert(appSource.includes('startStaffProfileSubscription();'), 'Le contexte utilisateur doit écouter les modifications Firestore en temps réel.');
+  assert(!appSource.includes('isSeedAdminEmail'), 'Aucun email, même historique, ne doit déclencher une promotion Admin.');
+  assert(!appSource.includes('applyAdminProfileRepair'), 'Le login ne doit jamais réparer un profil existant en augmentant ses droits.');
+  const profileLoad = appSource.match(/async function ensureUserProfile[\s\S]*?\n}\n/)?.[0] || '';
+  assert(profileLoad.includes("const loginPatch = {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email}"));
+  assert(!profileLoad.includes("permissionLevel = 'ADMIN'") && !profileLoad.includes('allowedModules = modules'));
+
+  for(const level of ['LECTEUR','EDITEUR']){
+    const stored = {
+      uid:`maxence-coach-${level.toLowerCase()}`,
+      email:'maxence.boisdron+coach@club.test',
+      role:'ENTRAINEUR', businessRole:'ENTRAINEUR', legacyRole:'ADMIN', userRole:'ADMIN',
+      permissionLevel:level, permission:'ADMIN', accessLevel:'ADMIN', isAdmin:true, admin:true,
+      authorizedTeamIds:[u13Id], teamIds:[u13Id], allowedTeamIds:[u13Id],
+      allowedModules:['presences'], modulePermissions:{presences:level === 'EDITEUR' ? 'edit' : 'read'}, status:'ACTIVE'
+    };
+    const afterLoad = structuredClone(stored);
+    const afterRefresh = structuredClone(afterLoad);
+    const afterReconnect = structuredClone(afterRefresh);
+    [afterLoad, afterRefresh, afterReconnect].forEach(profile => {
+      assert.equal(permissions.getRole(profile), 'ENTRAINEUR');
+      assert.equal(permissions.normalizePermission(null, profile), level);
+      assert.equal(permissions.isAdminRole(profile), false);
+      assert.deepEqual(permissions.getAuthorizedTeamIds(profile), [u13Id]);
+      assert.deepEqual(profile.allowedModules, ['presences']);
+    });
+  }
 }
 
 function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
@@ -233,6 +306,17 @@ function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
     {documentId:'secondary-u11', playerId:'secondary-u11', nom:'Bompard', prenom:'Lisa', status:'active', teamId:u13Id, teamIds:[u13Id, u11Id]}
   ], u11Id, sessionDate);
   assert.deepEqual(secondaryRoster.map(player => player.playerId), ['secondary-u11'], 'Une joueuse avec un second teamId doit apparaître dans la feuille de présence de cette équipe.');
+
+  const u13bId = teams.canonicalTeamId('U13 B');
+  const multiTeamRows = [
+    {documentId:'multi-valid', playerId:'multi-valid', nom:'Multi', prenom:'Team', status:'active', teamId:u13Id, teamIds:[u11Id,u13Id,u16Id]},
+    {documentId:'u13b-only', playerId:'u13b-only', nom:'Only', prenom:'U13B', status:'active', teamId:u13bId, teamIds:[u13bId]},
+    {documentId:'fake-global', playerId:'fake-global', nom:'Fake', prenom:'Global', status:'active', teamId:'team-team-global', teamIds:['team-global']}
+  ];
+  assert.deepEqual(players.playersForTeamAtDate(multiTeamRows, u11Id, sessionDate).map(p => p.playerId), ['multi-valid']);
+  assert.deepEqual(players.playersForTeamAtDate(multiTeamRows, u13Id, sessionDate).map(p => p.playerId), ['multi-valid']);
+  assert.deepEqual(players.playersForTeamAtDate(multiTeamRows, u13bId, sessionDate).map(p => p.playerId), ['u13b-only']);
+  assert.deepEqual(players.playersForTeamAtDate(multiTeamRows, u16Id, sessionDate).map(p => p.playerId), ['multi-valid']);
 }
 function testPlayerMeasurementsAreIndependentAndHistorical(){
   const first=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:'154',weightKg:'45,2',measuredAt:'2026-09-02'});
@@ -408,6 +492,7 @@ function testFirestoreRulesProtectExistingAndIncomingScope(){
     assert(rulesSource.includes(`match /${collection}/`), `La collection ${collection} doit être déclarée dans firestore.rules.`);
   });
   assert(rulesSource.includes('canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data)'), 'Les updates doivent valider l’ancien et le nouveau périmètre teamId/playerId.');
+  assert(rulesSource.includes("canAccessModule('presences')"), 'Présences doit pouvoir lire les joueuses du périmètre via une requête Firestore filtrée.');
   assert(rulesSource.includes('match /{document=**}'), 'Les règles doivent conserver le bloc catch-all.');
   assert(rulesSource.includes('allow read, write: if false;'), 'Le bloc catch-all doit refuser les accès non déclarés.');
 }
@@ -753,6 +838,7 @@ function testPresenceInteractionsStayNonBlocking(){
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
+testTeamIdNormalizationIsIdempotent();
 testManualTeamEditOverridesDefaultCategoryTeam();
 testEditedTeamIdsDoNotReAddRemovedEligibleTeam();
 testPlayerFilteringAndDedupe();
@@ -779,6 +865,7 @@ testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
 
 Promise.resolve()
+  .then(testScopedPlayerReadFiltersInFirestore)
   .then(testMeasurementSaveWithoutSelectedInjuryPersistsAfterReload)
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)
   .then(() => {
