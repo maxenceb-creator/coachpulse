@@ -96,17 +96,19 @@
     const categorie = rule?.category || normalizeTeamFromCategory(subCategory || fromHistory.categorie || player.categorie || player.category);
     const seasonTeam = computedSub ? defaultClubTeamFromSubCategory(subCategory) : '';
     const explicitTeam = resolveClubTeam(fromHistory.team || player.team || player.equipe, subCategory || categorie);
-    const team = explicitTeam || rule?.team || seasonTeam || asText(fromHistory.team || player.team || player.equipe || categorie);
-    const teamId = asText(fromHistory.teamId) || canonicalTeamId(team || categorie);
+    const team = explicitTeam || rule?.team || seasonTeam || '';
+    const teamId = canonicalTeamId(fromHistory.teamId || team || categorie);
     const explicitTeamIds = [
+      fromHistory.teamId,
+      player.teamId,
       ...(Array.isArray(fromHistory.teamIds) ? fromHistory.teamIds : []),
       ...(Array.isArray(player.teamIds) ? player.teamIds : [])
-    ].map(asText).filter(Boolean);
-    const automaticTeamIds = teamCategoryRulesForSubCategory(subCategory).map(item => canonicalTeamId(item.team));
+    ].map(canonicalTeamId).filter(Boolean);
+    const automaticTeamIds = team ? [canonicalTeamId(team)] : [];
     const teamIds = [...new Set([
       teamId,
       ...(explicitTeamIds.length ? explicitTeamIds : automaticTeamIds)
-    ].map(asText).filter(Boolean))];
+    ].map(canonicalTeamId).filter(Boolean))];
     return {season:selectedSeason, categorie, subCategory, team, teamId, teamIds};
   }
 
@@ -119,7 +121,7 @@
       subCategory:snapshot.subCategory || normalized.subCategory || '',
       sousCategorie:snapshot.subCategory || normalized.sousCategorie || normalized.subCategory || '',
       team:snapshot.team || normalized.team || '',
-      teamId:snapshot.teamId || normalized.teamId || canonicalTeamId(snapshot.team || normalized.team || snapshot.categorie || normalized.categorie || 'global'),
+      teamId:snapshot.teamId || normalized.teamId || canonicalTeamId(snapshot.team || normalized.team || snapshot.categorie || normalized.categorie),
       teamIds:[...new Set([
         snapshot.teamId,
         normalized.teamId,
@@ -176,8 +178,50 @@
   }
 
   function canonicalTeamId(value){
-    const team = resolveClubTeam(value) || asText(value).toUpperCase().replace(/\s+/g, ' ');
-    return stableId('team', team || 'global');
+    return teamsService()?.canonicalTeamId?.(value) || '';
+  }
+
+  function canonicalTeamIds(values=[]){
+    return [...new Set((Array.isArray(values) ? values : [values]).map(canonicalTeamId).filter(Boolean))];
+  }
+
+  function teamsService(){
+    if(global.CoachPulseTeamsService) return global.CoachPulseTeamsService;
+    if(typeof module !== 'undefined' && module.exports && typeof require === 'function'){
+      try{ return require('./teams-service.js'); }catch(_error){}
+    }
+    return null;
+  }
+
+  function normalizeAssignmentTeamReferences(raw={}){
+    const sourceIds = [
+      raw.teamId, raw.team_id, raw.team?.teamId, raw.teamSnapshot?.teamId,
+      raw.team, raw.equipe, raw.team?.name, raw.teamSnapshot?.name,
+      ...(Array.isArray(raw.teamIds) ? raw.teamIds : []),
+      ...(Array.isArray(raw.team_ids) ? raw.team_ids : []),
+      ...(Array.isArray(raw.team?.teamIds) ? raw.team.teamIds : []),
+      ...(Array.isArray(raw.teamSnapshot?.teamIds) ? raw.teamSnapshot.teamIds : [])
+    ];
+    const explicitTeamIds = canonicalTeamIds(sourceIds);
+    const teamIds = explicitTeamIds.length ? explicitTeamIds : canonicalTeamIds([raw.subCategory, raw.sousCategorie, raw.categorie, raw.category]);
+    return {...raw, teamId:teamIds[0] || '', teamIds};
+  }
+
+  function normalizeSeasonHistoryTeamReferences(history={}){
+    if(!history || typeof history !== 'object' || Array.isArray(history)) return {};
+    return Object.fromEntries(Object.entries(history).map(([season, snapshot]) => [season, normalizeAssignmentTeamReferences(snapshot || {})]));
+  }
+
+  function normalizePlayerTeamReferences(raw={}){
+    const direct = normalizeAssignmentTeamReferences(raw);
+    const history = normalizeSeasonHistoryTeamReferences(raw.seasonHistory || {});
+    const assignments = Array.isArray(raw.teamAssignments) ? raw.teamAssignments.map(normalizeAssignmentTeamReferences) : raw.teamAssignments;
+    return {
+      teamId:direct.teamId,
+      teamIds:direct.teamIds,
+      seasonHistory:history,
+      ...(Array.isArray(assignments) ? {teamAssignments:assignments} : {})
+    };
   }
 
   function displayName(player){
@@ -259,7 +303,7 @@
     const categorie = isOfficialCategory(storedCategorie) ? storedCategorie : sourceCategory;
     const subCategory = isOfficialSubCategory(sourceSubCategory) ? sourceSubCategory : storedSubCategory;
     const explicitTeam = resolveClubTeam(raw.team || raw.equipe, subCategory || categorie);
-    const team = explicitTeam || sourceRule?.team || asText(sourceCategory || normalizeTeamFromCategory(subCategory || categorie));
+    const team = explicitTeam || sourceRule?.team || defaultClubTeamFromSubCategory(subCategory || categorie) || '';
     const importedId = raw.id && !String(raw.id).startsWith('manual-') ? asText(raw.id) : '';
     const lockedId = asText(raw.documentId || raw.lockPlayerId || raw.preservePlayerId);
     const previousId = asText(raw.playerId || importedId);
@@ -272,18 +316,18 @@
       previousId && previousId !== playerId ? previousId : ''
     ].map(asText).filter(Boolean))];
     const status = asText(raw.status || 'active').toLowerCase();
-    const seasonHistory = raw.seasonHistory && typeof raw.seasonHistory === 'object' ? {...raw.seasonHistory} : {};
+    const seasonHistory = normalizeSeasonHistoryTeamReferences(raw.seasonHistory || {});
     if(sourceSeason) seasonHistory[sourceSeason] = {
       categorie,
       subCategory,
       team,
-      teamId: asText(raw.teamId) || canonicalTeamId(team || categorie),
-      teamIds: [...new Set([
-        asText(raw.teamId),
+      teamId: canonicalTeamId(raw.teamId || team || categorie),
+      teamIds: canonicalTeamIds([
+        raw.teamId,
         ...(Array.isArray(raw.teamIds) ? raw.teamIds : []),
         canonicalTeamId(team || categorie)
-      ].map(asText).filter(Boolean))],
-      updatedAtIso: asText(raw.updatedAtIso || raw.createdAtIso || '')
+      ]),
+      updatedAtIso: asText(seasonHistory[sourceSeason]?.updatedAtIso || '')
     };
     const currentSnapshot = categorySnapshotForSeason({...raw, birth, categorie, subCategory, team, seasonHistory}, currentSeason);
 
@@ -299,13 +343,13 @@
       categorie: currentSnapshot.categorie || categorie,
       subCategory: currentSnapshot.subCategory || subCategory,
       team: currentSnapshot.team || team,
-      teamId: isOfficialTeamId(raw.teamId) ? asText(raw.teamId) : (currentSnapshot.teamId || canonicalTeamId(currentSnapshot.team || team || categorie || 'global')),
-      teamIds: [...new Set([
-        isOfficialTeamId(raw.teamId) ? asText(raw.teamId) : '',
+      teamId: canonicalTeamId(raw.teamId) || currentSnapshot.teamId || canonicalTeamId(currentSnapshot.team || team || categorie),
+      teamIds: canonicalTeamIds([
+        raw.teamId,
         currentSnapshot.teamId,
         ...(Array.isArray(currentSnapshot.teamIds) ? currentSnapshot.teamIds : []),
         ...(Array.isArray(raw.teamIds) ? raw.teamIds : [])
-      ].map(asText).filter(Boolean))],
+      ]),
       poste: asText(raw.poste || raw.position),
       numero: asText(raw.numero || raw.number),
       photo: asText(raw.photo || raw.avatar),
@@ -322,6 +366,7 @@
       seasonStart: currentSeason ? `${currentSeason.slice(0,4)}-07-01` : '',
       seasonEnd: currentSeason ? `${currentSeason.slice(5)}-06-30` : '',
       seasonHistory,
+      ...(Array.isArray(raw.teamAssignments) ? {teamAssignments:raw.teamAssignments.map(normalizeAssignmentTeamReferences)} : {}),
       status: ACTIVE_STATUSES.includes(status) ? status : status || 'active',
       source: asText(raw.source || 'CoachPulse')
     };
@@ -380,7 +425,7 @@
       categorie:snapshot.categorie || normalized.categorie,
       subCategory:snapshot.subCategory || normalized.subCategory,
       team:snapshot.team || normalized.team,
-      teamId:snapshot.teamId || canonicalTeamId(snapshot.team || normalized.team || snapshot.categorie || normalized.categorie || 'global'),
+      teamId:snapshot.teamId || canonicalTeamId(snapshot.team || normalized.team || snapshot.categorie || normalized.categorie),
       teamIds:[...new Set([
         snapshot.teamId,
         normalized.teamId,
@@ -409,13 +454,15 @@
   }
 
   function assignmentTeamIds(assignment={}){
-    return [...new Set([
+    return canonicalTeamIds([
       assignmentTeamId(assignment),
+      assignment.team, assignment.equipe,
+      assignment.team?.name, assignment.teamSnapshot?.name,
       ...(Array.isArray(assignment.teamIds) ? assignment.teamIds : []),
       ...(Array.isArray(assignment.team_ids) ? assignment.team_ids : []),
       ...(Array.isArray(assignment.team?.teamIds) ? assignment.team.teamIds : []),
       ...(Array.isArray(assignment.teamSnapshot?.teamIds) ? assignment.teamSnapshot.teamIds : [])
-    ].map(asText).filter(Boolean))];
+    ]);
   }
 
   function assignmentContainsDate(assignment={}, dateValue){
@@ -434,7 +481,7 @@
   }
 
   function playerAssignedToTeamAtDate(player={}, teamId='', dateValue){
-    const targetTeamId = asText(teamId);
+    const targetTeamId = canonicalTeamId(teamId);
     const targetDate = dateKey(dateValue);
     if(!targetTeamId || !targetDate) return false;
     const assignments = teamAssignments(player);
@@ -481,7 +528,15 @@
   }
 
   function readCachedPlayers(){
-    return dedupePlayers([...parseCache(CACHE_KEY), ...parseCache(CUSTOM_CACHE_KEY)]);
+    const centralRaw = parseCache(CACHE_KEY);
+    const customRaw = parseCache(CUSTOM_CACHE_KEY);
+    const central = dedupePlayers(centralRaw);
+    const custom = dedupePlayers(customRaw);
+    try{
+      if(JSON.stringify(centralRaw) !== JSON.stringify(central)) global.localStorage?.setItem(CACHE_KEY, JSON.stringify(central));
+      if(JSON.stringify(customRaw) !== JSON.stringify(custom)) global.localStorage?.setItem(CUSTOM_CACHE_KEY, JSON.stringify(custom));
+    }catch(_error){}
+    return dedupePlayers([...central, ...custom]);
   }
 
   function writeCache(players){
@@ -501,10 +556,35 @@
     return {firebaseFns, db};
   }
 
+  function chunks(values=[], size=10){
+    const unique = [...new Set(values.map(asText).filter(Boolean))];
+    const out = [];
+    for(let index=0;index<unique.length;index+=size) out.push(unique.slice(index,index+size));
+    return out;
+  }
+
+  async function readScopedPlayerRows(firebaseFns, db, authorizedTeamIds=[]){
+    const canonicalIds = [...new Set(authorizedTeamIds.map(canonicalTeamId).filter(Boolean))];
+    if(!canonicalIds.length) return [];
+    const reads = [];
+    chunks(canonicalIds).forEach(teamChunk => {
+      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamId', 'in', teamChunk))));
+      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamIds', 'array-contains-any', teamChunk))));
+    });
+    const settled = await Promise.all(reads);
+    const byId = new Map();
+    settled.forEach(snap => snap.forEach(docSnap => byId.set(docSnap.id, normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()}))));
+    return [...byId.values()];
+  }
+
   async function listPlayers(ctx={}, filters={}){
     if(!ctx.firebaseFns || !ctx.db) return filterPlayers(readCachedPlayers(), filters);
     const {firebaseFns, db} = firestoreContext(ctx);
     const now = Date.now();
+    const scoped = ctx.accessAllPlayers === false;
+    const cacheKey = scoped ? [...new Set((ctx.authorizedTeamIds || []).map(canonicalTeamId).filter(Boolean))].sort().join(',') : '*';
+    if(firestorePlayersCache.key !== cacheKey) invalidatePlayersCache();
+    firestorePlayersCache.key = cacheKey;
     if(!ctx.forceRefresh && firestorePlayersCache.rows && now - firestorePlayersCache.loadedAt < FIRESTORE_CACHE_TTL_MS){
       return filterPlayers(dedupePlayers([...writeFirestoreCache(firestorePlayersCache.rows), ...parseCache(CUSTOM_CACHE_KEY)]), filters);
     }
@@ -512,10 +592,14 @@
       const pendingRows = await firestorePlayersCache.pending;
       return filterPlayers(dedupePlayers([...writeFirestoreCache(pendingRows), ...parseCache(CUSTOM_CACHE_KEY)]), filters);
     }
-    firestorePlayersCache.pending = firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION))
-      .then(snap => {
+    firestorePlayersCache.pending = (scoped
+      ? readScopedPlayerRows(firebaseFns, db, ctx.authorizedTeamIds || [])
+      : firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION)).then(snap => {
         const rows = [];
         snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()})));
+        return rows;
+      }))
+      .then(rows => {
         firestorePlayersCache.rows = rows;
         firestorePlayersCache.loadedAt = Date.now();
         return rows;
@@ -641,7 +725,9 @@
 
   const service = {
     CACHE_KEY, CUSTOM_CACHE_KEY, COLLECTION, PLAYER_REF_COLLECTIONS,
-    stableId, canonicalPlayerId, canonicalTeamId, seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
+    stableId, canonicalPlayerId, canonicalTeamId, canonicalTeamIds, normalizeAssignmentTeamReferences,
+    normalizeSeasonHistoryTeamReferences, normalizePlayerTeamReferences,
+    seasonFromDate, seasonEndYear, birthYear, subCategoryForSeason,
     categorySnapshotForSeason, playerSeasonSnapshot, playerForSeason, normalizeTeamFromCategory, defaultClubTeamFromSubCategory, resolveClubTeam,
     dateKey, assignmentTeamId, assignmentContainsDate, teamAssignments, playerAssignedToTeamAtDate, playersForTeamAtDate,
     teamCategoryRuleForSubCategory, teamCategoryRulesForSubCategory, teamCategoryRuleForTeam, displayName, splitName,

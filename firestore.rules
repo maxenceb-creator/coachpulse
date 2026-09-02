@@ -262,29 +262,10 @@ service cloud.firestore {
       return false;
     }
 
-    function isSeedAdminEmail() {
-      return signedIn()
-        && request.auth.token.email != null
-        && (
-          request.auth.token.email.matches('.*maxence\\.boisdron.*')
-          || request.auth.token.email == 'sylvain.ostard@gmail.com'
-        );
-    }
-
     function isAllowedSelfStaffMaintenance(uid) {
       return signedIn()
         && request.auth.uid == uid
         && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email']);
-    }
-
-    function isAllowedSeedAdminRepair(uid) {
-      return signedIn()
-        && request.auth.uid == uid
-        && isSeedAdminEmail()
-        && request.resource.data.permissionLevel == 'ADMIN'
-        && request.resource.data.role == 'ADMIN'
-        && request.resource.data.status == 'ACTIVE'
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email', 'legacyRole', 'role', 'roleLabel', 'permissionLevel', 'permissionLabel', 'allowedModules', 'status']);
     }
 
     match /staff_members/{uid} {
@@ -296,15 +277,8 @@ service cloud.firestore {
           && request.resource.data.role in ['RESPONSABLE_POLE', 'ENTRAINEUR', 'ENTRAINEUR_ADJOINT', 'PREPARATEUR_PHYSIQUE', 'KINE', 'MEDECIN', 'DIRIGEANT', 'EDUCATEUR', 'COACH', 'LECTURE', 'OBSERVATEUR_STAFF']
           && request.resource.data.permissionLevel in ['LECTEUR', 'SAISIE', 'EDITEUR']
           && request.resource.data.status == 'ACTIVE'
-        )
-        || (
-          signedIn()
-          && request.auth.uid == uid
-          && request.resource.data.permissionLevel == 'ADMIN'
-          && isSeedAdminEmail()
-          && request.resource.data.status == 'ACTIVE'
         );
-      allow update: if canManageUsers() || isAllowedSelfStaffMaintenance(uid) || isAllowedSeedAdminRepair(uid);
+      allow update: if canManageUsers() || isAllowedSelfStaffMaintenance(uid);
       allow delete: if noDelete();
     }
 
@@ -314,7 +288,7 @@ service cloud.firestore {
     }
 
     match /players/{playerId} {
-      allow read: if (canReadPlayerDoc(playerId, resource.data) && (canAccessModule('database') || canAccessModule('playerProfile')))
+      allow read: if (canReadPlayerDoc(playerId, resource.data) && (canAccessModule('database') || canAccessModule('playerProfile') || canAccessModule('presences')))
         || (canReadData() && canAccessPlayerId(playerId) && hasAnyAllPlayersModuleScope());
       allow create: if canManageCoreData()
         && canAccessModule('database')
