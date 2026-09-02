@@ -864,6 +864,23 @@ function testPresenceInteractionsStayNonBlocking(){
   });
 }
 
+function testPerformanceCriticalPathStaysNonBlocking(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const playerProfileSource = fs.readFileSync('pages/player-profile/playerProfile.js', 'utf8');
+  const teamProfileSource = fs.readFileSync('pages/team-profile/teamProfile.js', 'utf8');
+  const technicalSource = fs.readFileSync('pages/tests-techniques.html', 'utf8');
+  const swSource = fs.readFileSync('sw.js', 'utf8');
+
+  assert(appSource.includes("recordPerfEvent('auth:usable'"), 'Le démarrage doit mesurer le moment où l’application devient utilisable.');
+  assert(appSource.includes('Promise.allSettled([\n          syncCloud(false),'), 'Les synchronisations après connexion ne doivent pas bloquer l’interface.');
+  assert(!appSource.includes("await refreshCentralPlayersFromCloud({force:true, reason:'login'})"), 'La connexion ne doit pas forcer et attendre une nouvelle lecture des joueuses.');
+  assert(!playerProfileSource.includes('await preloadTeam(team'), 'La fiche individuelle ne doit pas précharger toutes les joueuses.');
+  assert(!teamProfileSource.includes('await preloadTeam(nextTeamId)'), 'La fiche équipe ne doit pas précharger les autres équipes.');
+  assert(technicalSource.includes('forceRefresh:options.forceRefresh===true'), 'Tests techniques doit réutiliser son cache sauf actualisation explicite.');
+  assert(swSource.includes('function staleWhileRevalidate(request)'), 'Les modules PWA doivent pouvoir être servis immédiatement depuis le cache.');
+  assert(appSource.includes('if(previousVersion === APP_SHELL_VERSION)'), 'Le cache applicatif ne doit être purgé que lors d’un changement de version.');
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -892,6 +909,7 @@ testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
+testPerformanceCriticalPathStaysNonBlocking();
 
 Promise.resolve()
   .then(testScopedPlayerReadFiltersInFirestore)
