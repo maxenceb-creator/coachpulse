@@ -67,6 +67,7 @@ let homeDashboardRequestId = 0;
 let centralPlayersRefreshPending = null;
 let lastCentralPlayersRefreshAt = 0;
 let firebaseInitPromise = null;
+let authFlowStartedAt = 0;
 function cloneData(value){
   if(typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
@@ -91,6 +92,50 @@ function firestoreSafeData(data={}){
 }
 function debugPerfEnabled(){
   return storage.get('coachpulse:debugPerf') === '1';
+}
+const perfState = {startedAt:performance.now(), firestoreRequests:0, firestoreDocuments:0, activeRequests:0, maxConcurrentRequests:0, listeners:0, events:[]};
+function recordPerfEvent(type, detail={}){
+  if(!debugPerfEnabled()) return;
+  const event = {type, atMs:Math.round(performance.now() - perfState.startedAt), ...detail};
+  perfState.events.push(event);
+  if(perfState.events.length > 250) perfState.events.shift();
+  console.info('[CoachPulse perf]', event);
+}
+function installFirebasePerfInstrumentation(){
+  if(!debugPerfEnabled() || !firebaseFns || firebaseFns.__coachpulsePerfInstrumented) return;
+  const originalGetDocs = firebaseFns.getDocs;
+  const originalOnSnapshot = firebaseFns.onSnapshot;
+  firebaseFns.getDocs = async function(){
+    const startedAt = performance.now();
+    perfState.firestoreRequests += 1;
+    perfState.activeRequests += 1;
+    perfState.maxConcurrentRequests = Math.max(perfState.maxConcurrentRequests, perfState.activeRequests);
+    try{
+      const snap = await originalGetDocs.apply(this, arguments);
+      const documents = Number(snap?.size || 0);
+      perfState.firestoreDocuments += documents;
+      recordPerfEvent('firestore:getDocs', {durationMs:Math.round(performance.now() - startedAt), documents});
+      return snap;
+    }finally{
+      perfState.activeRequests = Math.max(0, perfState.activeRequests - 1);
+    }
+  };
+  firebaseFns.onSnapshot = function(){
+    const unsubscribe = originalOnSnapshot.apply(this, arguments);
+    perfState.listeners += 1;
+    recordPerfEvent('firestore:listener-open', {listeners:perfState.listeners});
+    let active = true;
+    return () => {
+      if(active){
+        active = false;
+        perfState.listeners = Math.max(0, perfState.listeners - 1);
+        recordPerfEvent('firestore:listener-close', {listeners:perfState.listeners});
+      }
+      return unsubscribe();
+    };
+  };
+  firebaseFns.__coachpulsePerfInstrumented = true;
+  window.CoachPulsePerf = {state:perfState, snapshot:() => cloneData(perfState)};
 }
 async function measureAsync(label, work){
   if(!debugPerfEnabled()) return work();
@@ -890,6 +935,7 @@ async function loadFirebaseFns(){
   const authMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
   const fs = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js');
   firebaseFns = {...app, ...authMod, ...fs};
+  installFirebasePerfInstrumentation();
   return firebaseFns;
 }
 
@@ -1004,6 +1050,7 @@ async function initFirebaseInternal(){
     db = firebaseFns.getFirestore(fbApp);
     try{ await firebaseFns.enableIndexedDbPersistence(db); }catch(_e){}
     firebaseFns.onAuthStateChanged(auth, async user => {
+      const authCallbackStartedAt = authFlowStartedAt || performance.now();
       authReady = true;
       currentUser = user;
       updateSyncState(user ? 'Cloud connecté' : 'Connexion staff requise');
@@ -1016,14 +1063,22 @@ async function initFirebaseInternal(){
           setLocked(true);
           return;
         }
+        // Le cache local est purgé avec le nouveau périmètre avant tout affichage.
+        // Les synchronisations réseau non indispensables restent hors du chemin critique.
+        try{ purgeUnauthorizedLocalData(); }catch(e){ console.warn('Local data purge unavailable after login', e); }
         setLocked(false);
         startStaffProfileSubscription();
         try{ startRealtimeSync(); }catch(e){ console.warn('Realtime sync unavailable after login', e); }
-        await syncCloud(false).catch(e => console.warn('Cloud sync unavailable after login', e));
-        await refreshCentralPlayersFromCloud({force:true, reason:'login'}).catch(e => console.warn('Central players pull unavailable after login', e));
-        try{ purgeUnauthorizedLocalData(); }catch(e){ console.warn('Local data purge unavailable after login', e); }
         const last = storage.get('coachpulse:lastTool', 'home');
         routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
+        recordPerfEvent('auth:usable', {durationMs:Math.round(performance.now() - authCallbackStartedAt), route:last});
+        authFlowStartedAt = 0;
+        Promise.allSettled([
+          syncCloud(false),
+          refreshCentralPlayersFromCloud({reason:'login'})
+        ]).then(results => results.forEach(result => {
+          if(result.status === 'rejected') console.warn('Actualisation après connexion indisponible', result.reason);
+        }));
       } else {
         currentProfile = null;
         stopRealtimeSync();
@@ -1055,6 +1110,7 @@ async function signInStaff(){
   $('#authError').textContent = '';
   if(signingIn) return;
   signingIn = true;
+  authFlowStartedAt = performance.now();
   const btn = $('#loginBtn');
   if(btn) btn.disabled = true;
   try{
@@ -1855,7 +1911,11 @@ async function playerProfileLoadData(options={}){
   const aliases = [...new Set([playerId, ...(Array.isArray(options.aliases) ? options.aliases : [])].map(value => String(value || '').trim()).filter(Boolean))];
   const cacheKey = playerId || aliases.join('|');
   const cached = appDataCache.playerProfiles.get(cacheKey);
-  if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS) return cloneData(cached.payload);
+  if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS){
+    recordPerfEvent('cache:hit', {cache:'playerProfile', key:cacheKey});
+    return cloneData(cached.payload);
+  }
+  recordPerfEvent('cache:miss', {cache:'playerProfile', key:cacheKey});
   const directCollections = ['attendance','matchEvents','technicalTests','physicalTests','playerMeasurements','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps','convocations','individualReports'];
   const payload = {app:'CoachPulse', module:'playerProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), collections:{players:[],sessions:[],matches:[]}};
   directCollections.forEach(name => { payload.collections[name] = []; });
@@ -2030,7 +2090,11 @@ async function teamProfileLoadData(options={}){
 	  const summaryOnly = options.summaryOnly === true;
 	  const cacheKey = `${teamId || 'all'}:${summaryOnly ? 'summary' : 'full'}`;
 	  const cached = appDataCache.teamProfiles.get(cacheKey);
-	  if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS) return cloneData(cached.payload);
+	  if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS){
+	    recordPerfEvent('cache:hit', {cache:'teamProfile', key:cacheKey});
+	    return cloneData(cached.payload);
+	  }
+	  recordPerfEvent('cache:miss', {cache:'teamProfile', key:cacheKey});
 	  const payload = {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), teamId, collections:{}};
   const names = ['teams','players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
   names.forEach(name => { payload.collections[name] = []; });
@@ -6295,10 +6359,15 @@ async function enforceFreshAppShellOnLaunch(){
   if(!navigator.onLine) return false;
   let previousVersion = '';
   try{ previousVersion = localStorage.getItem(APP_SHELL_VERSION_KEY) || ''; }catch(_error){}
+  // Le Service Worker vérifie déjà les mises à jour. Purger tous ses assets à
+  // chaque ouverture supprimait le bénéfice du cache PWA et forçait le réseau.
+  if(previousVersion === APP_SHELL_VERSION){
+    requestServiceWorkerUpdate().catch(() => {});
+    return false;
+  }
   await clearAppShellCache('launch');
   await requestServiceWorkerUpdate();
   try{ localStorage.setItem(APP_SHELL_VERSION_KEY, APP_SHELL_VERSION); }catch(_error){}
-  if(previousVersion === APP_SHELL_VERSION) return false;
   try{
     if(sessionStorage.getItem(APP_SHELL_REFRESH_KEY) === APP_SHELL_VERSION) return false;
     sessionStorage.setItem(APP_SHELL_REFRESH_KEY, APP_SHELL_VERSION);

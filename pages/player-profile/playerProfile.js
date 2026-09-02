@@ -16,9 +16,7 @@
     view:'overview',
     filters:{team:'', periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]},
     renderToken:0,
-    loadingPlayerId:'',
-    firstSelectedPlayerId:'',
-    preloadedTeams:new Set()
+    loadingPlayerId:''
   };
   function debugPerf(){ try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; } }
   function logPerf(label, start){ if(debugPerf()) console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
@@ -126,59 +124,6 @@
     if(state.collectionCache[state.selectedPlayerId]) state.collectionCache[state.selectedPlayerId].collections.playerMeasurements=rows;
     delete state.filteredCollectionCache[state.selectedPlayerId];
   }
-  function teamRank(team=''){
-    const numbers = String(team || '').match(/\d+/g)?.map(Number).filter(Number.isFinite) || [];
-    if(numbers.length) return Math.min(...numbers);
-    return Number.POSITIVE_INFINITY;
-  }
-  function sortedTeamLabels(){
-    const season = displaySeason();
-    return [...new Set(state.players.map(p => Data.teamLabel(Data.playerForSeason(p, season))).filter(Boolean))]
-      .sort((a,b) => {
-        const rankDiff = teamRank(a) - teamRank(b);
-        return rankDiff || a.localeCompare(b, 'fr');
-      });
-  }
-  function teamsByDistanceFrom(team){
-    const selectedRank = teamRank(team);
-    return sortedTeamLabels()
-      .filter(label => label !== team)
-      .map(label => ({label, distance:Math.abs(teamRank(label) - selectedRank)}))
-      .sort((a,b) => a.distance - b.distance || a.label.localeCompare(b.label, 'fr'))
-      .map(item => item.label);
-  }
-  async function preloadTeam(team, excludedPlayerIds=new Set()){
-    if(!team || state.preloadedTeams.has(team)) return;
-    state.preloadedTeams.add(team);
-    const season = displaySeason();
-    const teamPlayers = state.players.filter(p => (
-      !excludedPlayerIds.has(p.playerId) &&
-      Data.teamLabel(Data.playerForSeason(p, season)) === team &&
-      !state.collectionCache[p.playerId]
-    ));
-    const start = performance.now();
-    for(const teammate of teamPlayers){
-      try{
-        await loadPlayerData(teammate.playerId);
-      }catch(error){
-        if(debugPerf()) console.warn('[CoachPulse perf] preload team player failed', teammate.playerId, error);
-      }
-    }
-    logPerf(`playerProfile.preloadTeam.${team}.${teamPlayers.length}`, start);
-  }
-  function preloadProgressiveTeamsForFirstSelection(playerId){
-    if(state.firstSelectedPlayerId || !playerId) return;
-    state.firstSelectedPlayerId = playerId;
-    const selected = state.players.find(p => p.playerId === playerId);
-    const team = Data.teamLabel(Data.playerForSeason(selected, displaySeason()));
-    if(!team) return;
-    setTimeout(async () => {
-      await preloadTeam(team, new Set([playerId]));
-      for(const nextTeam of teamsByDistanceFrom(team)){
-        await preloadTeam(nextTeam);
-      }
-    }, 0);
-  }
   async function selectPlayer(playerId, options={}){
     if(!playerId){
       state.selectedPlayerId = '';
@@ -205,7 +150,6 @@
       state.seasons = Filters.seasonsFromCollections(state.collections);
       await render();
     }
-    if(options.userSelected) preloadProgressiveTeamsForFirstSelection(playerId);
   }
   async function init(){
     try{
