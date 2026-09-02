@@ -218,6 +218,7 @@ function testPermissionUpdateDoesNotPromoteRole(){
 function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
   const u13Id = teams.canonicalTeamId('U13 A');
   const u16Id = teams.canonicalTeamId('U16 A');
+  const u11Id = teams.canonicalTeamId('U11 A');
   const sessionDate = '2026-09-15';
   const roster = players.playersForTeamAtDate([
     {documentId:'u13-valid', playerId:'u13-valid', nom:'Valid', prenom:'U13', status:'active', teamAssignments:[{teamId:u13Id, startDate:'2026-07-01', endDate:'2027-06-30'}]},
@@ -227,6 +228,11 @@ function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
     {documentId:'valid-open-ended', playerId:'valid-open-ended', nom:'Open', prenom:'U13', status:'active', teamAssignments:[{teamId:u13Id, effectiveFrom:'2026-08-20'}]}
   ], u13Id, sessionDate);
   assert.deepEqual(roster.map(player => player.playerId).sort(), ['u13-valid','valid-open-ended']);
+
+  const secondaryRoster = players.playersForTeamAtDate([
+    {documentId:'secondary-u11', playerId:'secondary-u11', nom:'Bompard', prenom:'Lisa', status:'active', teamId:u13Id, teamIds:[u13Id, u11Id]}
+  ], u11Id, sessionDate);
+  assert.deepEqual(secondaryRoster.map(player => player.playerId), ['secondary-u11'], 'Une joueuse avec un second teamId doit apparaître dans la feuille de présence de cette équipe.');
 }
 function testPlayerMeasurementsAreIndependentAndHistorical(){
   const first=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:'154',weightKg:'45,2',measuredAt:'2026-09-02'});
