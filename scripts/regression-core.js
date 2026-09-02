@@ -161,6 +161,7 @@ function testPermissions(){
 }
 
 function testPermissionUpdateDoesNotPromoteRole(){
+  const u13Id = teams.canonicalTeamId('U13 A');
   const firestore = new Map();
   const initial = permissions.defaultProfile({uid:'coach-permissions'}, 'ENTRAINEUR', 'SAISIE');
   initial.allowedModules = ['presences'];
@@ -213,6 +214,32 @@ function testPermissionUpdateDoesNotPromoteRole(){
   assert.deepEqual(permissions.getAuthorizedTeamIds(staleTeams), [], 'Les champs équipe historiques ne doivent pas réinjecter un accès supprimé du modèle canonique.');
   assert(accessSave.includes('legacyRole:role') && accessSave.includes('isAdmin:permissionLevel === \'ADMIN\''), 'La sauvegarde doit neutraliser les marqueurs admin historiques.');
   assert(appSource.includes('startStaffProfileSubscription();'), 'Le contexte utilisateur doit écouter les modifications Firestore en temps réel.');
+  assert(!appSource.includes('isSeedAdminEmail'), 'Aucun email, même historique, ne doit déclencher une promotion Admin.');
+  assert(!appSource.includes('applyAdminProfileRepair'), 'Le login ne doit jamais réparer un profil existant en augmentant ses droits.');
+  const profileLoad = appSource.match(/async function ensureUserProfile[\s\S]*?\n}\n/)?.[0] || '';
+  assert(profileLoad.includes("const loginPatch = {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email}"));
+  assert(!profileLoad.includes("permissionLevel = 'ADMIN'") && !profileLoad.includes('allowedModules = modules'));
+
+  for(const level of ['LECTEUR','EDITEUR']){
+    const stored = {
+      uid:`maxence-coach-${level.toLowerCase()}`,
+      email:'maxence.boisdron+coach@club.test',
+      role:'ENTRAINEUR', businessRole:'ENTRAINEUR', legacyRole:'ADMIN', userRole:'ADMIN',
+      permissionLevel:level, permission:'ADMIN', accessLevel:'ADMIN', isAdmin:true, admin:true,
+      authorizedTeamIds:[u13Id], teamIds:[u13Id], allowedTeamIds:[u13Id],
+      allowedModules:['presences'], modulePermissions:{presences:level === 'EDITEUR' ? 'edit' : 'read'}, status:'ACTIVE'
+    };
+    const afterLoad = structuredClone(stored);
+    const afterRefresh = structuredClone(afterLoad);
+    const afterReconnect = structuredClone(afterRefresh);
+    [afterLoad, afterRefresh, afterReconnect].forEach(profile => {
+      assert.equal(permissions.getRole(profile), 'ENTRAINEUR');
+      assert.equal(permissions.normalizePermission(null, profile), level);
+      assert.equal(permissions.isAdminRole(profile), false);
+      assert.deepEqual(permissions.getAuthorizedTeamIds(profile), [u13Id]);
+      assert.deepEqual(profile.allowedModules, ['presences']);
+    });
+  }
 }
 
 function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
@@ -233,6 +260,53 @@ function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
     {documentId:'secondary-u11', playerId:'secondary-u11', nom:'Bompard', prenom:'Lisa', status:'active', teamId:u13Id, teamIds:[u13Id, u11Id]}
   ], u11Id, sessionDate);
   assert.deepEqual(secondaryRoster.map(player => player.playerId), ['secondary-u11'], 'Une joueuse avec un second teamId doit apparaître dans la feuille de présence de cette équipe.');
+
+  const historicalRoster = players.playersForTeamAtDate([
+    {documentId:'canonical-u13-a', playerId:'canonical-u13-a', nom:'A', teamId:u13Id},
+    {documentId:'legacy-u13-a', playerId:'legacy-u13-a', nom:'B', teamId:'team-u12-u13'},
+    {documentId:'secondary-u13-a', playerId:'secondary-u13-a', nom:'C', teamId:u11Id, teamIds:[u11Id, 'U13 A']},
+    {documentId:'assignment-u13-a', playerId:'assignment-u13-a', nom:'D', teamAssignments:[{teamSnapshot:{name:'U13 A'}, startDate:'2026-07-01'}]},
+    {documentId:'u13-b-only', playerId:'u13-b-only', nom:'E', team:'U13 B', categorie:'U13', subCategory:'U13', teamId:'U13 B'}
+  ], u13Id, sessionDate);
+  assert.deepEqual(historicalRoster.map(player => player.playerId).sort(), ['assignment-u13-a','canonical-u13-a','legacy-u13-a','secondary-u13-a']);
+  assert.deepEqual(players.playersForTeamAtDate([{documentId:'u13-b-only', playerId:'u13-b-only', nom:'E', team:'U13 B', categorie:'U13', subCategory:'U13', teamId:'U13 B'}], teams.canonicalTeamId('U13 B'), sessionDate).map(p => p.playerId), ['u13-b-only']);
+  assert.notEqual(teams.resolveCanonicalTeamId('U13 B'), teams.resolveCanonicalTeamId('U13 A'));
+  assert.equal(teams.resolveCanonicalTeamId('team-u12-u13'), u13Id);
+  assert.equal(teams.resolveCanonicalTeamId({teamId:'old-firestore-id', teamSnapshot:{name:'U13 A'}}), u13Id);
+  assert.equal(teams.resolveCanonicalTeamId({id:'old-firestore-id', replacedByTeamId:u13Id}), u13Id);
+
+  assert.equal(players.playerAssignedToTeamAtDate({teamAssignments:[{team:'U13 A', endDate:'2026-09-14'}]}, u13Id, sessionDate), false);
+  assert.equal(players.playerAssignedToTeamAtDate({teamAssignments:[{team:'U13 A', startDate:'2026-09-16'}]}, u13Id, sessionDate), false);
+  assert.equal(players.playerAssignedToTeamAtDate({seasonHistory:{'2025-2026':{team:'U13 A'}}}, u13Id, sessionDate), false);
+}
+
+async function testScopedPlayerReadFiltersInFirestore(){
+  players.invalidatePlayersCache();
+  const u13Id = teams.canonicalTeamId('U13 A');
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const rows = [
+    {id:'u13-primary', data:{playerId:'u13-primary', nom:'A', teamId:u13Id}},
+    {id:'u13-secondary', data:{playerId:'u13-secondary', nom:'B', teamId:u16Id, teamIds:[u16Id,u13Id]}},
+    {id:'u16-only', data:{playerId:'u16-only', nom:'C', teamId:u16Id}}
+  ];
+  let unscopedReads = 0;
+  const firebaseFns = {
+    collection(_db, name){ return {name}; },
+    where(field, operator, value){ return {field, operator, value}; },
+    query(collection, constraint){ return {collection, constraint}; },
+    async getDocs(ref){
+      if(ref.name){ unscopedReads++; return snapshot(rows); }
+      const {field, operator, value} = ref.constraint;
+      const matching = rows.filter(row => operator === 'in'
+        ? value.includes(row.data[field])
+        : (row.data[field] || []).some(item => value.includes(item)));
+      return snapshot(matching);
+    }
+  };
+  function snapshot(source){ return {forEach(callback){ source.forEach(row => callback({id:row.id, data:()=>row.data})); }}; }
+  const scoped = await players.readFirestorePlayers({firebaseFns, db:{}, accessAllPlayers:false, authorizedTeamIds:[u13Id], forceRefresh:true});
+  assert.deepEqual(scoped.map(player => player.playerId).sort(), ['u13-primary','u13-secondary']);
+  assert.equal(unscopedReads, 0, 'Un entraîneur limité ne doit jamais télécharger toute la collection players.');
 }
 function testPlayerMeasurementsAreIndependentAndHistorical(){
   const first=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:'154',weightKg:'45,2',measuredAt:'2026-09-02'});
@@ -408,6 +482,7 @@ function testFirestoreRulesProtectExistingAndIncomingScope(){
     assert(rulesSource.includes(`match /${collection}/`), `La collection ${collection} doit être déclarée dans firestore.rules.`);
   });
   assert(rulesSource.includes('canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data)'), 'Les updates doivent valider l’ancien et le nouveau périmètre teamId/playerId.');
+  assert(rulesSource.includes("canAccessModule('presences')"), 'Présences doit pouvoir lire les joueuses du périmètre via une requête Firestore filtrée.');
   assert(rulesSource.includes('match /{document=**}'), 'Les règles doivent conserver le bloc catch-all.');
   assert(rulesSource.includes('allow read, write: if false;'), 'Le bloc catch-all doit refuser les accès non déclarés.');
 }
@@ -779,6 +854,7 @@ testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
 
 Promise.resolve()
+  .then(testScopedPlayerReadFiltersInFirestore)
   .then(testMeasurementSaveWithoutSelectedInjuryPersistsAfterReload)
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)
   .then(() => {

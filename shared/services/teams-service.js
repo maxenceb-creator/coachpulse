@@ -67,6 +67,54 @@
     return stableId('team', official?.name || normalizeTeamName(name));
   }
 
+  function teamReferenceValues(value){
+    if(value == null) return [];
+    if(Array.isArray(value)) return value.flatMap(teamReferenceValues);
+    if(typeof value !== 'object') return [value];
+    return [
+      value.replacedByTeamId,
+      value.teamId, value.team_id, value.id, value.name, value.team, value.equipe,
+      value.category, value.categorie,
+      value.team?.teamId, value.team?.name,
+      value.teamSnapshot?.teamId, value.teamSnapshot?.name,
+      ...(Array.isArray(value.teamIds) ? value.teamIds : []),
+      ...(Array.isArray(value.team_ids) ? value.team_ids : []),
+      ...(Array.isArray(value.team?.teamIds) ? value.team.teamIds : []),
+      ...(Array.isArray(value.teamSnapshot?.teamIds) ? value.teamSnapshot.teamIds : [])
+    ].flatMap(teamReferenceValues);
+  }
+
+  function resolveCanonicalTeamId(value, knownTeams=[]){
+    const references = teamReferenceValues(value).map(asText).filter(Boolean);
+    if(!references.length) return '';
+    const rows = Array.isArray(knownTeams) ? knownTeams : [];
+    for(const reference of references){
+      const canonicalOfficial = OFFICIAL_TEAMS.find(team => stableId('team', team.name) === reference);
+      if(canonicalOfficial) return stableId('team', canonicalOfficial.name);
+      const matching = rows.find(row => [row?.id, row?.teamId, row?.name]
+        .map(compactTeamKey).filter(Boolean).includes(compactTeamKey(reference)));
+      if(matching){
+        const replacement = asText(matching.replacedByTeamId);
+        if(replacement) return resolveCanonicalTeamId(replacement, rows.filter(row => row !== matching));
+        const official = resolveOfficialTeam(matching.name || matching.team || matching.category || matching.categorie);
+        if(official) return canonicalTeamId(official.name);
+      }
+      const official = resolveOfficialTeam(reference);
+      if(official) return canonicalTeamId(official.name);
+    }
+    return canonicalTeamId(references[0]);
+  }
+
+  function canonicalTeamAliases(value){
+    const teamId = resolveCanonicalTeamId(value);
+    const official = OFFICIAL_TEAMS.find(team => canonicalTeamId(team.name) === teamId);
+    if(!official) return [teamId].filter(Boolean);
+    const name = official.name;
+    const aliases = [teamId, name, name.toLowerCase(), stableId(name), stableId('team', name)];
+    if(name === 'U13 A') aliases.push('U13', 'u13', 'team-u13', 'U12-U13', 'team-u12-u13', 'U12-U13-U14', 'team-u12-u13-u14');
+    return [...new Set(aliases.map(asText).filter(Boolean))];
+  }
+
   function defaultTeamForSubCategory(value){
     const raw = normalizeTeamName(value);
     if(raw === 'R1' || raw.includes('SENIOR') || raw.includes('SÉNIOR')) return 'R1';
@@ -281,7 +329,8 @@
 
   const service = {
     COLLECTION, SETTINGS_COLLECTION, OPTIONS_ID, OFFICIAL_TEAMS, DEFAULT_DB_OPTIONS,
-    stableId, canonicalTeamId, defaultTeamForSubCategory, categoryForSubCategory, resolveOfficialTeam, cleanOptionList,
+    stableId, canonicalTeamId, resolveCanonicalTeamId, canonicalTeamAliases, teamReferenceValues,
+    defaultTeamForSubCategory, categoryForSubCategory, resolveOfficialTeam, cleanOptionList,
     officialTeamRows, mergeWithOfficialTeams, normalizeTeam, normalizeTeamForWrite,
     listTeams, ensureOfficialTeams, getTeam, saveTeam, archiveTeam, readDatabaseOptions, saveDatabaseOptions, invalidateTeamsCache
   };
