@@ -318,6 +318,35 @@ function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
   assert.deepEqual(players.playersForTeamAtDate(multiTeamRows, u13bId, sessionDate).map(p => p.playerId), ['u13b-only']);
   assert.deepEqual(players.playersForTeamAtDate(multiTeamRows, u16Id, sessionDate).map(p => p.playerId), ['multi-valid']);
 }
+async function testScopedPlayerReadFiltersInFirestore(){
+  players.invalidatePlayersCache();
+  const u13Id = teams.canonicalTeamId('U13 A');
+  const u16Id = teams.canonicalTeamId('U16 A');
+  const rows = [
+    {id:'u13-primary', data:{playerId:'u13-primary', nom:'A', teamId:u13Id}},
+    {id:'u13-secondary', data:{playerId:'u13-secondary', nom:'B', teamId:u16Id, teamIds:[u16Id,u13Id]}},
+    {id:'u16-only', data:{playerId:'u16-only', nom:'C', teamId:u16Id}}
+  ];
+  let unscopedReads = 0;
+  const firebaseFns = {
+    collection(_db, name){ return {name}; },
+    where(field, operator, value){ return {field, operator, value}; },
+    query(collection, constraint){ return {collection, constraint}; },
+    async getDocs(ref){
+      if(ref.name){ unscopedReads++; return snapshot(rows); }
+      const {field, operator, value} = ref.constraint;
+      const matching = rows.filter(row => operator === 'in'
+        ? value.includes(row.data[field])
+        : (row.data[field] || []).some(item => value.includes(item)));
+      return snapshot(matching);
+    }
+  };
+  function snapshot(source){ return {forEach(callback){ source.forEach(row => callback({id:row.id, data:()=>row.data})); }}; }
+  const scoped = await players.readFirestorePlayers({firebaseFns, db:{}, accessAllPlayers:false, authorizedTeamIds:[u13Id], forceRefresh:true});
+  assert.deepEqual(scoped.map(player => player.playerId).sort(), ['u13-primary','u13-secondary']);
+  assert.equal(unscopedReads, 0, 'Un entraîneur limité ne doit jamais télécharger toute la collection players.');
+}
+
 function testPlayerMeasurementsAreIndependentAndHistorical(){
   const first=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:'154',weightKg:'45,2',measuredAt:'2026-09-02'});
   const second=measurements.parse({playerId:'player-a',teamId:'team-u13',heightCm:156,weightKg:46.1,measuredAt:'2026-11-10'});
@@ -835,6 +864,23 @@ function testPresenceInteractionsStayNonBlocking(){
   });
 }
 
+function testPerformanceCriticalPathStaysNonBlocking(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const playerProfileSource = fs.readFileSync('pages/player-profile/playerProfile.js', 'utf8');
+  const teamProfileSource = fs.readFileSync('pages/team-profile/teamProfile.js', 'utf8');
+  const technicalSource = fs.readFileSync('pages/tests-techniques.html', 'utf8');
+  const swSource = fs.readFileSync('sw.js', 'utf8');
+
+  assert(appSource.includes("recordPerfEvent('auth:usable'"), 'Le démarrage doit mesurer le moment où l’application devient utilisable.');
+  assert(appSource.includes('Promise.allSettled([\n          syncCloud(false),'), 'Les synchronisations après connexion ne doivent pas bloquer l’interface.');
+  assert(!appSource.includes("await refreshCentralPlayersFromCloud({force:true, reason:'login'})"), 'La connexion ne doit pas forcer et attendre une nouvelle lecture des joueuses.');
+  assert(!playerProfileSource.includes('await preloadTeam(team'), 'La fiche individuelle ne doit pas précharger toutes les joueuses.');
+  assert(!teamProfileSource.includes('await preloadTeam(nextTeamId)'), 'La fiche équipe ne doit pas précharger les autres équipes.');
+  assert(technicalSource.includes('forceRefresh:options.forceRefresh===true'), 'Tests techniques doit réutiliser son cache sauf actualisation explicite.');
+  assert(swSource.includes('function staleWhileRevalidate(request)'), 'Les modules PWA doivent pouvoir être servis immédiatement depuis le cache.');
+  assert(appSource.includes('if(previousVersion === APP_SHELL_VERSION)'), 'Le cache applicatif ne doit être purgé que lors d’un changement de version.');
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -863,6 +909,7 @@ testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
+testPerformanceCriticalPathStaysNonBlocking();
 
 Promise.resolve()
   .then(testScopedPlayerReadFiltersInFirestore)
