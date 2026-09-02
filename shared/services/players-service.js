@@ -564,7 +564,7 @@
   }
 
   async function readScopedPlayerRows(firebaseFns, db, authorizedTeamIds=[]){
-    const canonicalIds = [...new Set(authorizedTeamIds.map(resolveCanonicalTeamId).filter(Boolean))];
+    const canonicalIds = [...new Set(authorizedTeamIds.map(canonicalTeamId).filter(Boolean))];
     if(!canonicalIds.length) return [];
     const reads = [];
     chunks(canonicalIds).forEach(teamChunk => {
@@ -582,7 +582,7 @@
     const {firebaseFns, db} = firestoreContext(ctx);
     const now = Date.now();
     const scoped = ctx.accessAllPlayers === false;
-    const cacheKey = scoped ? [...new Set((ctx.authorizedTeamIds || []).map(resolveCanonicalTeamId).filter(Boolean))].sort().join(',') : '*';
+    const cacheKey = scoped ? [...new Set((ctx.authorizedTeamIds || []).map(canonicalTeamId).filter(Boolean))].sort().join(',') : '*';
     if(firestorePlayersCache.key !== cacheKey) invalidatePlayersCache();
     firestorePlayersCache.key = cacheKey;
     if(!ctx.forceRefresh && firestorePlayersCache.rows && now - firestorePlayersCache.loadedAt < FIRESTORE_CACHE_TTL_MS){
