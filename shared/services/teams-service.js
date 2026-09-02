@@ -62,9 +62,28 @@
     return officialTeamByName(fromSub) || null;
   }
 
-  function canonicalTeamId(name){
-    const official = resolveOfficialTeam(name);
-    return stableId('team', official?.name || normalizeTeamName(name));
+  function stripTeamIdPrefixes(value){
+    return asText(value).replace(/^(?:team-)+/i, '');
+  }
+
+  function officialTeamFromReference(value){
+    const raw = stripTeamIdPrefixes(value);
+    if(!raw || /^(?:global|non[-_ ]?renseign(?:e|ee)|sans[-_ ]?equipe)$/i.test(raw)) return null;
+    const direct = officialTeamByName(raw);
+    if(direct) return direct;
+    if(/^(?:u\d+)(?:[-_ ]u?\d+)*$/i.test(raw) || /^(?:r1|seniors?)$/i.test(raw)){
+      return resolveOfficialTeam(raw);
+    }
+    return null;
+  }
+
+  function canonicalTeamId(value){
+    const official = officialTeamFromReference(value);
+    return official ? stableId('team', official.name) : '';
+  }
+
+  function canonicalTeamIds(values=[]){
+    return [...new Set((Array.isArray(values) ? values : [values]).map(canonicalTeamId).filter(Boolean))];
   }
 
   function teamReferenceValues(value){
@@ -174,7 +193,7 @@
     const sourceName = raw.name || raw.team || raw.equipe || raw.category || raw.categorie;
     const official = resolveOfficialTeam(sourceName, raw.category || raw.categorie);
     const name = official ? official.name : normalizeTeamName(sourceName);
-    const teamId = official ? canonicalTeamId(official.name) : (asText(raw.teamId || raw.id) || canonicalTeamId(name || raw.category || 'global'));
+    const teamId = official ? canonicalTeamId(official.name) : asText(raw.teamId || raw.id);
     return {
       ...raw,
       id:teamId,
@@ -329,7 +348,7 @@
 
   const service = {
     COLLECTION, SETTINGS_COLLECTION, OPTIONS_ID, OFFICIAL_TEAMS, DEFAULT_DB_OPTIONS,
-    stableId, canonicalTeamId, resolveCanonicalTeamId, canonicalTeamAliases, teamReferenceValues,
+    stableId, canonicalTeamId, canonicalTeamIds, stripTeamIdPrefixes, officialTeamFromReference,
     defaultTeamForSubCategory, categoryForSubCategory, resolveOfficialTeam, cleanOptionList,
     officialTeamRows, mergeWithOfficialTeams, normalizeTeam, normalizeTeamForWrite,
     listTeams, ensureOfficialTeams, getTeam, saveTeam, archiveTeam, readDatabaseOptions, saveDatabaseOptions, invalidateTeamsCache
