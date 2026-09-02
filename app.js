@@ -1398,7 +1398,7 @@ function normalizePlayer(raw={}){
   const playerId = (nom || prenom) ? stableFirestoreId('player', prenom, nom, birth || 'no-birth') : (raw.playerId || importedId);
   return {
     playerId, id:playerId, prenom:String(prenom || '').toUpperCase(), nom:String(nom || '').toUpperCase(), displayName:[prenom, String(nom || '').toUpperCase()].filter(Boolean).join(' ').trim().toUpperCase(),
-    categorie, subCategory, team, teamId:teamService?.canonicalTeamId?.(team || categorie) || stableFirestoreId('team', team || categorie || 'global'),
+    categorie, subCategory, team, teamId:teamService?.canonicalTeamId?.(team || categorie) || '',
     foot:raw.foot || raw.pied || raw.meilleurPiedLabel || raw.meilleurPied || raw.piedFort || raw.preferredFoot || raw.strongFoot || '', nationalite:raw.nationalite || raw.nationalité || raw.nationality || raw.country || raw.pays || '', nationality:raw.nationality || raw.nationalite || raw.nationalité || raw.country || raw.pays || '', leftClub:raw.leftClub || raw.dernierClubQuitte || raw.lastClubLeft || '', dernierClubQuitte:raw.dernierClubQuitte || raw.leftClub || raw.lastClubLeft || '', birth, dateNaissance:raw.dateNaissance || birth, photo:raw.photo || '',
     source:raw.source || 'Migration CoachPulse', status:raw.status || 'ACTIVE'
   };
@@ -3046,6 +3046,10 @@ async function readSyncLogs(limit=20){
 async function adminListPlayers(filters={}){
   if(!guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  if(!teamIdRepairScheduled){
+    teamIdRepairScheduled = true;
+    Promise.resolve().then(() => adminRepairTeamIds()).catch(err => console.warn('Team ID repair skipped', err));
+  }
   const service = playersService();
   const hints = mergeTechnicalPlayerFootHints([
     ...await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints()),
@@ -3084,7 +3088,7 @@ function normalizeAdminPlayerTeamIds(player={}, teamService=teamsService()){
   const ids = [
     player.teamId,
     ...(Array.isArray(player.teamIds) ? player.teamIds : [])
-  ].map(value => String(value || '').trim()).filter(Boolean);
+  ].map(value => teamService?.canonicalTeamId?.(value) || '').filter(Boolean);
   const clean = [...new Set(ids)];
   if(clean.length) return clean;
   const team = String(player.team || player.equipe || '').trim();
@@ -3395,7 +3399,18 @@ async function adminRepairTeamIds(){
       let patch = null;
       if(collectionName === 'players'){
         const player = normalizePlayer({id:docSnap.id, playerId:docSnap.id, ...data});
-        if((player.team && data.team !== player.team) || (player.teamId && data.teamId !== player.teamId)) patch = {team:player.team || '', teamId:player.teamId || '', categorie:player.categorie || data.categorie || '', subCategory:player.subCategory || data.subCategory || ''};
+        const references = playersService()?.normalizePlayerTeamReferences?.(data) || {};
+        const candidate = {
+          team:player.team || '',
+          teamId:references.teamId || player.teamId || '',
+          teamIds:Array.isArray(references.teamIds) ? references.teamIds : [],
+          seasonHistory:references.seasonHistory || {},
+          ...(Array.isArray(references.teamAssignments) ? {teamAssignments:references.teamAssignments} : {}),
+          categorie:player.categorie || data.categorie || '',
+          subCategory:player.subCategory || data.subCategory || ''
+        };
+        const changed = Object.keys(candidate).some(key => JSON.stringify(data[key] ?? (Array.isArray(candidate[key]) ? [] : candidate[key] && typeof candidate[key] === 'object' ? {} : '')) !== JSON.stringify(candidate[key]));
+        if(changed) patch = {...candidate, teamReferenceMigrationVersion:1};
       }else{
         const official = resolveOfficialTeamForApp(data.team || data.equipe || data.categorie || data.category || data.subCategory || data.sousCategorie);
         if(official && (data.team !== official.name || data.teamId !== official.teamId)) patch = {team:official.name, teamId:official.teamId};
