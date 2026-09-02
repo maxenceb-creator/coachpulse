@@ -99,6 +99,8 @@
     const team = explicitTeam || rule?.team || seasonTeam || '';
     const teamId = canonicalTeamId(fromHistory.teamId || team || categorie);
     const explicitTeamIds = [
+      fromHistory.teamId,
+      player.teamId,
       ...(Array.isArray(fromHistory.teamIds) ? fromHistory.teamIds : []),
       ...(Array.isArray(player.teamIds) ? player.teamIds : [])
     ].map(canonicalTeamId).filter(Boolean);
@@ -454,6 +456,8 @@
   function assignmentTeamIds(assignment={}){
     return canonicalTeamIds([
       assignmentTeamId(assignment),
+      assignment.team, assignment.equipe,
+      assignment.team?.name, assignment.teamSnapshot?.name,
       ...(Array.isArray(assignment.teamIds) ? assignment.teamIds : []),
       ...(Array.isArray(assignment.team_ids) ? assignment.team_ids : []),
       ...(Array.isArray(assignment.team?.teamIds) ? assignment.team.teamIds : []),
@@ -552,10 +556,35 @@
     return {firebaseFns, db};
   }
 
+  function chunks(values=[], size=10){
+    const unique = [...new Set(values.map(asText).filter(Boolean))];
+    const out = [];
+    for(let index=0;index<unique.length;index+=size) out.push(unique.slice(index,index+size));
+    return out;
+  }
+
+  async function readScopedPlayerRows(firebaseFns, db, authorizedTeamIds=[]){
+    const canonicalIds = [...new Set(authorizedTeamIds.map(resolveCanonicalTeamId).filter(Boolean))];
+    if(!canonicalIds.length) return [];
+    const reads = [];
+    chunks(canonicalIds).forEach(teamChunk => {
+      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamId', 'in', teamChunk))));
+      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamIds', 'array-contains-any', teamChunk))));
+    });
+    const settled = await Promise.all(reads);
+    const byId = new Map();
+    settled.forEach(snap => snap.forEach(docSnap => byId.set(docSnap.id, normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()}))));
+    return [...byId.values()];
+  }
+
   async function listPlayers(ctx={}, filters={}){
     if(!ctx.firebaseFns || !ctx.db) return filterPlayers(readCachedPlayers(), filters);
     const {firebaseFns, db} = firestoreContext(ctx);
     const now = Date.now();
+    const scoped = ctx.accessAllPlayers === false;
+    const cacheKey = scoped ? [...new Set((ctx.authorizedTeamIds || []).map(resolveCanonicalTeamId).filter(Boolean))].sort().join(',') : '*';
+    if(firestorePlayersCache.key !== cacheKey) invalidatePlayersCache();
+    firestorePlayersCache.key = cacheKey;
     if(!ctx.forceRefresh && firestorePlayersCache.rows && now - firestorePlayersCache.loadedAt < FIRESTORE_CACHE_TTL_MS){
       return filterPlayers(dedupePlayers([...writeFirestoreCache(firestorePlayersCache.rows), ...parseCache(CUSTOM_CACHE_KEY)]), filters);
     }
@@ -563,10 +592,14 @@
       const pendingRows = await firestorePlayersCache.pending;
       return filterPlayers(dedupePlayers([...writeFirestoreCache(pendingRows), ...parseCache(CUSTOM_CACHE_KEY)]), filters);
     }
-    firestorePlayersCache.pending = firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION))
-      .then(snap => {
+    firestorePlayersCache.pending = (scoped
+      ? readScopedPlayerRows(firebaseFns, db, ctx.authorizedTeamIds || [])
+      : firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION)).then(snap => {
         const rows = [];
         snap.forEach(docSnap => rows.push(normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()})));
+        return rows;
+      }))
+      .then(rows => {
         firestorePlayersCache.rows = rows;
         firestorePlayersCache.loadedAt = Date.now();
         return rows;

@@ -207,6 +207,7 @@ function testPermissions(){
 }
 
 function testPermissionUpdateDoesNotPromoteRole(){
+  const u13Id = teams.canonicalTeamId('U13 A');
   const firestore = new Map();
   const initial = permissions.defaultProfile({uid:'coach-permissions'}, 'ENTRAINEUR', 'SAISIE');
   initial.allowedModules = ['presences'];
@@ -259,6 +260,32 @@ function testPermissionUpdateDoesNotPromoteRole(){
   assert.deepEqual(permissions.getAuthorizedTeamIds(staleTeams), [], 'Les champs équipe historiques ne doivent pas réinjecter un accès supprimé du modèle canonique.');
   assert(accessSave.includes('legacyRole:role') && accessSave.includes('isAdmin:permissionLevel === \'ADMIN\''), 'La sauvegarde doit neutraliser les marqueurs admin historiques.');
   assert(appSource.includes('startStaffProfileSubscription();'), 'Le contexte utilisateur doit écouter les modifications Firestore en temps réel.');
+  assert(!appSource.includes('isSeedAdminEmail'), 'Aucun email, même historique, ne doit déclencher une promotion Admin.');
+  assert(!appSource.includes('applyAdminProfileRepair'), 'Le login ne doit jamais réparer un profil existant en augmentant ses droits.');
+  const profileLoad = appSource.match(/async function ensureUserProfile[\s\S]*?\n}\n/)?.[0] || '';
+  assert(profileLoad.includes("const loginPatch = {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email}"));
+  assert(!profileLoad.includes("permissionLevel = 'ADMIN'") && !profileLoad.includes('allowedModules = modules'));
+
+  for(const level of ['LECTEUR','EDITEUR']){
+    const stored = {
+      uid:`maxence-coach-${level.toLowerCase()}`,
+      email:'maxence.boisdron+coach@club.test',
+      role:'ENTRAINEUR', businessRole:'ENTRAINEUR', legacyRole:'ADMIN', userRole:'ADMIN',
+      permissionLevel:level, permission:'ADMIN', accessLevel:'ADMIN', isAdmin:true, admin:true,
+      authorizedTeamIds:[u13Id], teamIds:[u13Id], allowedTeamIds:[u13Id],
+      allowedModules:['presences'], modulePermissions:{presences:level === 'EDITEUR' ? 'edit' : 'read'}, status:'ACTIVE'
+    };
+    const afterLoad = structuredClone(stored);
+    const afterRefresh = structuredClone(afterLoad);
+    const afterReconnect = structuredClone(afterRefresh);
+    [afterLoad, afterRefresh, afterReconnect].forEach(profile => {
+      assert.equal(permissions.getRole(profile), 'ENTRAINEUR');
+      assert.equal(permissions.normalizePermission(null, profile), level);
+      assert.equal(permissions.isAdminRole(profile), false);
+      assert.deepEqual(permissions.getAuthorizedTeamIds(profile), [u13Id]);
+      assert.deepEqual(profile.allowedModules, ['presences']);
+    });
+  }
 }
 
 function testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate(){
@@ -465,6 +492,7 @@ function testFirestoreRulesProtectExistingAndIncomingScope(){
     assert(rulesSource.includes(`match /${collection}/`), `La collection ${collection} doit être déclarée dans firestore.rules.`);
   });
   assert(rulesSource.includes('canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data)'), 'Les updates doivent valider l’ancien et le nouveau périmètre teamId/playerId.');
+  assert(rulesSource.includes("canAccessModule('presences')"), 'Présences doit pouvoir lire les joueuses du périmètre via une requête Firestore filtrée.');
   assert(rulesSource.includes('match /{document=**}'), 'Les règles doivent conserver le bloc catch-all.');
   assert(rulesSource.includes('allow read, write: if false;'), 'Le bloc catch-all doit refuser les accès non déclarés.');
 }
@@ -837,6 +865,7 @@ testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
 
 Promise.resolve()
+  .then(testScopedPlayerReadFiltersInFirestore)
   .then(testMeasurementSaveWithoutSelectedInjuryPersistsAfterReload)
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)
   .then(() => {
