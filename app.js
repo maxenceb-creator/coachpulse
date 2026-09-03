@@ -50,7 +50,7 @@ const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260806-cache-login-auth-fix';
+const APP_SHELL_VERSION = '20260903-presence-rosters-v77';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -3429,13 +3429,14 @@ async function adminRepairTeamIds(){
           team:player.team || '',
           teamId:references.teamId || player.teamId || '',
           teamIds:Array.isArray(references.teamIds) ? references.teamIds : [],
+          rosterTeamIds:Array.isArray(references.rosterTeamIds) ? references.rosterTeamIds : [],
           seasonHistory:references.seasonHistory || {},
           ...(Array.isArray(references.teamAssignments) ? {teamAssignments:references.teamAssignments} : {}),
           categorie:player.categorie || data.categorie || '',
           subCategory:player.subCategory || data.subCategory || ''
         };
         const changed = Object.keys(candidate).some(key => JSON.stringify(data[key] ?? (Array.isArray(candidate[key]) ? [] : candidate[key] && typeof candidate[key] === 'object' ? {} : '')) !== JSON.stringify(candidate[key]));
-        if(changed) patch = {...candidate, teamReferenceMigrationVersion:1};
+        if(changed) patch = {...candidate, teamReferenceMigrationVersion:2};
       }else{
         const official = resolveOfficialTeamForApp(data.team || data.equipe || data.categorie || data.category || data.subCategory || data.sousCategorie);
         if(official && (data.team !== official.name || data.teamId !== official.teamId)) patch = {team:official.name, teamId:official.teamId};
