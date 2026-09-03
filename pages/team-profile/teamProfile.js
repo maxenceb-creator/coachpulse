@@ -15,9 +15,7 @@
     filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', competition:'', venue:'', result:'', opponent:''},
     renderToken:0,
     loadingTeamId:'',
-    detailLoadingTeamId:'',
-    firstSelectedTeamId:'',
-    preloadedTeams:new Set()
+    detailLoadingTeamId:''
   };
   function debugPerf(){ try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; } }
   function logPerf(label, start){ if(debugPerf()) console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
@@ -44,48 +42,6 @@
     state.seasons = Filters.seasonsFromCollections(state.collections);
     if(!state.seasons.includes(state.filters.season)) state.filters.season = state.seasons.includes(Data.currentSeason()) ? Data.currentSeason() : state.seasons[0];
     return loaded;
-  }
-  function teamRank(team=''){
-    const label = String(team || '').toUpperCase();
-    if(label.includes('R1') || label.includes('SENIOR')) return 999;
-    const numbers = label.match(/\d+/g)?.map(Number).filter(Number.isFinite) || [];
-    return numbers.length ? Math.min(...numbers) : Number.POSITIVE_INFINITY;
-  }
-  function sortedTeams(){
-    return state.teams.slice().sort((a,b) => {
-      const nameA = Data.teamName(a);
-      const nameB = Data.teamName(b);
-      const rankA = teamRank(nameA);
-      const rankB = teamRank(nameB);
-      const distance = Number.isFinite(rankA) && Number.isFinite(rankB) ? rankA - rankB : 0;
-      return distance || nameA.localeCompare(nameB, 'fr', {numeric:true});
-    });
-  }
-  function teamsByDistanceFrom(teamId){
-    const selected = state.teams.find(team => Data.teamIdOf(team) === teamId);
-    const selectedRank = teamRank(Data.teamName(selected));
-    return sortedTeams()
-      .filter(team => Data.teamIdOf(team) !== teamId)
-      .map(team => ({team, distance:Math.abs(teamRank(Data.teamName(team)) - selectedRank)}))
-      .sort((a,b) => a.distance - b.distance || Data.teamName(a.team).localeCompare(Data.teamName(b.team), 'fr', {numeric:true}))
-      .map(item => Data.teamIdOf(item.team))
-      .filter(Boolean);
-  }
-  async function preloadTeam(teamId){
-    if(!teamId || state.preloadedTeams.has(teamId) || state.teamCache[teamId]) return;
-    state.preloadedTeams.add(teamId);
-    try{ await loadTeamData(teamId, {summaryOnly:true}); }
-    catch(error){ if(debugPerf()) console.warn('[CoachPulse perf] preload team failed', teamId, error); }
-  }
-  function preloadProgressiveTeamsForFirstSelection(teamId){
-    if(state.firstSelectedTeamId || !teamId) return;
-    state.firstSelectedTeamId = teamId;
-    const schedule = global.requestIdleCallback || (callback => setTimeout(callback, 3000));
-    schedule(async () => {
-      for(const nextTeamId of teamsByDistanceFrom(teamId).slice(0, 2)){
-        await preloadTeam(nextTeamId);
-      }
-    });
   }
   async function selectTeam(teamId, options={}){
     if(!teamId){
@@ -121,7 +77,6 @@
       await render();
     }
     if(!hasCompleteData) loadFullTeamInBackground(teamId);
-    if(options.userSelected) preloadProgressiveTeamsForFirstSelection(teamId);
   }
   async function loadFullTeamInBackground(teamId){
     if(!teamId || state.teamCache[teamId]?.complete || state.detailLoadingTeamId === teamId) return;

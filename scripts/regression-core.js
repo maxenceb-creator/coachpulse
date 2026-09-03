@@ -112,6 +112,7 @@ function testTeamIdNormalizationIsIdempotent(){
     assert.deepEqual(teamState(normalized), expectedState, `Les références Team ont changé à la normalisation ${index + 2}.`);
   }
   assert.deepEqual(normalized.teamIds, ['team-u13-a']);
+  assert.deepEqual(normalized.rosterTeamIds, ['team-u13-a','team-u11-a']);
   assert(!JSON.stringify(teamState(normalized)).includes('global'));
 
   const playersSource = fs.readFileSync('shared/services/players-service.js', 'utf8');
@@ -325,6 +326,7 @@ async function testScopedPlayerReadFiltersInFirestore(){
   const rows = [
     {id:'u13-primary', data:{playerId:'u13-primary', nom:'A', teamId:u13Id}},
     {id:'u13-secondary', data:{playerId:'u13-secondary', nom:'B', teamId:u16Id, teamIds:[u16Id,u13Id]}},
+    {id:'u13-history-only', data:{playerId:'u13-history-only', nom:'History', teamId:u16Id, teamIds:[u16Id], rosterTeamIds:[u13Id,u16Id], seasonHistory:{'2026-2027':{teamId:u13Id}}}},
     {id:'u16-only', data:{playerId:'u16-only', nom:'C', teamId:u16Id}}
   ];
   let unscopedReads = 0;
@@ -343,8 +345,65 @@ async function testScopedPlayerReadFiltersInFirestore(){
   };
   function snapshot(source){ return {forEach(callback){ source.forEach(row => callback({id:row.id, data:()=>row.data})); }}; }
   const scoped = await players.readFirestorePlayers({firebaseFns, db:{}, accessAllPlayers:false, authorizedTeamIds:[u13Id], forceRefresh:true});
-  assert.deepEqual(scoped.map(player => player.playerId).sort(), ['u13-primary','u13-secondary']);
+  assert.deepEqual(scoped.map(player => player.playerId).sort(), ['u13-history-only','u13-primary','u13-secondary']);
   assert.equal(unscopedReads, 0, 'Un entraîneur limité ne doit jamais télécharger toute la collection players.');
+}
+
+async function testPresenceScopedRosterSurvivesColdReloadReconnect(){
+  const u13a = teams.canonicalTeamId('U13 A');
+  const u13b = teams.canonicalTeamId('U13 B');
+  const u11a = teams.canonicalTeamId('U11 A');
+  const rows = [
+    {id:'direct-u13a', data:{playerId:'direct-u13a', nom:'Direct', status:'active', teamId:u13a, teamIds:[u13a], rosterTeamIds:[u13a]}},
+    {id:'history-u13a', data:{playerId:'history-u13a', nom:'History', status:'active', teamId:u11a, teamIds:[u11a], rosterTeamIds:[u11a,u13a], seasonHistory:{'2026-2027':{teamId:u13a, teamIds:[u13a]}}}},
+    {id:'multi-team', data:{playerId:'multi-team', nom:'Multi', status:'active', teamId:u11a, teamIds:[u11a], rosterTeamIds:[u11a,u13a], teamAssignments:[{teamId:u13a,startDate:'2026-07-01'},{teamId:u11a,startDate:'2026-07-01'}]}},
+    {id:'u13b-only', data:{playerId:'u13b-only', nom:'U13B', status:'active', teamId:u13b, teamIds:[u13b], rosterTeamIds:[u13b]}}
+  ];
+  let globalReads = 0;
+  const firebaseFns = {
+    collection(_db, name){ return {name}; },
+    where(field, operator, value){ return {field, operator, value}; },
+    query(collection, constraint){ return {collection, constraint}; },
+    async getDocs(ref){
+      if(ref.name){ globalReads++; return snapshot(rows); }
+      const {field, operator, value} = ref.constraint;
+      const matching = rows.filter(row => operator === 'in'
+        ? value.includes(row.data[field])
+        : (row.data[field] || []).some(item => value.includes(item)));
+      return snapshot(matching);
+    }
+  };
+  function snapshot(source){ return {forEach(callback){ source.forEach(row => callback({id:row.id, data:()=>row.data})); }}; }
+  const previousStorage = global.localStorage;
+  global.localStorage = {
+    values:new Map([['coachpulse:centralPlayers', JSON.stringify([...rows.map(row => row.data), {playerId:'stale-foreign',teamId:u13b,teamIds:[u13b]}])]]),
+    getItem(key){ return this.values.get(key) || null; },
+    setItem(key, value){ this.values.set(key, value); }
+  };
+  try{
+    const expected = ['direct-u13a','history-u13a','multi-team'];
+    for(const phase of ['cold-cache','reload','reconnect','next-day']){
+      players.invalidatePlayersCache();
+      if(phase === 'cold-cache') global.localStorage.values.clear();
+      const downloaded = await players.readFirestorePlayers({firebaseFns, db:{}, accessAllPlayers:false, authorizedTeamIds:[u13a], forceRefresh:true});
+      const date = phase === 'next-day' ? '2026-09-01' : '2026-08-31';
+      assert.deepEqual(players.playersForTeamAtDate(downloaded, u13a, date).map(player => player.playerId).sort(), expected, `Roster instable pendant ${phase}.`);
+      assert(!downloaded.some(player => player.playerId === 'u13b-only' || player.playerId === 'stale-foreign'), `Une joueuse hors scope a fui pendant ${phase}.`);
+    }
+    assert.equal(globalReads, 0, 'Le scénario cache vide/reload/reconnexion ne doit jamais lire globalement players.');
+  }finally{
+    global.localStorage = previousStorage;
+    players.invalidatePlayersCache();
+  }
+}
+
+function testPresenceUsesExplicitScopedRoster(){
+  const source = fs.readFileSync('pages/presences.html', 'utf8');
+  const rosterPath = source.match(/function playersForTeam\(teamId, dateValue\)[\s\S]*?\n      function normalizePresenceEventForStorage/)?.[0] || '';
+  assert(rosterPath.includes('presenceScopedPlayers'), 'Présences doit utiliser directement le résultat scoped chargé.');
+  assert(!rosterPath.includes('const rows = service?.readCachedPlayers'), 'Le cache ne doit pas être la source primaire du roster Présences.');
+  const cloudPath = source.match(/async function initPresenceCloud\(\)[\s\S]*?\n      initTabs\(\)/)?.[0] || '';
+  assert(cloudPath.includes('presenceScopedPlayers = Array.isArray(loadedPlayers) ? loadedPlayers : []'), 'Le chargement Présences doit conserver explicitement les joueuses retournées.');
 }
 
 function testPlayerMeasurementsAreIndependentAndHistorical(){
@@ -864,6 +923,23 @@ function testPresenceInteractionsStayNonBlocking(){
   });
 }
 
+function testPerformanceCriticalPathStaysNonBlocking(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const playerProfileSource = fs.readFileSync('pages/player-profile/playerProfile.js', 'utf8');
+  const teamProfileSource = fs.readFileSync('pages/team-profile/teamProfile.js', 'utf8');
+  const technicalSource = fs.readFileSync('pages/tests-techniques.html', 'utf8');
+  const swSource = fs.readFileSync('sw.js', 'utf8');
+
+  assert(appSource.includes("recordPerfEvent('auth:usable'"), 'Le démarrage doit mesurer le moment où l’application devient utilisable.');
+  assert(appSource.includes('Promise.allSettled([\n          syncCloud(false),'), 'Les synchronisations après connexion ne doivent pas bloquer l’interface.');
+  assert(!appSource.includes("await refreshCentralPlayersFromCloud({force:true, reason:'login'})"), 'La connexion ne doit pas forcer et attendre une nouvelle lecture des joueuses.');
+  assert(!playerProfileSource.includes('await preloadTeam(team'), 'La fiche individuelle ne doit pas précharger toutes les joueuses.');
+  assert(!teamProfileSource.includes('await preloadTeam(nextTeamId)'), 'La fiche équipe ne doit pas précharger les autres équipes.');
+  assert(technicalSource.includes('forceRefresh:options.forceRefresh===true'), 'Tests techniques doit réutiliser son cache sauf actualisation explicite.');
+  assert(swSource.includes('function staleWhileRevalidate(request)'), 'Les modules PWA doivent pouvoir être servis immédiatement depuis le cache.');
+  assert(appSource.includes('if(previousVersion === APP_SHELL_VERSION)'), 'Le cache applicatif ne doit être purgé que lors d’un changement de version.');
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -874,6 +950,7 @@ testPlayerFilteringAndDedupe();
 testPermissions();
 testPermissionUpdateDoesNotPromoteRole();
 testAttendanceRosterUsesActiveTeamAssignmentAtSessionDate();
+testPresenceUsesExplicitScopedRoster();
 testPlayerMeasurementsAreIndependentAndHistorical();
 testPermissionsRespectTeamHistoryAndModuleScope();
 testModuleAllPlayersScopeStaysModuleSpecific();
@@ -892,9 +969,11 @@ testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
+testPerformanceCriticalPathStaysNonBlocking();
 
 Promise.resolve()
   .then(testScopedPlayerReadFiltersInFirestore)
+  .then(testPresenceScopedRosterSurvivesColdReloadReconnect)
   .then(testMeasurementSaveWithoutSelectedInjuryPersistsAfterReload)
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)
   .then(() => {

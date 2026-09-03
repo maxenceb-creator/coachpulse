@@ -180,6 +180,10 @@ service cloud.firestore {
             get(/databases/$(database)/documents/players/$(playerId)).data.keys().hasAny(['teamIds'])
             && canAccessTeamList(get(/databases/$(database)/documents/players/$(playerId)).data.teamIds)
           )
+          || (
+            get(/databases/$(database)/documents/players/$(playerId)).data.keys().hasAny(['rosterTeamIds'])
+            && canAccessTeamList(get(/databases/$(database)/documents/players/$(playerId)).data.rosterTeamIds)
+          )
         );
     }
 
@@ -208,7 +212,7 @@ service cloud.firestore {
     }
 
     function hasScopeFields(data) {
-      return data.keys().hasAny(['teamId', 'teamIds']);
+      return data.keys().hasAny(['teamId', 'teamIds', 'rosterTeamIds']);
     }
 
     function canAccessScopedData(data) {
@@ -218,6 +222,7 @@ service cloud.firestore {
           && (
             canAccessTeam(valueOrEmpty(data, 'teamId'))
             || (data.keys().hasAny(['teamIds']) && canAccessTeamList(data.teamIds))
+            || (data.keys().hasAny(['rosterTeamIds']) && canAccessTeamList(data.rosterTeamIds))
           )
         )
         || (data.keys().hasAny(['playerId']) && canAccessLinkedPlayer(data.playerId))

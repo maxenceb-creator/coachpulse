@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-75-20260831-main-release';
+const CACHE_NAME = 'coachpulse-v6-4-77-presence-rosters';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
@@ -48,10 +48,18 @@ function cacheFirst(request) {
   return caches.match(request).then(cached => cached || fetch(request).then(response => cacheResponse(request, response)));
 }
 
+function staleWhileRevalidate(request) {
+  return caches.match(request).then(cached => {
+    const refresh = fetch(new Request(request, {cache:'no-store'}))
+      .then(response => cacheResponse(request, response))
+      .catch(() => null);
+    return cached || refresh.then(response => response || caches.match('./index.html'));
+  });
+}
+
 function shouldUseNetworkFirst(request, url) {
   if(request.mode === 'navigate') return true;
-  if(NETWORK_FIRST_ASSETS.has(assetKey(url))) return true;
-  return url.origin === self.location.origin && NETWORK_FIRST_EXTENSIONS.test(url.pathname);
+  return NETWORK_FIRST_ASSETS.has(assetKey(url));
 }
 
 self.addEventListener('install', event => {
@@ -76,6 +84,10 @@ self.addEventListener('fetch', event => {
   if(url.hostname.includes('gstatic.com') || url.hostname.includes('googleapis.com')) return;
   if(shouldUseNetworkFirst(event.request, url)) {
     event.respondWith(networkFirst(event.request));
+    return;
+  }
+  if(url.origin === self.location.origin && NETWORK_FIRST_EXTENSIONS.test(url.pathname)) {
+    event.respondWith(staleWhileRevalidate(event.request));
     return;
   }
   event.respondWith(cacheFirst(event.request).catch(() => caches.match('./index.html')));
