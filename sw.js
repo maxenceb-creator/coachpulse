@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-76-perf-fluidity';
+const CACHE_NAME = 'coachpulse-v6-4-77-presence-rosters';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',

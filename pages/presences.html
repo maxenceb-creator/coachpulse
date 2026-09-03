@@ -1858,6 +1858,8 @@
           return null;
         }
       }
+      let presenceScopedPlayers = null;
+      let presencePlayersSource = "loading";
       function playerName(player){
         const service = playersService();
         if(service?.displayName) return service.displayName(player);
@@ -1938,10 +1940,11 @@
       }
       function playersForTeam(teamId, dateValue){
         const service = playersService();
-        const rows = service?.readCachedPlayers ? service.readCachedPlayers() : [
+        const cachedRows = service?.readCachedPlayers ? service.readCachedPlayers() : [
           ...readJson("coachpulse:centralPlayers", []),
           ...readJson("coachpulse:customPlayers", [])
         ];
+        const rows = Array.isArray(presenceScopedPlayers) ? presenceScopedPlayers : (presencePlayersSource === "offline-cache" ? cachedRows : []);
         const normalized = service?.playersForTeamAtDate
           ? service.playersForTeamAtDate(Array.isArray(rows) ? rows : [], teamId, dateValue)
           : (Array.isArray(rows) ? rows : [])
@@ -1949,6 +1952,17 @@
             .filter(player => player?.playerId && String(player.status || "active").toLowerCase() !== "archived")
             .filter(player => playerMatchesTeam(player, teamId, dateValue));
         const deduped = service?.dedupePlayers ? service.dedupePlayers(normalized) : normalized;
+        if(new URLSearchParams(location.search).has("debug")) console.debug("[Présences roster]", {
+          teamId,
+          sessionDate:dateValue,
+          authorizedTeamIds:window.parent?.accessContext?.()?.authorizedTeamIds || [],
+          playersDownloadedFromFirestore:Array.isArray(presenceScopedPlayers) ? presenceScopedPlayers.length : 0,
+          playersMatchingRoster:deduped.length,
+          cacheSource:presencePlayersSource,
+          playerIdsRejected:(Array.isArray(presenceScopedPlayers) ? presenceScopedPlayers : [])
+            .map(player => String(player.playerId || player.id || ""))
+            .filter(playerId => playerId && !deduped.some(player => String(player.playerId || player.id || "") === playerId))
+        });
         return deduped.sort((a,b) => playerName(a).localeCompare(playerName(b), "fr"));
       }
       function normalizePresenceEventForStorage(event={}){
@@ -3247,6 +3261,10 @@
           content.innerHTML = '<div class="empty-state">Aucune équipe reliée à cet événement.</div>';
           return;
         }
+        if(presencePlayersSource === "loading"){
+          content.innerHTML = '<div class="empty-state">Chargement de l’effectif autorisé…</div>';
+          return;
+        }
         if(!players.length){
           content.innerHTML = '<div class="empty-state">Aucune joueuse trouvée pour cette équipe.</div>';
           return;
@@ -3673,8 +3691,16 @@
       async function initPresenceCloud(){
         try{
           const api = centralDataApi();
-          await api?.listPlayers?.({season:"all", includeArchived:true, moduleId:"presences"})
-            .catch(error => console.warn('[Présences] Préchargement effectif indisponible', error));
+          try{
+            if(typeof api?.listPlayers !== "function") throw new Error("API centrale indisponible");
+            const loadedPlayers = await api.listPlayers({season:"all", includeArchived:true, moduleId:"presences"});
+            presenceScopedPlayers = Array.isArray(loadedPlayers) ? loadedPlayers : [];
+            presencePlayersSource = "firestore-scoped";
+          }catch(error){
+            presenceScopedPlayers = null;
+            presencePlayersSource = "offline-cache";
+            console.warn('[Présences] Chargement effectif indisponible, cache hors ligne utilisé', error);
+          }
           await pullPresenceSettingsFromCloud();
           const presenceResult = await pullPresenceEventsFromCloud();
           const {cloudEvents=[]} = presenceResult || {};

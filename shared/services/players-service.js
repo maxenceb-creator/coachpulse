@@ -216,9 +216,15 @@
     const direct = normalizeAssignmentTeamReferences(raw);
     const history = normalizeSeasonHistoryTeamReferences(raw.seasonHistory || {});
     const assignments = Array.isArray(raw.teamAssignments) ? raw.teamAssignments.map(normalizeAssignmentTeamReferences) : raw.teamAssignments;
+    const rosterTeamIds = canonicalTeamIds([
+      ...direct.teamIds,
+      ...Object.values(history).flatMap(snapshot => snapshot.teamIds || []),
+      ...(Array.isArray(assignments) ? assignments.flatMap(assignment => assignment.teamIds || []) : [])
+    ]);
     return {
       teamId:direct.teamId,
       teamIds:direct.teamIds,
+      rosterTeamIds,
       seasonHistory:history,
       ...(Array.isArray(assignments) ? {teamAssignments:assignments} : {})
     };
@@ -293,7 +299,8 @@
   function normalizePlayer(raw={}){
     const names = splitName(raw);
     const birth = asText(raw.birth || raw.dateNaissance || raw.birthDate);
-    const sourceSeason = asText(raw.season || raw.saison || raw.currentSeason) || seasonFromDate();
+    const explicitSourceSeason = asText(raw.season || raw.saison);
+    const sourceSeason = explicitSourceSeason || asText(raw.currentSeason) || seasonFromDate();
     const currentSeason = seasonFromDate();
     const storedCategorie = asText(raw.categorie || raw.category);
     const storedSubCategory = asText(raw.subCategory || raw.sousCategorie || raw.sous_category || storedCategorie);
@@ -317,7 +324,7 @@
     ].map(asText).filter(Boolean))];
     const status = asText(raw.status || 'active').toLowerCase();
     const seasonHistory = normalizeSeasonHistoryTeamReferences(raw.seasonHistory || {});
-    if(sourceSeason) seasonHistory[sourceSeason] = {
+    if(sourceSeason && (explicitSourceSeason || !seasonHistory[sourceSeason])) seasonHistory[sourceSeason] = {
       categorie,
       subCategory,
       team,
@@ -331,6 +338,17 @@
     };
     const currentSnapshot = categorySnapshotForSeason({...raw, birth, categorie, subCategory, team, seasonHistory}, currentSeason);
 
+    const normalizedReferences = normalizePlayerTeamReferences({
+      ...raw,
+      teamId:canonicalTeamId(raw.teamId) || currentSnapshot.teamId || canonicalTeamId(currentSnapshot.team || team || categorie),
+      teamIds:canonicalTeamIds([
+        raw.teamId,
+        currentSnapshot.teamId,
+        ...(Array.isArray(currentSnapshot.teamIds) ? currentSnapshot.teamIds : []),
+        ...(Array.isArray(raw.teamIds) ? raw.teamIds : [])
+      ]),
+      seasonHistory
+    });
     return {
       ...raw,
       id: playerId,
@@ -350,6 +368,7 @@
         ...(Array.isArray(currentSnapshot.teamIds) ? currentSnapshot.teamIds : []),
         ...(Array.isArray(raw.teamIds) ? raw.teamIds : [])
       ]),
+      rosterTeamIds:normalizedReferences.rosterTeamIds,
       poste: asText(raw.poste || raw.position),
       numero: asText(raw.numero || raw.number),
       photo: asText(raw.photo || raw.avatar),
@@ -568,6 +587,7 @@
     if(!canonicalIds.length) return [];
     const reads = [];
     chunks(canonicalIds).forEach(teamChunk => {
+      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('rosterTeamIds', 'array-contains-any', teamChunk))));
       reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamId', 'in', teamChunk))));
       reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamIds', 'array-contains-any', teamChunk))));
     });
