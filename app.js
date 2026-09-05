@@ -50,7 +50,7 @@ const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260903-presence-rosters-v77';
+const APP_SHELL_VERSION = '20260905-match-cloud-sync-v78';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -1744,7 +1744,7 @@ function collectCentralFirestoreDocs(){
     });
   });
   const stats = parseStoredJson('coachStatsV170', null);
-  const matches = Array.isArray(stats?.matches) ? stats.matches : (Array.isArray(stats) ? stats.filter(x => x?.score || x?.events || x?.actions) : []);
+  const matches = Array.isArray(stats?.savedMatches) ? stats.savedMatches : (Array.isArray(stats?.matches) ? stats.matches : (Array.isArray(stats) ? stats.filter(x => x?.score || x?.events || x?.actions || x?.log) : []));
   matches.forEach((m, idx) => {
     const matchTeam = m.team || m.equipe || '';
     const matchTeamId = m.teamId || m.team_id || m.teamSnapshot?.teamId || teamsService()?.canonicalTeamId?.(matchTeam) || (matchTeam ? stableFirestoreId('team', matchTeam) : '');
@@ -1777,7 +1777,7 @@ function collectCentralFirestoreDocs(){
       competition:m.competition || '',
       source:m.source || 'Coach Stats'
     });
-    const actions = Array.isArray(m.events) ? m.events : (Array.isArray(m.actions) ? m.actions : []);
+    const actions = Array.isArray(m.log) ? m.log : (Array.isArray(m.events) ? m.events : (Array.isArray(m.actions) ? m.actions : []));
     actions.forEach((ev, evIdx) => {
       const player = ev.playerId ? playerIndex.get(ev.playerId) : normalizePlayer({joueuse:ev.player || ev.joueuse || '', categorie:ev.categorie || '', source:'Coach Stats'});
       const eventId = ev.eventId || stableFirestoreId('event', matchId, ev.minute, ev.action || ev.type, evIdx);
@@ -4412,6 +4412,96 @@ function seasonFromDate(date=new Date()){
   return safe.getMonth() >= 6 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
 }
 function currentSeason(){ return seasonFromDate(new Date()); }
+
+function matchDocumentId(match={}){
+  return String(match.matchId || match.id || stableFirestoreId('match', match.createdAt || match.date, match.teamId || match.team, match.opponent || match.adversaire)).slice(0, 120);
+}
+function matchEventDocumentId(matchId, event={}, index=0){
+  return String(event.eventId || stableFirestoreId('event', matchId, event.ts || event.t || event.minute || index, event.playerId || event.player || '', event.key || event.action || '', index)).slice(0, 120);
+}
+function matchSyncCapabilities(){
+  return {available:!!(db && currentUser), online:navigator.onLine, canRead:canViewModule('stats'), canWrite:canEditModule('stats')};
+}
+function normalizeMatchForFirestore(raw={}){
+  const matchId = matchDocumentId(raw);
+  const createdAt = raw.createdAt || raw.date || new Date().toISOString();
+  const team = raw.team || raw.equipe || '';
+  const teamId = raw.teamId || raw.team_id || raw.teamSnapshot?.teamId || teamsService()?.canonicalTeamId?.(team) || '';
+  const teamIds = [...new Set([teamId, ...(raw.teamIds || [])].filter(Boolean))];
+  const season = raw.season || seasonFromDate(createdAt);
+  const events = (raw.log || raw.events || raw.actions || []).map((event, index) => ({
+    ...event,
+    id:matchEventDocumentId(matchId, event, index),
+    eventId:matchEventDocumentId(matchId, event, index),
+    matchId,
+    teamId:event.teamId || teamId,
+    teamIds:[...new Set([event.teamId || teamId, ...teamIds].filter(Boolean))],
+    minute:event.minute || event.t || '',
+    source:event.source || 'Coach Stats'
+  }));
+  return {
+    ...raw,
+    id:matchId,
+    matchId,
+    createdAt,
+    date:raw.date || createdAt,
+    season,
+    team,
+    teamId,
+    teamIds,
+    teamSnapshot:{...(raw.teamSnapshot || {}), team, name:team, teamId, teamIds},
+    status:raw.status || 'COMPLETED',
+    source:raw.source || 'Coach Stats',
+    events
+  };
+}
+async function matchSaveToFirestore(raw={}){
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise. Le match reste sauvegardé localement.');
+  if(!navigator.onLine) throw new Error('Hors ligne. Le match reste en attente de synchronisation.');
+  if(!canEditModule('stats')) throw new Error('Droits insuffisants pour synchroniser les matchs.');
+  const match = normalizeMatchForFirestore(raw);
+  if(!match.teamId) throw new Error('Équipe non identifiée. Le match reste en attente de synchronisation.');
+  const matchRef = firebaseFns.doc(db, 'matches', match.matchId);
+  const existing = await firebaseFns.getDoc(matchRef);
+  const localVersion = Date.parse(match.updatedAtIso || match.createdAt || match.date || 0) || 0;
+  const cloudVersion = existing.exists() ? (Date.parse(existing.data().updatedAtIso || existing.data().createdAt || existing.data().date || 0) || 0) : 0;
+  if(existing.exists() && cloudVersion > localVersion){
+    return {matchId:match.matchId, status:'cloud-newer', events:0};
+  }
+  const updatedAtIso = new Date().toISOString();
+  const matchData = {...match};
+  delete matchData.events;
+  await firebaseFns.setDoc(matchRef, {
+    ...firestoreSafeData(matchData),
+    updatedAt:firebaseFns.serverTimestamp(),
+    updatedAtIso,
+    updatedBy:currentUser.uid,
+    updatedByEmail:currentUser.email || ''
+  }, {merge:true});
+  const writes = match.events.map(event => firebaseFns.setDoc(firebaseFns.doc(db, 'matchEvents', event.eventId), {
+    ...firestoreSafeData(event),
+    updatedAt:firebaseFns.serverTimestamp(),
+    updatedAtIso,
+    updatedBy:currentUser.uid
+  }, {merge:true}));
+  await Promise.all(writes);
+  return {matchId:match.matchId, status:'synced', events:writes.length, updatedAtIso};
+}
+async function matchListFromFirestore(filters={}){
+  if(!db || !currentUser || !canViewModule('stats')) return [];
+  const teamIds = [...new Set((filters.teamIds || (filters.teamId ? [filters.teamId] : getAuthorizedTeamIds())).filter(Boolean))];
+  const queries = teamIds.length
+    ? teamIds.map(teamId => firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamId', '==', teamId))))
+    : [firebaseFns.getDocs(firebaseFns.collection(db, 'matches'))];
+  const snapshots = await Promise.all(queries);
+  const byId = new Map();
+  snapshots.forEach(snapshot => snapshot.forEach(docSnap => {
+    const row = {id:docSnap.id, matchId:docSnap.id, ...docSnap.data()};
+    if(filters.season && row.season && row.season !== filters.season) return;
+    byId.set(docSnap.id, row);
+  }));
+  return [...byId.values()].sort((a,b) => String(b.createdAt || b.date || '').localeCompare(String(a.createdAt || a.date || '')));
+}
 function playerForSeason(player={}, season=currentSeason()){
   const service = playersService();
   return service?.playerForSeason ? service.playerForSeason(player, season) : player;
@@ -5632,7 +5722,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
