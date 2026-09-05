@@ -84,6 +84,7 @@ const $=id=>document.getElementById(id);
 const storage=(()=>{try{return window.CoachPulseStorage||window.parent?.CoachPulseStorage||null}catch(_){return window.CoachPulseStorage||null}})();
 const storageMemoryRaw={};
 const TECHNICAL_ROWS_KEY='coachStatsV13Rows';
+const TECHNICAL_PENDING_ROWS_KEY='coachpulse:technicalTestsPending';
 const TECHNICAL_OBJECTIVES_KEY='coachStatsV13Objectives';
 const TECHNICAL_FOOT_HINTS_KEY='coachpulse:technicalPlayerFootHints';
 function storageRaw(key,fallback=''){if(storage?.get)return storage.get(key,fallback);return Object.prototype.hasOwnProperty.call(storageMemoryRaw,key)?storageMemoryRaw[key]:fallback}
@@ -92,12 +93,16 @@ function storageSetJson(key,value){storageMemoryRaw[key]=JSON.stringify(value);i
 function storageRemove(key){delete storageMemoryRaw[key];if(storage?.remove)return storage.remove(key);return true}
 let charts={}, familyState={max:true,reg:true,mouv:true}, hideEmpty=false, editingTechnicalTestId='', technicalSaveInProgress=false;
 function api(){try{return window.parent?.CoachPulseCentralData||{}}catch(_){return {}}}
-function technicalRowId(row={},fallback=''){return String(row.technicalTestId||row.testId||row.id||fallback||'').trim();}
-function rowFinalized(row={}){return row.finalized===true||row.status==='finalized';}
+function technicalRowId(row={},fallback=''){return String(row.draftId||row.technicalTestId||row.testId||row.id||fallback||'').trim();}
+function rowFinalized(row={}){return !(row.finalized===false||row.status==='draft'||row.status==='pending');}
 function rowDisplayName(row={}){return playerById(row.playerId)?.label||row.playerName||playerById(row.joueuse)?.label||row?.playerSnapshot?.displayName||row.joueuse||'Joueuse';}
 
 function localRows(){return storageJson(TECHNICAL_ROWS_KEY,[])}
 	function setLocalRows(rows){storageSetJson(TECHNICAL_ROWS_KEY,rows);resetTechnicalRowsCache();}
+function pendingRows(){return storageJson(TECHNICAL_PENDING_ROWS_KEY,[])}
+function setPendingRows(rows){storageSetJson(TECHNICAL_PENDING_ROWS_KEY,rows);resetTechnicalRowsCache();}
+function upsertPendingRow(row){const rows=pendingRows();const id=technicalRowId(row);const idx=rows.findIndex(r=>technicalRowId(r)===id);if(idx>=0)rows[idx]=row;else rows.push(row);setPendingRows(rows);}
+function removePendingRow(testId){setPendingRows(pendingRows().filter(r=>technicalRowId(r)!==testId));}
 function setObjectives(obj){storageSetJson(TECHNICAL_OBJECTIVES_KEY,obj);}
 function objectives(){return storageJson(TECHNICAL_OBJECTIVES_KEY,null)||DATA.obj||{}}
 function num(v){return v===''||v===null||v===undefined||Number.isNaN(Number(v))?0:Number(v)}
@@ -125,7 +130,7 @@ function escAttr(s){return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&qu
 	function playerFromTechnicalRow(row={}){const indexes=technicalPlayerIndexes();if(row.playerId)return indexes.idMap.get(String(row.playerId||'').trim())||indexes.aliasMap.get(normPlayer(row.playerId))||null;const target=normPlayer(row.joueuse||row.playerName);return target?indexes.aliasMap.get(target)||null:null;}
 	function sanitizeRow(row){const tests={};TESTS.forEach(([k])=>{const v=row?.tests?.[k];tests[k]=hasValue(v)?Number(v):'';});const player=playerFromTechnicalRow(row);const season=seasonFromDate(row?.date)||row?.saison||row?.season||appCurrentSeason();const seasonPlayer=player?playerForSeasonView(player,season):{};const teamIds=teamIdsFromSources(row,row?.playerSnapshot,player,seasonPlayer);const teamId=String(row?.teamId||row?.playerSnapshot?.teamId||seasonPlayer?.teamId||player?.teamId||teamIds[0]||'').trim();const playerId=String(row?.playerId||player?.playerId||player?.id||'').trim();const playerName=player?.label||row?.playerName||row?.playerSnapshot?.displayName||row?.joueuse||playerId;return {...row,playerId,teamId,teamIds,tests,saison:season,season,playerName};}
 	function rowsCacheKey(value){let hash=0;for(let i=0;i<value.length;i+=1)hash=((hash*31)+value.charCodeAt(i))>>>0;return `${value.length}:${hash}`;}
-function allRows(){const localKey=storageRaw(TECHNICAL_ROWS_KEY,'[]'),signature=`${DATA.hist.length}:${technicalPlayerIndexes().signature}:${rowsCacheKey(localKey)}`;if(technicalRowsCache?.signature===signature)return technicalRowsCache.rows;const sourceRows=[...DATA.hist,...localRows()];const rows=sourceRows.filter(isCleanTechnicalRow).map(sanitizeRow).sort((a,b)=>technicalDateTime(a.date)-technicalDateTime(b.date)||String(a.date||'').localeCompare(String(b.date||'')));technicalRowsCache={signature,rows};return rows;}
+function allRows(){const localKey=storageRaw(TECHNICAL_ROWS_KEY,'[]'),signature=`${DATA.hist.length}:${technicalPlayerIndexes().signature}:${rowsCacheKey(localKey)}`;if(technicalRowsCache?.signature===signature)return technicalRowsCache.rows;const sourceRows=[...DATA.hist,...localRows()].filter(row=>rowFinalized(row));const rows=sourceRows.filter(isCleanTechnicalRow).map(sanitizeRow).sort((a,b)=>technicalDateTime(a.date)-technicalDateTime(b.date)||String(a.date||'').localeCompare(String(b.date||'')));technicalRowsCache={signature,rows};return rows;}
 function opt(value,label){const o=document.createElement('option');o.value=value;o.textContent=label;return o;}
 function catRank(c){if(String(c||'').toUpperCase().includes('SÉNIOR')||String(c||'').toUpperCase().includes('SENIOR'))return 999;const m=String(c||'').match(/(\d+)/);return m?Number(m[1]):998;}
 function profileSeason(){const s=selectedSeasonValue('seasonFilter');return s==='all'?appCurrentSeason():s;}
@@ -154,30 +159,21 @@ if(!id||!d){$('commonMsg').textContent='Choisis une joueuse et une date dans le 
 const ps=playerForTestSeason(p,d),cat=ps?.categorie||p?.categorie||$('cat').value,sub=ps?.subCategory||ps?.sousCategorie||p?.sousCategorie||cat;
 const tests={};TESTS.forEach(([k])=>{const f=$('c_'+k);tests[k]=f&&f.value!==''?Number(f.value):'';});
 if(!Object.values(tests).some(hasValue)){$('commonMsg').textContent='Renseigne au moins une mesure.';return;}
-const foot=playerFootValue(ps)||playerFootValue(p),nationalite=playerNationalityValue(ps)||playerNationalityValue(p),teamIds=teamIdsFromSources(p,ps),teamId=ps?.teamId||p?.teamId||teamIds[0]||'',wasEditing=!!editingTechnicalTestId;
-const row={technicalTestId:editingTechnicalTestId,testId:editingTechnicalTestId,playerId:id,joueuse:id,playerName:p?.label||id,teamId,teamIds,categorie:cat,categorieListe:cat,sousCategorie:sub,subCategory:sub,date:d,season:seasonFromDate(d),saison:seasonFromDate(d),foot,pied:foot,meilleurPiedLabel:foot,nationalite,nationality:nationalite,playerSnapshot:playerSnapshotForTest(p,ps,{playerId:id,playerName:p?.label||id,categorie:cat,subCategory:sub,teamId,teamIds}),tests,objectifs:objectives()[cat]||{},testType:'jongles',source:'Tests techniques',finalized:true,status:'finalized'};
+	const foot=playerFootValue(ps)||playerFootValue(p),nationalite=playerNationalityValue(ps)||playerNationalityValue(p),teamIds=teamIdsFromSources(p,ps),teamId=ps?.teamId||p?.teamId||teamIds[0]||'',wasEditing=!!editingTechnicalTestId,draftId=editingTechnicalTestId||`draft-${Date.now()}-${id}`;
+	const row={draftId,id:draftId,playerId:id,joueuse:id,playerName:p?.label||id,teamId,teamIds,categorie:cat,categorieListe:cat,sousCategorie:sub,subCategory:sub,date:d,season:seasonFromDate(d),saison:seasonFromDate(d),foot,pied:foot,meilleurPiedLabel:foot,nationalite,nationality:nationalite,playerSnapshot:playerSnapshotForTest(p,ps,{playerId:id,playerName:p?.label||id,categorie:cat,subCategory:sub,teamId,teamIds}),tests,objectifs:objectives()[cat]||{},testType:'jongles',source:'Tests techniques',finalized:false,status:'draft'};
 const saveBtn=$('commonSave');
 technicalSaveInProgress=true;
-if(saveBtn){saveBtn.disabled=true;saveBtn.textContent=wasEditing?'Modification...':'Enregistrement...';}
-$('commonMsg').textContent='Enregistrement en cours...';
-try{
-if(typeof api().technicalSaveTest==='function'){
-await api().technicalSaveTest(row);
-await refreshTechnicalCloudIfNeeded(true);
-}else{
-const rows=localRows(),rowId=editingTechnicalTestId||`local-${Date.now()}-${id}`;
-const idx=rows.findIndex(r=>technicalRowId(r)===rowId);
-const clean={...row,technicalTestId:rowId,testId:rowId,id:rowId,finalized:true,status:'finalized'};
-if(idx>=0)rows[idx]=clean;else rows.push(clean);
-setLocalRows(rows);
-}
-editingTechnicalTestId='';
-if(saveBtn)saveBtn.textContent='Enregistrer le test';
+	if(saveBtn){saveBtn.disabled=true;saveBtn.textContent=wasEditing?'Modification...':'Ajout à l’historique...';}
+	$('commonMsg').textContent='Ajout à l’historique de relecture...';
+	try{
+	upsertPendingRow(row);
+	editingTechnicalTestId='';
+	if(saveBtn)saveBtn.textContent='Enregistrer le test';
 $('player').value=id;if(p)$('cat').value=cat;
 fillPlayerSelect($('player'),{empty:'Toutes les joueuses',cat:$('cat').value,grouped:true,showCat:false});
 $('player').value=id;fillSeasons();renderCommonHistory();updateJongles();
 if(document.querySelector('.tab.active')?.dataset.tab==='bilan')renderBilan();
-$('commonMsg').textContent=wasEditing?'Test modifié et enregistré dans la base.':'Test enregistré dans la base. Onglet Jongle mis à jour.';
+	$('commonMsg').textContent=wasEditing?'Test modifié dans l’historique. Relis puis valide définitivement.':'Test ajouté à l’historique. Relis puis clique sur Enregistrer pour validation définitive.';
 }catch(e){
 $('commonMsg').textContent=e.message||String(e);
 }finally{
@@ -185,13 +181,13 @@ technicalSaveInProgress=false;
 if(saveBtn){saveBtn.disabled=false;saveBtn.textContent=editingTechnicalTestId?'Modifier le test':'Enregistrer le test';}
 }}
 function clearCommon(){TESTS.forEach(([k])=>{const f=$('c_'+k);if(f)f.value='';});editingTechnicalTestId='';$('commonSave').textContent='Enregistrer le test';if($('seasonFilter'))$('seasonFilter').value='__current';if($('cat'))$('cat').value='';fillPlayerSelect($('player'),{empty:'Toutes les joueuses',grouped:true,showCat:false});if($('player'))$('player').value='';$('commonDate').valueAsDate=new Date();syncCommonSeason();updateProfile([]);updateJongles();renderCommonHistory();$('commonMsg').textContent='Saisie annulée.';}
-function commonHistoryRows(){return localRows().map(sanitizeRow).filter(row=>!rowFinalized(row)).sort((a,b)=>technicalDateTime(b.date)-technicalDateTime(a.date)||String(b.date||'').localeCompare(String(a.date||'')));}
+function commonHistoryRows(){const byId=new Map();[...localRows(),...pendingRows()].forEach(row=>{const clean=sanitizeRow(row);if(!rowFinalized(clean))byId.set(technicalRowId(clean),clean);});return [...byId.values()].sort((a,b)=>technicalDateTime(b.date)-technicalDateTime(a.date)||String(b.date||'').localeCompare(String(a.date||'')));}
 function ensureCommonHistory(){if($('commonHistoryTable'))return;const section=$('saisie');section?.insertAdjacentHTML('beforeend',`<div class="card"><h2 class="history-title">Historique des tests saisis <span id="commonHistoryCounter" class="history-counter">0</span></h2><div class="wrap"><table id="commonHistoryTable"><thead><tr><th>Joueuse</th><th>Date</th><th>Saison</th><th>Catégorie</th><th>Maximum</th><th>Régularité</th><th>Mouvement</th><th>Actions</th></tr></thead><tbody></tbody></table></div></div>`);}
 function familySummary(row,fam){return GROUPS[fam].map(([k,label])=>hasValue(row.tests?.[k])?`${shortLabel(label)} ${row.tests[k]}`:'').filter(Boolean).join(' · ')||'-';}
 function renderCommonHistory(){ensureCommonHistory();const tbody=$('commonHistoryTable')?.querySelector('tbody');if(!tbody)return;const rows=commonHistoryRows();$('commonHistoryCounter').textContent=rows.length;tbody.innerHTML='';rows.forEach(row=>{const id=technicalRowId(row);const tr=document.createElement('tr');tr.innerHTML=`<td><b>${rowDisplayName(row)}</b></td><td>${formatTechnicalDate(row.date)}</td><td>${row.saison||row.season||'-'}</td><td><span class="badge">${row.categorie||'-'}</span></td><td>${familySummary(row,'max')}</td><td>${familySummary(row,'reg')}</td><td>${familySummary(row,'mouv')}</td><td><button class="primary" data-finalize-technical-test="${escAttr(id)}" type="button">Enregistrer</button> <button class="secondary" data-edit-technical-test="${escAttr(id)}" type="button">Modifier</button> <button class="danger" data-delete-technical-test="${escAttr(id)}" type="button">Supprimer</button></td>`;tbody.appendChild(tr);});}
 function fillFormFromTechnicalTest(row){const p=DATA.players.find(x=>x.id===(row.playerId||row.joueuse));editingTechnicalTestId=technicalRowId(row);$('commonTestType').value=row.testType||'jongles';$('cat').value=row.categorie||row.categorieListe||p?.categorie||'';commonCatChanged();$('player').value=row.playerId||row.joueuse||'';$('commonDate').value=row.date||new Date().toISOString().slice(0,10);syncCommonSeason();syncCommonType();TESTS.forEach(([k])=>{const f=$('c_'+k);if(f)f.value=hasValue(row.tests?.[k])?row.tests[k]:'';});$('commonSave').textContent='Modifier le test';$('commonMsg').textContent='Modification en cours. Valide pour remplacer la saisie.';document.querySelector('.tab[data-tab="saisie"]')?.click();}
-async function finalizeTechnicalTest(testId){const row=commonHistoryRows().find(r=>technicalRowId(r)===testId);if(!row)return $('commonMsg').textContent='Test technique introuvable.';try{if(typeof api().technicalSaveTest==='function'){await api().technicalSaveTest({...row,finalized:true,status:'finalized'});await loadTechnicalData(false);}else{const rows=localRows().map(r=>technicalRowId(r)===testId?{...r,finalized:true,status:'finalized'}:r);setLocalRows(rows);}renderCommonHistory();updateJongles();$('commonMsg').textContent=`Test enregistré définitivement pour ${rowDisplayName(row)}.`;}catch(e){$('commonMsg').textContent=e.message||String(e);}}
-async function deleteTechnicalTest(testId){const row=localRows().find(r=>technicalRowId(r)===testId)||commonHistoryRows().find(r=>technicalRowId(r)===testId);if(!row)return $('commonMsg').textContent='Test technique introuvable.';if(!confirm(`Supprimer le test technique du ${formatTechnicalDate(row.date)} pour ${rowDisplayName(row)} ?`))return;try{if(typeof api().technicalDeleteTest==='function'){await api().technicalDeleteTest(row);await loadTechnicalData(false);}else setLocalRows(localRows().filter(r=>technicalRowId(r)!==testId));if(editingTechnicalTestId===testId)clearCommon();renderCommonHistory();updateJongles();$('commonMsg').textContent='Test technique supprimé.';}catch(e){$('commonMsg').textContent=e.message||String(e);}}
+async function finalizeTechnicalTest(testId){const row=commonHistoryRows().find(r=>technicalRowId(r)===testId);if(!row)return $('commonMsg').textContent='Test technique introuvable.';try{if(typeof api().technicalSaveTest==='function'){const payload={...row,finalized:true,status:'finalized'};delete payload.draftId;if(String(payload.technicalTestId||'').startsWith('draft-'))delete payload.technicalTestId;if(String(payload.testId||'').startsWith('draft-'))delete payload.testId;if(String(payload.id||'').startsWith('draft-'))delete payload.id;await api().technicalSaveTest(payload);removePendingRow(testId);await loadTechnicalData(false);}else{const finalRow={...row,technicalTestId:testId,testId:testId,id:testId,finalized:true,status:'finalized'};delete finalRow.draftId;setLocalRows([...localRows().filter(r=>technicalRowId(r)!==testId),finalRow]);removePendingRow(testId);}renderCommonHistory();updateJongles();$('commonMsg').textContent=`Test enregistré définitivement pour ${rowDisplayName(row)}.`;}catch(e){$('commonMsg').textContent=e.message||String(e);}}
+async function deleteTechnicalTest(testId){const pending=pendingRows().find(r=>technicalRowId(r)===testId);const row=pending||localRows().find(r=>technicalRowId(r)===testId)||commonHistoryRows().find(r=>technicalRowId(r)===testId);if(!row)return $('commonMsg').textContent='Test technique introuvable.';if(!confirm(`Supprimer le test technique du ${formatTechnicalDate(row.date)} pour ${rowDisplayName(row)} ?`))return;try{if(pending){removePendingRow(testId);}else if(typeof api().technicalDeleteTest==='function'){await api().technicalDeleteTest(row);await loadTechnicalData(false);}else setLocalRows(localRows().filter(r=>technicalRowId(r)!==testId));if(editingTechnicalTestId===testId)clearCommon();renderCommonHistory();updateJongles();$('commonMsg').textContent='Test technique supprimé.';}catch(e){$('commonMsg').textContent=e.message||String(e);}}
 async function loadTechnicalData(updateUi=true, options={}){try{if(typeof api().technicalListData==='function'){const rows=await api().technicalListData({season:'all',forceRefresh:options.forceRefresh===true});if(Array.isArray(rows))setLocalRows(rows);}if(updateUi){fillSeasons();renderCommonHistory();refreshActiveTechnicalTab();}}catch(e){$('commonMsg').textContent=e.message||String(e);}}
 let lastTechnicalCloudRefresh=0;
 async function refreshTechnicalCloudIfNeeded(force=false){const now=Date.now();if(!force&&now-lastTechnicalCloudRefresh<60000)return;lastTechnicalCloudRefresh=now;await loadTechnicalData(true,{forceRefresh:true});}
