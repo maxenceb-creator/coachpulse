@@ -383,6 +383,46 @@ function teamsService(){
 function presenceEventsService(){
   return window.CoachPulsePresenceEventsService || null;
 }
+function presenceTeamIdRefs(...sources){
+  const refs = [];
+  const collect = source => {
+    if(source == null) return;
+    if(Array.isArray(source)){
+      source.forEach(collect);
+      return;
+    }
+    if(typeof source !== 'object'){
+      refs.push(source);
+      return;
+    }
+    refs.push(
+      source.teamId,
+      source.team_id,
+      source.team,
+      source.equipe,
+      source.name,
+      source.category,
+      source.categorie
+    );
+    collect(source.teamIds);
+    collect(source.authorizedTeamIds);
+    collect(source.teamSnapshot);
+    collect(source.sessionSnapshot);
+    collect(source.playerSnapshot);
+  };
+  sources.forEach(collect);
+  const service = teamsService();
+  const direct = refs.map(value => String(value || '').trim()).filter(Boolean);
+  const aliases = direct.flatMap(value => {
+    if(service?.canonicalTeamAliases) return service.canonicalTeamAliases(value);
+    if(service?.canonicalTeamId) return [service.canonicalTeamId(value), value, value.toLowerCase()];
+    return [value, value.toLowerCase()];
+  });
+  return [...new Set([...direct, ...aliases].map(value => String(value || '').trim()).filter(Boolean))];
+}
+function canAccessAnyPresenceTeam(...sources){
+  return presenceTeamIdRefs(...sources).some(teamId => canAccessTeamId(teamId));
+}
 function profilePresenceParseDate(value){
   const raw = String(value || '').trim();
   if(!raw) return null;
@@ -5345,11 +5385,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   const sessionId = String(session.sessionId || session.id || '').trim();
   const dateFromId = sessionId.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
   const eventDate = session.date || session.startDate || session.day || dateFromId || '';
-  const teamIds = [...new Set([
-    session.teamId,
-    ...(Array.isArray(session.teamIds) ? session.teamIds : []),
-    ...(Array.isArray(session.teamSnapshot?.teamIds) ? session.teamSnapshot.teamIds : [])
-  ].map(value => String(value || '').trim()).filter(Boolean))];
+  const teamIds = presenceTeamIdRefs(session, session.teamSnapshot, session.sessionSnapshot);
   const rowsForSession = attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId && presenceUiStatusFromCode(row.status));
   const embeddedAttendanceIsAuthoritative = Number(session.embeddedAttendanceVersion || 0) >= 2;
   const embeddedAttendance = firestoreSafeData(session.attendance || {});
@@ -5361,7 +5397,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
       comment:row.comment || row.note || '',
       attendanceId:row.attendanceId || row.id || '',
       teamId:row.teamId || session.teamId || '',
-      teamIds:row.teamIds || teamIds,
+      teamIds:presenceTeamIdRefs(row, row.playerSnapshot, teamIds),
       playerSnapshot:row.playerSnapshot || {}
     };
   });
@@ -5589,23 +5625,21 @@ function presenceSubscribeSettings(onChange){
 }
 async function presenceSaveEvent(event={}){
   if(!canEditModule('presences')) throw new Error('Modification Présences non autorisée.');
-  if(!event.teamId || !canAccessTeamId(event.teamId)) throw new Error('Accès non autorisé à cette équipe.');
+  if(!canAccessAnyPresenceTeam(event)) throw new Error('Accès non autorisé à cette équipe.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = presenceEventsService();
   const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
   const sessionId = session.sessionId || event.id;
   const now = new Date().toISOString();
-  const sessionTeamIds = [...new Set([
-    session.teamId,
-    ...(Array.isArray(session.teamIds) ? session.teamIds : []),
-    ...(Array.isArray(event.teamIds) ? event.teamIds : [])
-  ].map(value => String(value || '').trim()).filter(Boolean))];
+  const sessionTeamIds = presenceTeamIdRefs(session, event, session.teamSnapshot, event.teamSnapshot);
+  const primaryTeamId = presenceTeamIdRefs(session.teamId || event.teamId, session, event).find(teamId => canAccessTeamId(teamId)) || session.teamId || event.teamId || sessionTeamIds[0] || '';
   const sessionPayload = {
     ...session,
+    teamId:primaryTeamId,
     teamIds:sessionTeamIds,
     teamSnapshot:{
       ...(session.teamSnapshot || event.teamSnapshot || {}),
-      teamId:session.teamId || event.teamId || '',
+      teamId:primaryTeamId,
       teamIds:sessionTeamIds,
       name:session.team || event.team || '',
       category:session.category || event.category || event.categorie || ''
@@ -5631,24 +5665,24 @@ async function presenceSaveEvent(event={}){
     .filter(row => row.playerId)
     .map(row => ({
       ...row,
-      teamId:row.teamId || session.teamId || event.teamId || '',
-      teamIds:[...new Set([...(Array.isArray(row.teamIds) ? row.teamIds : []), ...sessionTeamIds].filter(Boolean))],
+      teamId:row.teamId || primaryTeamId || '',
+      teamIds:presenceTeamIdRefs(row, row.playerSnapshot, sessionTeamIds),
       sessionSnapshot:{
         ...(row.sessionSnapshot || {}),
         sessionId,
         date:sessionPayload.date || '',
-        teamId:sessionPayload.teamId || '',
+        teamId:primaryTeamId,
         teamIds:sessionTeamIds,
         procedure:presencePlainProcedure(row.sessionSnapshot?.procedure || sessionPayload.procedure)
       },
       playerSnapshot:{
         ...(row.playerSnapshot || {}),
         playerId:row.playerId,
-        teamId:row.playerSnapshot?.teamId || row.teamId || session.teamId || event.teamId || '',
-        teamIds:[...new Set([...(Array.isArray(row.playerSnapshot?.teamIds) ? row.playerSnapshot.teamIds : []), ...(Array.isArray(row.teamIds) ? row.teamIds : []), ...sessionTeamIds].filter(Boolean))]
+        teamId:row.playerSnapshot?.teamId || row.teamId || primaryTeamId || '',
+        teamIds:presenceTeamIdRefs(row.playerSnapshot, row, sessionTeamIds)
       }
     }))
-    .filter(row => !row.teamId || canAccessTeamId(row.teamId));
+    .filter(row => canAccessAnyPresenceTeam(row, row.playerSnapshot, row.sessionSnapshot, sessionTeamIds));
   const nextAttendanceIds = new Set(attendanceRows.map(row => row.attendanceId || row.id).filter(Boolean));
   const existingAttendanceSnap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)));
   const staleAttendanceDeletes = [];

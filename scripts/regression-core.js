@@ -766,7 +766,8 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   assert.equal(byTeam.attendance.length, 2);
   assert.equal(byTeam.attendance[0].playerId, 'player-a');
   assert.equal(byTeam.attendance[0].teamId, 'team-u13-a');
-  assert.equal(byTeam.attendance[0].teamIds.join(','), 'team-u13-a');
+  assert(byTeam.attendance[0].teamIds.includes('team-u13-a'), 'Les lignes de présence doivent conserver le teamId canonique.');
+  assert(byTeam.attendance[0].teamIds.includes('U13 A'), 'Les lignes de présence doivent conserver les alias utiles au partage entre profils.');
   assert.equal(byTeam.attendance[1].status, 'AJ');
   assert.equal(byPlayer.sessions[0].teamId, 'team-u13-a');
   assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
