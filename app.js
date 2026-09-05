@@ -5474,10 +5474,14 @@ function presenceSubscribeEvents(onChange){
   const queries = [];
   if(isAdmin() || canAccessAllPlayersForModule('presences')){
     queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true)));
+    queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences')));
   }else{
     for(let i=0;i<authorizedTeamIds.length;i+=10){
       const chunk = authorizedTeamIds.slice(i,i+10);
       queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true), firebaseFns.where('teamId', 'in', chunk)));
+      queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true), firebaseFns.where('teamIds', 'array-contains-any', chunk)));
+      queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences'), firebaseFns.where('teamId', 'in', chunk)));
+      queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences'), firebaseFns.where('teamIds', 'array-contains-any', chunk)));
     }
   }
   let initialized = 0;
