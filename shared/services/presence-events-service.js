@@ -93,15 +93,33 @@
   function uniqueTexts(values=[]){
     return [...new Set(values.map(text).filter(Boolean))];
   }
+  function presenceTeamAliases(values=[]){
+    const service = global.CoachPulseTeamsService || null;
+    const refs = uniqueTexts(values);
+    const aliases = refs.flatMap(value => {
+      if(service?.canonicalTeamAliases) return service.canonicalTeamAliases(value);
+      if(service?.canonicalTeamId) return [service.canonicalTeamId(value), value, text(value).toLowerCase()];
+      return [value, text(value).toLowerCase()];
+    });
+    return uniqueTexts([...refs, ...aliases]);
+  }
   function eventId(event={}){
     return text(event.id || event.sessionId || event.eventId);
   }
   function teamIdsFromEvent(event={}){
-    return uniqueTexts([
+    return presenceTeamAliases([
       event.teamId,
       event.team_id,
+      event.team,
+      event.equipe,
+      event.category,
+      event.categorie,
       event.teamSnapshot?.teamId,
+      event.teamSnapshot?.name,
+      event.teamSnapshot?.category,
       event.sessionSnapshot?.teamId,
+      event.sessionSnapshot?.name,
+      event.sessionSnapshot?.category,
       ...(Array.isArray(event.teamIds) ? event.teamIds : []),
       ...(Array.isArray(event.teamSnapshot?.teamIds) ? event.teamSnapshot.teamIds : []),
       ...(Array.isArray(event.sessionSnapshot?.teamIds) ? event.sessionSnapshot.teamIds : [])

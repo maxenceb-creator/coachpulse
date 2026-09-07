@@ -348,7 +348,7 @@
 
   const service = {
     COLLECTION, SETTINGS_COLLECTION, OPTIONS_ID, OFFICIAL_TEAMS, DEFAULT_DB_OPTIONS,
-    stableId, canonicalTeamId, canonicalTeamIds, stripTeamIdPrefixes, officialTeamFromReference,
+    stableId, canonicalTeamId, canonicalTeamIds, canonicalTeamAliases, stripTeamIdPrefixes, officialTeamFromReference,
     defaultTeamForSubCategory, categoryForSubCategory, resolveOfficialTeam, cleanOptionList,
     officialTeamRows, mergeWithOfficialTeams, normalizeTeam, normalizeTeamForWrite,
     listTeams, ensureOfficialTeams, getTeam, saveTeam, archiveTeam, readDatabaseOptions, saveDatabaseOptions, invalidateTeamsCache

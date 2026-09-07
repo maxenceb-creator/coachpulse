@@ -766,7 +766,8 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   assert.equal(byTeam.attendance.length, 2);
   assert.equal(byTeam.attendance[0].playerId, 'player-a');
   assert.equal(byTeam.attendance[0].teamId, 'team-u13-a');
-  assert.equal(byTeam.attendance[0].teamIds.join(','), 'team-u13-a');
+  assert(byTeam.attendance[0].teamIds.includes('team-u13-a'), 'Les lignes de présence doivent conserver le teamId canonique.');
+  assert(byTeam.attendance[0].teamIds.includes('U13 A'), 'Les lignes de présence doivent conserver les alias utiles au partage entre profils.');
   assert.equal(byTeam.attendance[1].status, 'AJ');
   assert.equal(byPlayer.sessions[0].teamId, 'team-u13-a');
   assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
@@ -940,6 +941,25 @@ function testPerformanceCriticalPathStaysNonBlocking(){
   assert(appSource.includes('if(previousVersion === APP_SHELL_VERSION)'), 'Le cache applicatif ne doit être purgé que lors d’un changement de version.');
 }
 
+function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const matchSource = fs.readFileSync('pages/coach-stats.html', 'utf8');
+  const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
+
+  assert(matchSource.includes("syncStatus:'pendingSync'"), 'Un match doit être marqué en attente avant toute tentative cloud.');
+  assert(matchSource.includes("window.CoachStatsStorage.setJson('coachStatsV170',state"), 'La sauvegarde locale doit rester la première protection hors ligne.');
+  assert(matchSource.includes("window.addEventListener('online',()=>syncPendingMatches"), 'Les matchs locaux doivent être retentés au retour du réseau.');
+  assert(matchSource.includes('state.matchId=state.matchId||Date.now()'), 'Le matchId doit être créé une seule fois et conservé pendant le match.');
+  assert(matchSource.includes('event.eventId=stableMatchEventId(state.matchId'), 'Chaque événement doit recevoir un identifiant stable dès sa création.');
+  assert(matchSource.includes("String(m.matchId||m.id)===String(snap.matchId)"), 'Une sauvegarde répétée doit remplacer le même match local au lieu de le dupliquer.');
+  assert(appSource.includes("firebaseFns.doc(db, 'matches', match.matchId)"), 'Firestore doit utiliser matchId comme identifiant de document idempotent.');
+  assert(appSource.includes("firebaseFns.doc(db, 'matchEvents', event.eventId)"), 'Firestore doit utiliser eventId comme identifiant de document idempotent.');
+  assert(appSource.includes("firebaseFns.where('teamId', '==', teamId)"), 'La récupération des matchs doit rester ciblée par équipe.');
+  assert(appSource.includes("Array.isArray(stats?.savedMatches) ? stats.savedMatches"), 'Les matchs locaux historiques doivent être récupérables par la migration non destructive.');
+  assert(appSource.includes("Array.isArray(m.log) ? m.log"), 'Le fil réel du match doit alimenter matchEvents.');
+  assert(rulesSource.includes('match /matches/{matchId}') && rulesSource.includes('match /matchEvents/{eventId}'), 'Les règles doivent couvrir matches et matchEvents.');
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -970,6 +990,7 @@ testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
 testPerformanceCriticalPathStaysNonBlocking();
+testMatchCloudSyncIsOfflineFirstAndIdempotent();
 
 Promise.resolve()
   .then(testScopedPlayerReadFiltersInFirestore)

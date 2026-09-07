@@ -1840,13 +1840,22 @@
           return service.officialTeamRows().map(team => ({
             teamId:team.teamId || team.id || "",
             name:team.name || "",
-            category:team.category || team.categorie || ""
+            category:team.category || team.categorie || "",
+            teamIds:teamAliasIds(team.teamId || team.id || team.name || "")
           })).filter(team => team.teamId && team.name);
         }
         return FALLBACK_TEAMS;
       }
+      function teamAliasIds(value){
+        const service = teamsService();
+        const raw = String(value || "").trim();
+        const aliases = service?.canonicalTeamAliases
+          ? service.canonicalTeamAliases(raw)
+          : [raw, raw.toLowerCase()];
+        return [...new Set(aliases.map(item => String(item || "").trim()).filter(Boolean))];
+      }
       function teamById(teamId){
-        return officialTeams().find(team => String(team.teamId) === String(teamId)) || null;
+        return officialTeams().find(team => String(team.teamId) === String(teamId) || teamAliasIds(team.teamId).includes(String(teamId))) || null;
       }
       function teamColorIndex(teamId){
         const teams = officialTeams();
@@ -1871,12 +1880,13 @@
         return name && service?.canonicalTeamId ? service.canonicalTeamId(name) : "";
       }
       function eventTeamIds(event={}){
-        return [...new Set([
+        const direct = [
           eventTeamId(event),
           ...(Array.isArray(event.teamIds) ? event.teamIds : []),
           ...(Array.isArray(event.teamSnapshot?.teamIds) ? event.teamSnapshot.teamIds : []),
           ...(Array.isArray(event.sessionSnapshot?.teamIds) ? event.sessionSnapshot.teamIds : [])
-        ].map(value => String(value || "").trim()).filter(Boolean))];
+        ].map(value => String(value || "").trim()).filter(Boolean);
+        return [...new Set(direct.flatMap(value => teamAliasIds(value)).concat(direct).filter(Boolean))];
       }
       function normalizedEventMarkerPart(value){
         return String(value || "")
@@ -2021,12 +2031,7 @@
         const date = isoDate(parseDate(event.date || event.startDate || event.day || event.start) || new Date());
         const teamId = eventTeamId(event);
         const team = teamById(teamId);
-        const teamIds = [...new Set([
-          teamId,
-          ...(Array.isArray(event.teamIds) ? event.teamIds : []),
-          ...(Array.isArray(event.teamSnapshot?.teamIds) ? event.teamSnapshot.teamIds : []),
-          ...(Array.isArray(event.sessionSnapshot?.teamIds) ? event.sessionSnapshot.teamIds : [])
-        ].map(value => String(value || "").trim()).filter(Boolean))];
+        const teamIds = eventTeamIds({...event, teamId});
         const normalized = {
           ...event,
           id,
@@ -3076,12 +3081,13 @@
         setSessionMessage(cloudError ? `Événement masqué localement. Suppression cloud à vérifier : ${cloudError?.message || cloudError}.` : "Événement supprimé.", cloudError ? "error" : "success");
       }
       function emptyAttendanceForEvent(teamId, dateValue, duration){
+        const teamIds = eventTeamIds({teamId});
         return Object.fromEntries(playersForTeam(teamId, dateValue).map(player => [player.playerId, {
           status:"present",
           minutes:Number(duration || 0),
           comment:"",
           teamId,
-          teamIds:[teamId],
+          teamIds,
           playerSnapshot:playerSnapshotForAttendance(player, teamId, dateValue)
         }]));
       }
@@ -3112,23 +3118,24 @@
             ...fallbackSnapshot,
             playerId,
             teamId:fallbackSnapshot.teamId || teamId || "",
-            teamIds:fallbackSnapshot.teamIds || (teamId ? [teamId] : [])
+            teamIds:eventTeamIds({teamId, teamIds:fallbackSnapshot.teamIds || []})
           };
+        const teamIds = eventTeamIds({teamId, teamIds:playerSnapshot.teamIds || []});
         return previous ? {
           ...previous,
           minutes:isPresentStatus(previous.status)
             ? Number(previous.minutes || duration || 0)
             : Number(previous.minutes || 0),
           teamId:playerSnapshot.teamId || teamId || "",
-          teamIds:playerSnapshot.teamIds || (teamId ? [teamId] : []),
-          playerSnapshot
+          teamIds,
+          playerSnapshot:{...playerSnapshot, teamIds}
         } : {
           status:"present",
           minutes:Number(duration || 0),
           comment:"",
           teamId,
-          teamIds:[teamId],
-          playerSnapshot
+          teamIds,
+          playerSnapshot:{...playerSnapshot, teamIds}
         };
       }
       function procedureMinutes(value){
@@ -3242,6 +3249,7 @@
           throw new Error("Complète le jour, les horaires et une durée valide.");
         }
         if(!team) throw new Error("Choisis une équipe reliée à un teamId.");
+        const teamIds = eventTeamIds({teamId:team.teamId, teamIds:team.teamIds || [], team:team.name, category:team.category});
         return {
           ...(previousEvent || {}),
           id:previousEvent?.id || `presence-event-${Date.now()}-0`,
@@ -3253,10 +3261,10 @@
           type,
           title:typeLabel(type),
           teamId:team.teamId,
-          teamIds:[team.teamId],
+          teamIds,
           teamSnapshot:{
             teamId:team.teamId,
-            teamIds:[team.teamId],
+            teamIds,
             name:team.name,
             category:team.category || ""
           },

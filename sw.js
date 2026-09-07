@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-77-presence-rosters';
+const CACHE_NAME = 'coachpulse-v6-4-78-match-cloud-sync';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',

@@ -69,6 +69,22 @@
       ]
     },
     {
+      "collectionGroup": "sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "source", "order": "ASCENDING"},
+        {"fieldPath": "teamId", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "source", "order": "ASCENDING"},
+        {"fieldPath": "teamIds", "arrayConfig": "CONTAINS"}
+      ]
+    },
+    {
       "collectionGroup": "attendance",
       "queryScope": "COLLECTION",
       "fields": [
