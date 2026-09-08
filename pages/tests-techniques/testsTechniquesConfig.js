@@ -9,6 +9,8 @@
     ['reg_alt', 'REG ALT', 'reg'],
     ['reg_tete', 'REG Tête', 'reg'],
     ['mouv_pfp', 'Libre', 'mouv'],
+    ['mouv_pfm', 'MOUV PF-', 'mouv'],
+    ['mouv_alt', 'MOUV ALTER', 'mouv'],
   ];
 
   const GROUPS = {
