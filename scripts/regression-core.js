@@ -8,6 +8,7 @@ const permissions = require('../shared/services/permissions-service.js');
 const modules = require('../shared/utils/module-registry.js');
 const playerDataAudit = require('./audit-player-data.js');
 const measurements = require('../shared/services/player-measurements-service.js');
+const technicalTests = require('../shared/services/technical-tests-service.js');
 
 function loadBrowserScript(filePath, windowOverrides={}){
   const window = {
@@ -941,6 +942,38 @@ function testPerformanceCriticalPathStaysNonBlocking(){
   assert(appSource.includes('if(previousVersion === APP_SHELL_VERSION)'), 'Le cache applicatif ne doit être purgé que lors d’un changement de version.');
 }
 
+function testTechnicalHistoryCompatibilityAndScoping(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const pageSource = fs.readFileSync('pages/tests-techniques.html', 'utf8');
+  const configSource = fs.readFileSync('pages/tests-techniques/testsTechniquesConfig.js', 'utf8');
+
+  assert.deepEqual(technicalTests.testsFromRow({playerId:'player-a', teamId:'team-u13-a', season:'2026-2027', tests:{max_pfp:12, reg_pfp:8}}), {max_pfp:12, reg_pfp:8});
+  assert.deepEqual(technicalTests.testsFromRow({joueuse:'Legacy Name', saison:'2026-2027', testName:'MAX PF-', value:'17'}), {max_pfm:17});
+  assert.deepEqual(technicalTests.testsFromRow({playerSnapshot:{playerId:'player-a'}, testType:'REG ALT', value:'9'}), {reg_alt:9});
+  assert.equal(technicalTests.legacyMetricKey('MOUV ALTER'), 'mouv_alt');
+  assert.equal(technicalTests.legacyMetricKey('OBJ MAX ALT'), '', 'Les objectifs historiques ne doivent pas être comptés comme des résultats.');
+  assert.equal(technicalTests.legacyMetricKey('SEMAINE'), '', 'La semaine historique ne doit pas être comptée comme une mesure.');
+
+  assert(appSource.includes('player.legacyPlayerId') && appSource.includes('player.legacyPlayerIds'), 'Les anciens playerId doivent être résolus vers la joueuse canonique.');
+  assert(appSource.includes("stableFirestoreId('technicalTest', canonicalId, date, season, 'jongles')"), 'Les formats legacy et moderne d’une même joueuse/date/saison doivent être regroupés sur une clé métier commune.');
+  assert(appSource.includes("return !(row.finalized === false || row.status === 'draft' || row.status === 'pending')"), 'Un historique sans champ finalized doit rester visible; seuls les brouillons explicites sont masqués.');
+  assert(appSource.includes('originalIds:[...new Set('), 'La fusion moderne + legacy doit dédupliquer strictement les identifiants source.');
+  assert(appSource.includes("if(isAdmin() || canAccessAllPlayersForModule('tests'))"), 'Un administrateur doit conserver la lecture globale prévue.');
+  assert(appSource.includes("readWhere('teamId', 'in', chunk)"), 'Un entraîneur limité doit charger par teamId autorisé.');
+  assert(appSource.includes("readWhere('teamIds', 'array-contains-any', chunk)"), 'Les teamIds autorisés doivent participer au scope.');
+  assert(appSource.includes("readWhere('playerSnapshot.playerId', 'in', chunk)"), 'Le fallback playerSnapshot.playerId doit être ciblé.');
+  assert(appSource.includes("readWhere('joueuse', 'in', chunk)"), 'Le fallback joueuse doit rester ciblé sur les alias autorisés.');
+  assert(appSource.includes("status = code.includes('permission') ? 'permission-denied'"), 'Une permission refusée doit être distinguée d’un résultat vide.');
+  assert(appSource.includes("status:'partial-error', source:'cloud-partial'"), 'Une lecture partielle doit être distinguée d’une erreur réseau et ne pas être mise en cache comme complète.');
+  assert(!/async function technicalListData[\s\S]*?function technicalDataStatus/.exec(appSource)[0].includes('saveLocalTechnicalPayload(rows)'), 'Une lecture ne doit jamais réécrire le stockage local des tests.');
+  assert(appSource.includes("currentUser?.uid || 'anonymous'"), 'Le cache doit être isolé par connexion utilisateur.');
+  assert(appSource.includes("getAuthorizedTeamIds().slice().sort().join(',')"), 'Le cache doit être isolé par scope équipe, empêchant U13 B d’apparaître pour U13 A.');
+  assert(pageSource.includes('technicalCloudRows=rows') && !pageSource.includes('if(Array.isArray(rows))setLocalRows(rows)'), 'Le reload doit conserver les données cloud en mémoire sans écraser le localStorage.');
+  assert(pageSource.includes('row.playerId === filters.playerId') || appSource.includes('row.playerId === filters.playerId'), 'Le changement de joueuse doit filtrer par playerId canonique.');
+  assert(appSource.includes('row.season === filters.season || row.saison === filters.season'), 'Le changement de saison doit accepter season et saison.');
+  assert(configSource.includes("['mouv_pfm', 'MOUV PF-', 'mouv']") && configSource.includes("['mouv_alt', 'MOUV ALTER', 'mouv']"), 'Les mesures historiques Mouvement doivent alimenter la synthèse et les graphiques.');
+}
+
 function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   const appSource = fs.readFileSync('app.js', 'utf8');
   const matchSource = fs.readFileSync('pages/coach-stats.html', 'utf8');
@@ -990,6 +1023,7 @@ testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
 testPerformanceCriticalPathStaysNonBlocking();
+testTechnicalHistoryCompatibilityAndScoping();
 testMatchCloudSyncIsOfflineFirstAndIdempotent();
 
 Promise.resolve()
