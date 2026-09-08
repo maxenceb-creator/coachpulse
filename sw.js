@@ -7,6 +7,7 @@ const CORE_ASSETS = [
   './shared/services/permissions-service.js',
   './shared/services/player-measurements-service.js',
   './shared/services/presence-events-service.js',
+  './shared/services/technical-tests-service.js',
   './shared/utils/storage-service.js',
   './shared/utils/notifications-service.js',
   './shared/utils/module-registry.js',

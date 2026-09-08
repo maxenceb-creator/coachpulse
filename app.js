@@ -55,7 +55,7 @@ const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
   athleticRows:{rows:null, loadedAt:0},
-  technicalRows:{rows:null, loadedAt:0},
+  technicalRows:{rows:null, loadedAt:0, key:'', status:'idle', source:'none', error:''},
   technicalFootHints:{rows:null, loadedAt:0, pending:null},
   presenceEvents:{rows:null, loadedAt:0, key:'', pending:null},
   playerProfiles:new Map(),
@@ -153,6 +153,10 @@ function invalidateAppDataCaches(scope='all'){
   if(scope === 'all' || scope === 'technical' || scope === 'tests'){
     appDataCache.technicalRows.rows = null;
     appDataCache.technicalRows.loadedAt = 0;
+    appDataCache.technicalRows.key = '';
+    appDataCache.technicalRows.status = 'idle';
+    appDataCache.technicalRows.source = 'none';
+    appDataCache.technicalRows.error = '';
     appDataCache.technicalFootHints.rows = null;
     appDataCache.technicalFootHints.loadedAt = 0;
     appDataCache.technicalFootHints.pending = null;
@@ -4269,6 +4273,8 @@ function technicalNumber(value){
   return Number.isFinite(n) ? n : '';
 }
 function technicalTestsFromRow(row={}){
+  const service = window.CoachPulseTechnicalTestsService;
+  if(service?.testsFromRow) return service.testsFromRow(row);
   const tests = {};
   const source = row.tests && typeof row.tests === 'object' ? row.tests : {};
   TECHNICAL_TEST_KEYS.forEach(key => {
@@ -4276,6 +4282,12 @@ function technicalTestsFromRow(row={}){
     if(value !== '') tests[key] = value;
   });
   return tests;
+}
+function technicalLegacyMetricKey(row={}){
+  return window.CoachPulseTechnicalTestsService?.legacyMetricKey?.(row.testName || row.testType || row.metric || row.type) || '';
+}
+function technicalRowIsFinalized(row={}){
+  return !(row.finalized === false || row.status === 'draft' || row.status === 'pending');
 }
 function playerSearchKey(value){
   return normalizeAthleticToken(value);
@@ -4311,6 +4323,8 @@ function athleticPlayerLookup(players=[]){
   players.forEach(player => {
     const id = player.playerId || player.id;
     if(id) byId.set(id, player);
+    [player.legacyPlayerId, ...(Array.isArray(player.legacyPlayerIds) ? player.legacyPlayerIds : []), ...(Array.isArray(player.previousPlayerIds) ? player.previousPlayerIds : [])]
+      .map(value => String(value || '').trim()).filter(Boolean).forEach(value => byId.set(value, player));
     const names = [
       player.displayName,
       player.playerName,
@@ -5080,7 +5094,9 @@ function normalizeTechnicalRows(rawRows=[], players=[]){
     const canonicalId = seasonPlayer.playerId || seasonPlayer.id || playerId;
     const teamIds = athleticTeamIdsFromSources(raw, raw.playerSnapshot, rawPlayer, seasonPlayer);
     const teamId = seasonPlayer.teamId || raw.teamId || raw.playerSnapshot?.teamId || teamIds[0] || '';
-    const groupId = technicalRowStorageId(raw, stableFirestoreId('technicalTest', canonicalId, date || 'date-inconnue', season, raw.testType || 'jongles'));
+    const groupId = date
+      ? stableFirestoreId('technicalTest', canonicalId, date, season, 'jongles')
+      : technicalRowStorageId(raw, stableFirestoreId('technicalTest', canonicalId, 'date-inconnue', season, raw.testType || 'jongles'));
     const previous = grouped.get(groupId) || {
       id:groupId,
       technicalTestId:groupId,
@@ -5118,15 +5134,15 @@ function normalizeTechnicalRows(rawRows=[], players=[]){
       tests:{},
       objectifs:raw.objectifs || {},
       testType:raw.testType || 'jongles',
-      finalized:raw.finalized === true || raw.status === 'finalized',
+      finalized:technicalRowIsFinalized(raw),
       status:raw.status || '',
       comment:raw.comment || raw.commentaire || raw.note || '',
       source:raw.source || 'Tests techniques'
     };
-    const finalized = previous.finalized || raw.finalized === true || raw.status === 'finalized';
+    const finalized = previous.finalized || technicalRowIsFinalized(raw);
     grouped.set(groupId, {
       ...previous,
-      originalIds:[...(previous.originalIds || []), raw.technicalTestId || raw.testId || raw.id || `row-${idx}`],
+      originalIds:[...new Set([...(previous.originalIds || []), raw.technicalTestId || raw.testId || raw.id || `row-${idx}`])],
       tests:{...previous.tests, ...tests},
       finalized,
       status:finalized ? 'finalized' : (previous.status || raw.status || ''),
@@ -5139,16 +5155,24 @@ function normalizeTechnicalRows(rawRows=[], players=[]){
 }
 async function technicalListData(filters={}){
   return measureAsync('technicalListData', async () => {
-    if(!guardTechnical('read')) return [];
+    if(!guardTechnical('read')){
+      Object.assign(appDataCache.technicalRows, {status:'permission-denied', source:'none', error:'Accès tests techniques non autorisé.'});
+      return [];
+    }
     const now = Date.now();
+    const cacheKey = [currentUser?.uid || 'anonymous', isAdmin() || canAccessAllPlayersForModule('tests') ? 'all' : getAuthorizedTeamIds().slice().sort().join(',')].join(':');
     const filterRows = rows => rows.filter(row =>
       (!filters.playerId || row.playerId === filters.playerId)
       && (!filters.season || filters.season === 'all' || row.season === filters.season || row.saison === filters.season)
       && (!filters.date || row.date === filters.date)
     );
-    if(!filters.forceRefresh && appDataCache.technicalRows.rows && now - appDataCache.technicalRows.loadedAt < DATA_CACHE_TTL_MS){
+    if(!filters.forceRefresh && appDataCache.technicalRows.rows && appDataCache.technicalRows.key === cacheKey && now - appDataCache.technicalRows.loadedAt < DATA_CACHE_TTL_MS){
+      appDataCache.technicalRows.status = 'loaded';
+      appDataCache.technicalRows.source = 'cache';
       return filterRows(appDataCache.technicalRows.rows);
     }
+    appDataCache.technicalRows.status = 'loading';
+    appDataCache.technicalRows.error = '';
     const players = await listPlayers({season:'all', includeArchived:true, moduleId:'tests'});
     const rawById = new Map();
     localTechnicalPayload().forEach((row, idx) => {
@@ -5172,32 +5196,72 @@ async function technicalListData(filters={}){
         return out;
       };
       const readScopedTechnicalTests = async () => {
-        if(isAdmin() || canAccessAllPlayersForModule('tests')) return docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'technicalTests')));
+        if(isAdmin() || canAccessAllPlayersForModule('tests')) return {rows:docsFromSnap(await firebaseFns.getDocs(firebaseFns.collection(db, 'technicalTests'))), complete:true, error:null};
         const authorizedTeamIds = getAuthorizedTeamIds();
-        const playerIds = players.map(player => player.playerId || player.id).filter(Boolean);
-        const reads = [];
+        const playerIds = players.flatMap(player => [player.playerId || player.id, player.legacyPlayerId, ...(Array.isArray(player.legacyPlayerIds) ? player.legacyPlayerIds : []), ...(Array.isArray(player.previousPlayerIds) ? player.previousPlayerIds : [])]).filter(Boolean);
+        const primaryReads = [];
         chunkValues(authorizedTeamIds).forEach(chunk => {
-          reads.push(readWhere('teamId', 'in', chunk));
-          reads.push(readWhere('teamIds', 'array-contains-any', chunk));
-          reads.push(readWhere('playerSnapshot.teamId', 'in', chunk));
-          reads.push(readWhere('playerSnapshot.teamIds', 'array-contains-any', chunk));
+          primaryReads.push(readWhere('teamId', 'in', chunk));
+          primaryReads.push(readWhere('teamIds', 'array-contains-any', chunk));
         });
-        chunkValues(playerIds).forEach(chunk => reads.push(readWhere('playerId', 'in', chunk)));
-        const rows = reads.length ? (await Promise.all(reads.map(promise => promise.catch(() => [])))).flat() : [];
-        return [...new Map(rows.map(row => [row.id || row.technicalTestId || row.testId, row])).values()];
+        chunkValues(playerIds).forEach(chunk => primaryReads.push(readWhere('playerId', 'in', chunk)));
+        const primaryResults = primaryReads.length ? await Promise.allSettled(primaryReads) : [];
+        const primaryFailures = primaryResults.filter(result => result.status === 'rejected');
+        if(primaryFailures.length && !primaryResults.some(result => result.status === 'fulfilled')){
+          const error = primaryFailures[0].reason instanceof Error ? primaryFailures[0].reason : new Error(String(primaryFailures[0].reason || 'Lecture Firestore impossible'));
+          throw error;
+        }
+        const fallbackReads = [];
+        chunkValues(authorizedTeamIds).forEach(chunk => {
+          fallbackReads.push(readWhere('playerSnapshot.teamId', 'in', chunk));
+          fallbackReads.push(readWhere('playerSnapshot.teamIds', 'array-contains-any', chunk));
+        });
+        chunkValues(playerIds).forEach(chunk => {
+          fallbackReads.push(readWhere('playerSnapshot.playerId', 'in', chunk));
+          fallbackReads.push(readWhere('joueuse', 'in', chunk));
+        });
+        const fallbackResults = fallbackReads.length ? await Promise.allSettled(fallbackReads) : [];
+        const rows = [...primaryResults, ...fallbackResults].flatMap(result => result.status === 'fulfilled' ? result.value : []);
+        return {
+          rows:[...new Map(rows.map(row => [row.id || row.technicalTestId || row.testId, row])).values()],
+          complete:primaryFailures.length === 0,
+          error:primaryFailures[0]?.reason || null
+        };
       };
-      const scopedRows = await readScopedTechnicalTests();
-      scopedRows.forEach(row => {
-        const id = technicalRowStorageId(row);
-        if(id) rawById.set(id, row);
-      });
+      try{
+        const scopedRead = await readScopedTechnicalTests();
+        const scopedRows = scopedRead.rows;
+        scopedRows.forEach(row => {
+          const id = technicalRowStorageId(row);
+          if(id) rawById.set(id, row);
+        });
+        if(!scopedRead.complete){
+          const partialRows = scopedRecordsForModuleAccess(normalizeTechnicalRows([...rawById.values()], players), 'tests');
+          Object.assign(appDataCache.technicalRows, {status:'partial-error', source:'cloud-partial', error:cleanError(scopedRead.error)});
+          if(!partialRows.length && appDataCache.technicalRows.rows && appDataCache.technicalRows.key === cacheKey) return filterRows(appDataCache.technicalRows.rows);
+          return filterRows(partialRows);
+        }
+      }catch(error){
+        const code = String(error?.code || '').toLowerCase();
+        const status = code.includes('permission') ? 'permission-denied' : 'network-error';
+        Object.assign(appDataCache.technicalRows, {status, source:rawById.size ? 'local-fallback' : 'none', error:cleanError(error)});
+        if(appDataCache.technicalRows.rows && appDataCache.technicalRows.key === cacheKey) return filterRows(appDataCache.technicalRows.rows);
+        return filterRows(scopedRecordsForModuleAccess(normalizeTechnicalRows([...rawById.values()], players), 'tests'));
+      }
     }
     const rows = scopedRecordsForModuleAccess(normalizeTechnicalRows([...rawById.values()], players), 'tests');
-    saveLocalTechnicalPayload(rows);
     appDataCache.technicalRows.rows = rows;
-    appDataCache.technicalRows.loadedAt = now;
+    appDataCache.technicalRows.loadedAt = Date.now();
+    appDataCache.technicalRows.key = cacheKey;
+    appDataCache.technicalRows.status = 'loaded';
+    appDataCache.technicalRows.source = db && currentUser ? 'cloud' : 'local-fallback';
+    appDataCache.technicalRows.error = '';
     return filterRows(rows);
   });
+}
+function technicalDataStatus(){
+  const cache = appDataCache.technicalRows;
+  return {status:cache.status, source:cache.source, error:cache.error, loadedAt:cache.loadedAt};
 }
 async function technicalSaveTest(test={}){
   if(!guardTechnical('write')) return null;
@@ -5757,7 +5821,7 @@ var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? ad
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
 window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
-Object.assign(window.CoachPulseCentralData, {accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
+Object.assign(window.CoachPulseCentralData, {technicalDataStatus, accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   snapshotLocalData({fromCloud:true});
