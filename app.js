@@ -50,7 +50,7 @@ const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260905-match-cloud-sync-v78';
+const APP_SHELL_VERSION = '20260911-global-loading-v79';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -94,6 +94,7 @@ function debugPerfEnabled(){
   return storage.get('coachpulse:debugPerf') === '1';
 }
 const perfState = {startedAt:performance.now(), firestoreRequests:0, firestoreDocuments:0, activeRequests:0, maxConcurrentRequests:0, listeners:0, events:[]};
+function loadingIndicator(){ return window.CoachPulseLoading || null; }
 function recordPerfEvent(type, detail={}){
   if(!debugPerfEnabled()) return;
   const event = {type, atMs:Math.round(performance.now() - perfState.startedAt), ...detail};
@@ -101,40 +102,92 @@ function recordPerfEvent(type, detail={}){
   if(perfState.events.length > 250) perfState.events.shift();
   console.info('[CoachPulse perf]', event);
 }
-function installFirebasePerfInstrumentation(){
-  if(!debugPerfEnabled() || !firebaseFns || firebaseFns.__coachpulsePerfInstrumented) return;
-  const originalGetDocs = firebaseFns.getDocs;
+function firestoreOperationLabel(method, value){
+  const segments = value?.path?.segments || value?._key?.path?.segments || value?._query?.path?.segments || value?._path?.segments || [];
+  const path = Array.isArray(segments) ? segments.join('/') : String(value?.path || '');
+  const collection = path.split('/').filter(Boolean)[0] || 'firestore';
+  return `${collection}:${method}`;
+}
+function installFirebaseInstrumentation(){
+  if(!firebaseFns || firebaseFns.__coachpulseInstrumented) return;
+  const instrumented = ['getDoc','getDocs','setDoc','updateDoc','addDoc','deleteDoc','runTransaction'];
+  instrumented.forEach(method => {
+    const original = firebaseFns[method];
+    if(typeof original !== 'function') return;
+    firebaseFns[method] = function(){
+      const args = arguments;
+      const label = firestoreOperationLabel(method, args[0]);
+      const isRead = method === 'getDoc' || method === 'getDocs';
+      const operation = loadingIndicator()?.start(label, {kind:'sync'});
+      const startedAt = performance.now();
+      if(debugPerfEnabled() && isRead){
+        perfState.firestoreRequests += 1;
+        perfState.activeRequests += 1;
+        perfState.maxConcurrentRequests = Math.max(perfState.maxConcurrentRequests, perfState.activeRequests);
+      }
+      let result;
+      try{ result = original.apply(this, args); }
+      catch(error){ operation?.fail(error); throw error; }
+      return Promise.resolve(result).then(value => {
+        if(debugPerfEnabled() && isRead){
+          const documents = method === 'getDocs' ? Number(value?.size || 0) : (value?.exists?.() ? 1 : 0);
+          perfState.firestoreDocuments += documents;
+          recordPerfEvent(`firestore:${method}`, {durationMs:Math.round(performance.now() - startedAt), documents});
+        }
+        operation?.end();
+        return value;
+      }, error => {
+        operation?.fail(error);
+        throw error;
+      }).finally(() => {
+        if(debugPerfEnabled() && isRead) perfState.activeRequests = Math.max(0, perfState.activeRequests - 1);
+      });
+    };
+  });
   const originalOnSnapshot = firebaseFns.onSnapshot;
-  firebaseFns.getDocs = async function(){
-    const startedAt = performance.now();
-    perfState.firestoreRequests += 1;
-    perfState.activeRequests += 1;
-    perfState.maxConcurrentRequests = Math.max(perfState.maxConcurrentRequests, perfState.activeRequests);
-    try{
-      const snap = await originalGetDocs.apply(this, arguments);
-      const documents = Number(snap?.size || 0);
-      perfState.firestoreDocuments += documents;
-      recordPerfEvent('firestore:getDocs', {durationMs:Math.round(performance.now() - startedAt), documents});
-      return snap;
-    }finally{
-      perfState.activeRequests = Math.max(0, perfState.activeRequests - 1);
-    }
-  };
   firebaseFns.onSnapshot = function(){
-    const unsubscribe = originalOnSnapshot.apply(this, arguments);
-    perfState.listeners += 1;
-    recordPerfEvent('firestore:listener-open', {listeners:perfState.listeners});
+    const args = [...arguments];
+    const operation = loadingIndicator()?.start(firestoreOperationLabel('listen', args[0]), {kind:'sync'});
+    const callbackIndex = args.findIndex((value, index) => index > 0 && typeof value === 'function');
+    const errorIndex = args.findIndex((value, index) => index > callbackIndex && typeof value === 'function');
+    const observerIndex = args.findIndex((value, index) => index > 0 && value && typeof value === 'object' && (typeof value.next === 'function' || typeof value.error === 'function'));
+    if(callbackIndex >= 0){
+      const callback = args[callbackIndex];
+      args[callbackIndex] = function(){ operation?.end(); return callback.apply(this, arguments); };
+    }
+    if(errorIndex >= 0){
+      const errorCallback = args[errorIndex];
+      args[errorIndex] = function(error){ operation?.fail(error); return errorCallback.apply(this, arguments); };
+    }
+    if(callbackIndex < 0 && observerIndex >= 0){
+      const observer = args[observerIndex];
+      args[observerIndex] = {
+        ...observer,
+        next(){ operation?.end(); return observer.next?.apply(this, arguments); },
+        error(error){ operation?.fail(error); return observer.error?.call(this, error); }
+      };
+    }
+    let unsubscribe;
+    try{ unsubscribe = originalOnSnapshot.apply(this, args); }
+    catch(error){ operation?.fail(error); throw error; }
+    if(debugPerfEnabled()){
+      perfState.listeners += 1;
+      recordPerfEvent('firestore:listener-open', {listeners:perfState.listeners});
+    }
     let active = true;
     return () => {
+      operation?.end();
       if(active){
         active = false;
-        perfState.listeners = Math.max(0, perfState.listeners - 1);
-        recordPerfEvent('firestore:listener-close', {listeners:perfState.listeners});
+        if(debugPerfEnabled()){
+          perfState.listeners = Math.max(0, perfState.listeners - 1);
+          recordPerfEvent('firestore:listener-close', {listeners:perfState.listeners});
+        }
       }
       return unsubscribe();
     };
   };
-  firebaseFns.__coachpulsePerfInstrumented = true;
+  firebaseFns.__coachpulseInstrumented = true;
   window.CoachPulsePerf = {state:perfState, snapshot:() => cloneData(perfState)};
 }
 async function measureAsync(label, work){
@@ -965,7 +1018,18 @@ function routeTo(key){
     if(adminView) adminView.classList.add('hidden');
     frame.classList.remove('hidden');
     const target = new URL(item.src, location.href).href;
-    if(frame.src !== target) frame.src = item.src;
+    if(frame.src !== target){
+      const moduleLoad = loadingIndicator()?.start(`module:${key}`, {kind:'loading'});
+      const cleanup = () => {
+        frame.removeEventListener('load', onLoad);
+        frame.removeEventListener('error', onError);
+      };
+      const onLoad = () => { cleanup(); moduleLoad?.end(); };
+      const onError = error => { cleanup(); moduleLoad?.fail(error, {message:`Le module ${item.title} n’a pas pu être chargé.`}); };
+      frame.addEventListener('load', onLoad);
+      frame.addEventListener('error', onError);
+      frame.src = item.src;
+    }
     else notifyFramesAccessUpdated();
     if(!window.matchMedia('(max-width:1100px)').matches) shell.classList.add('collapsed');
   }
@@ -979,7 +1043,7 @@ async function loadFirebaseFns(){
   const authMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
   const fs = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js');
   firebaseFns = {...app, ...authMod, ...fs};
-  installFirebasePerfInstrumentation();
+  installFirebaseInstrumentation();
   return firebaseFns;
 }
 
@@ -6500,11 +6564,15 @@ $('#membersTbody').addEventListener('click', adminTableClick);
 adminView?.addEventListener('change', adminAccessPickerChange);
 
 window.addEventListener('online', () => {
+  loadingIndicator()?.clearError();
   updateSyncState('Retour Internet · sync...');
   syncCloud(false);
   refreshCentralPlayersFromCloud({reason:'online'}).catch(error => console.warn('Actualisation joueuses au retour Internet indisponible', error));
 });
-window.addEventListener('offline', () => updateSyncState('Hors ligne · local actif'));
+window.addEventListener('offline', () => {
+  updateSyncState('Hors ligne · local actif');
+  loadingIndicator()?.reportError('Données locales disponibles — synchronisation impossible tant que le réseau est indisponible.', {offline:true});
+});
 window.addEventListener('resize', () => { if(window.matchMedia('(max-width:1180px)').matches) shell.classList.remove('collapsed'); });
 window.addEventListener('focus', () => {
   if(currentUser) refreshCentralPlayersFromCloud({reason:'focus'}).catch(error => console.warn('Actualisation joueuses au focus indisponible', error));
