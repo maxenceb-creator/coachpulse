@@ -158,26 +158,58 @@
       const striker = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[9]);
       add('A — ASSE goalkeeper is below the striker',goalkeeper&&striker&&rect(goalkeeper).top>rect(striker).top);
 
+      const scrollRoot=doc.scrollingElement;
+      scrollRoot.style.setProperty('scroll-behavior','auto','important');
+      doc.body.style.setProperty('scroll-behavior','auto','important');
+      const originalScrollY=win.scrollY;
+      const contextCases=[
+        {label:'centre',name:names[9]},
+        {label:'gauche',name:names[8]},
+        {label:'droite',name:names[10]},
+        {label:'milieu',name:names[5]},
+        {label:'gardienne',name:names[0]},
+        {label:'remplaçante',name:names[11]}
+      ];
+      const contextDetails=[];
+      let allContextsValid=true;
+      for(const testCase of contextCases){
+        const slot=[...doc.querySelectorAll('#pitch .slot,#matchBench .slot')].find(node=>node.dataset.name===testCase.name);
+        let slotRect=rect(slot);
+        win.scrollTo(0,win.scrollY+slotRect.top+slotRect.height/2-viewport.height/2);
+        await nextPaint();
+        win.openPlayerPanel(testCase.name);
+        await nextPaint();
+        slotRect=rect(slot);
+        const menuRect=rect(panel),fieldRect=rect(pitch),boundsRect=slot.closest('#pitch')?fieldRect:rect(doc.querySelector('.pitchCard')),stickyRect=doc.querySelector('.tt-header.v364-header')?.getBoundingClientRect();
+        const safeTop=stickyRect&&stickyRect.top<=8&&stickyRect.bottom>8?stickyRect.bottom+8:8;
+        const horizontalGap=Math.max(slotRect.left-menuRect.right,menuRect.left-slotRect.right,0);
+        const verticalGap=Math.max(slotRect.top-menuRect.bottom,menuRect.top-slotRect.bottom,0);
+        const near=Math.min(horizontalGap||Infinity,verticalGap||Infinity)<=14;
+        const insideBounds=menuRect.left>=boundsRect.left+6&&menuRect.right<=boundsRect.right-6&&menuRect.top>=boundsRect.top+6&&menuRect.bottom<=boundsRect.bottom-6;
+        const insideViewport=menuRect.left>=6&&menuRect.right<=viewport.width-6&&menuRect.top>=safeTop-1&&menuRect.bottom<=viewport.height-6;
+        const expectedEdgePlacement=testCase.label==='gauche'?'right':testCase.label==='droite'?(slotRect.right+12+menuRect.width<=Math.min(fieldRect.right-8,viewport.width-8)?'right':'left'):null;
+        const placementOk=!expectedEdgePlacement||panel.dataset.placement===expectedEdgePlacement;
+        const valid=visible(win,panel)&&panel.dataset.anchor===testCase.name&&!overlaps(menuRect,slotRect)&&near&&insideBounds&&insideViewport&&placementOk;
+        if(!valid)allContextsValid=false;
+        contextDetails.push(`${testCase.label}:${panel.dataset.placement}/${Math.round(menuRect.left)},${Math.round(menuRect.top)} ${Math.round(menuRect.width)}×${Math.round(menuRect.height)}`);
+      }
+      add('B — contextual menu follows starters, edges, goal areas and substitutes',allContextsValid,contextDetails.join('; '));
+      const buttons=strip?[...strip.querySelectorAll('button')]:[];
+      const columns=new Set(buttons.map(button=>Math.round(rect(button).left)));
+      const rows=new Set(buttons.map(button=>Math.round(rect(button).top)));
+      add('B — player selection highlights the active player',doc.querySelector('.slot.selected')?.dataset.name===names[11]);
+      add('B — ten ASSE actions use a compact multi-row grid',buttons.length===10&&columns.size===3&&rows.size>=4&&win.getComputedStyle(strip).display==='grid',`${columns.size} columns × ${rows.size} rows`);
+      add('B — every contextual action keeps a 48px touch target',buttons.length===10&&buttons.every(button=>visible(win,button)&&rect(button).width>=47.5&&rect(button).height>=47.5));
+      add('B — no horizontal action strip remains',strip.scrollWidth<=strip.clientWidth+1&&win.getComputedStyle(panel).position==='absolute');
+      add('B — opening the overlay never resizes the pitch',Math.abs(rect(pitch).width-initialPitchRect.width)<=1&&Math.abs(rect(pitch).height-initialPitchRect.height)<=1);
+      doc.querySelector('.matchDirection').dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true}));
+      await nextPaint();
+      add('B — an outside touch closes the menu without changing the selected player',!visible(win,panel)&&win.__tabletFixtureStateSummary().selected===names[11]);
+      win.scrollTo(0,originalScrollY);
+      scrollRoot.style.removeProperty('scroll-behavior');
+      doc.body.style.removeProperty('scroll-behavior');
       win.openPlayerPanel(names[9]);
       await nextPaint();
-      const buttons = strip ? [...strip.querySelectorAll('button')] : [];
-      const tops = buttons.map(button => Math.round(rect(button).top));
-      add('B — player selection opens the ASSE strip',visible(win,panel) && doc.querySelector('.slot.selected')?.dataset.name===names[9]);
-      add('B — all ASSE actions stay on one row',buttons.length===10 && Math.max(...tops)-Math.min(...tops)<=1,`${buttons.length} buttons; row tops ${[...new Set(tops)].join(', ')}`);
-      add('B — ASSE actions keep 48px touch targets',buttons.length===10 && buttons.every(button => visible(win,button) && rect(button).width>=47.5 && rect(button).height>=47.5));
-      let allReachable = buttons.length===10;
-      if(strip) {
-        const previousScroll = strip.scrollLeft;
-        for(const button of buttons) {
-          strip.scrollLeft += rect(button).left - rect(strip).left - 3;
-          await nextPaint();
-          const b = rect(button),s = rect(strip);
-          if(b.left<s.left-1 || b.right>s.right+1) allReachable=false;
-        }
-        strip.scrollLeft=previousScroll;
-      }
-      add('B — every ASSE action is reachable by local strip scroll',allReachable);
-      add('B — action panel does not overlap the pitch',!overlaps(rect(panel),rect(pitch)));
 
       win.actionZone('tirCadre');
       await nextPaint();
@@ -213,15 +245,19 @@
       win.showActionMenu('adv');
       await nextPaint();
       const opponentButtons = [...doc.querySelectorAll('#actionMenu .subActionGrid button')];
-      const opponentTops = opponentButtons.map(button=>Math.round(rect(button).top));
-      add('D — opponent selector opens only existing opponent actions',panel.classList.contains('advOnly') && visible(win,panel) && !visible(win,strip) && opponentButtons.length===9,`${opponentButtons.length} controls`);
-      add('D — opponent actions stay on one row and remain touch-friendly',opponentButtons.length===9 && Math.max(...opponentTops)-Math.min(...opponentTops)<=1 && opponentButtons.every(button=>rect(button).height>=47.5));
+      const opponentColumns=new Set(opponentButtons.map(button=>Math.round(rect(button).left)));
+      const opponentRows=new Set(opponentButtons.map(button=>Math.round(rect(button).top)));
+      const opponentRect=rect(panel),triggerRect=rect(doc.getElementById('opponentActionTrigger'));
+      const opponentGap=Math.max(triggerRect.left-opponentRect.right,opponentRect.left-triggerRect.right,triggerRect.top-opponentRect.bottom,opponentRect.top-triggerRect.bottom,0);
+      add('D — opponent selector opens only existing opponent actions',panel.classList.contains('advOnly')&&visible(win,panel)&&!visible(win,strip)&&opponentButtons.length===9&&panel.dataset.anchor==='Adversaire',`${opponentButtons.length} controls`);
+      add('D — opponent actions use the same compact touch grid',opponentButtons.length===9&&opponentColumns.size===3&&opponentRows.size===3&&opponentButtons.every(button=>rect(button).width>=47.5&&rect(button).height>=47.5));
+      add('D — opponent menu stays attached to its button and inside the viewport',opponentGap<=14&&opponentRect.left>=6&&opponentRect.right<=viewport.width-6&&opponentRect.top>=6&&opponentRect.bottom<=viewport.height-6,`${panel.dataset.placement}; gap ${Math.round(opponentGap)}px`);
       win.hideActionMenu();
       win.__prepareTabletFixture();
       await nextPaint();
-      add('E — closing/resetting restores zero action-strip space',!visible(win,panel) && rect(panel).height===0);
+      add('E — closing/resetting removes the contextual overlay',!visible(win,panel) && rect(panel).height===0);
       add('E — pitch recovers its initial height',Math.abs(rect(pitch).height-initialPitchRect.height)<=1,`${Math.round(rect(pitch).height)} / ${Math.round(initialPitchRect.height)}px`);
-      const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{pitch:{width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},page:{clientHeight:doc.documentElement.clientHeight,scrollHeight:doc.documentElement.scrollHeight},strip:{clientWidth:strip?.clientWidth,scrollWidth:strip?.scrollWidth},starters:pitch?.querySelectorAll('.slot').length,bench:bench?.querySelectorAll('.slot').length}};
+      const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{pitch:{width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},page:{clientHeight:doc.documentElement.clientHeight,scrollHeight:doc.documentElement.scrollHeight},contextMenu:{width:Math.round(opponentRect.width),height:Math.round(opponentRect.height),columns:opponentColumns.size},starters:pitch?.querySelectorAll('.slot').length,bench:bench?.querySelectorAll('.slot').length}};
       api.lastResult=result;
       const results = document.getElementById('results');
       results.replaceChildren();

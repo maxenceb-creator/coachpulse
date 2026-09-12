@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-85-match-wide-pitch';
+const CACHE_NAME = 'coachpulse-v6-4-86-match-context-actions';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
