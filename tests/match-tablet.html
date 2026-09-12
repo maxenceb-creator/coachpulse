@@ -131,20 +131,35 @@
       const doc = win.document;
       const checks = [];
       const add = (name,pass,detail='') => checks.push({name,pass:!!pass,detail});
+      win.__prepareTabletFixture();
+      await nextPaint();
       const strip = doc.querySelector('.playerPanelActions');
       const pitch = doc.getElementById('pitch');
       const bench = doc.getElementById('matchBench');
       const panel = doc.getElementById('playerActionPanel');
-      const buttons = strip ? [...strip.querySelectorAll('button')] : [];
-      await nextPaint();
-      const pitchRect = pitch ? rect(pitch) : {width:0,height:0};
       const viewport = {width:doc.documentElement.clientWidth,height:doc.documentElement.clientHeight};
-      add('Fixture storage isolated',win.localStorage.__tabletFixtureMemory && !window.CoachPulseCentralData);
-      add('Page has no horizontal overflow',Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)<=viewport.width+1,`${Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)} / ${viewport.width}px`);
+      const initialPitchRect = pitch ? rect(pitch) : {width:0,height:0};
+      add('A — fixture storage isolated',win.localStorage.__tabletFixtureMemory && !window.CoachPulseCentralData);
+      add('A — no horizontal page overflow',Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)<=viewport.width+1,`${Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)} / ${viewport.width}px`);
+      add('A — no action strip or reserved space before selection',panel && !visible(win,panel) && rect(panel).height===0,`panel ${Math.round(rect(panel).width)}×${Math.round(rect(panel).height)}px`);
+      add('A — pitch is large and vertical',initialPitchRect.height>initialPitchRect.width && initialPitchRect.width>=Math.min(250,viewport.width*.3) && initialPitchRect.height>=Math.min(330,viewport.height*.43),`${Math.round(initialPitchRect.width)} × ${Math.round(initialPitchRect.height)}px`);
+      const benchRect = bench ? rect(bench) : {left:0,right:0,top:0,bottom:0};
+      const benchSlots = bench ? [...bench.querySelectorAll('.slot')] : [];
+      const benchSlotsInside = benchSlots.every(slot => {const slotRect=rect(slot);return slotRect.left>=benchRect.left-1 && slotRect.right<=benchRect.right+1 && slotRect.top>=benchRect.top-1 && slotRect.bottom<=benchRect.bottom+1 && !overlaps(slotRect,initialPitchRect);});
+      add('A — substitutes stay outside the pitch',bench && !overlaps(benchRect,initialPitchRect) && benchSlots.length===3 && benchSlotsInside,`${benchSlots.length} substitutes`);
+      add('A — all eleven starters stay inside the pitch',pitch && pitch.querySelectorAll('.slot').length===11 && [...pitch.querySelectorAll('.slot')].every(slot => {const s=rect(slot);return s.left>=initialPitchRect.left-1 && s.right<=initialPitchRect.right+1 && s.top>=initialPitchRect.top-1 && s.bottom<=initialPitchRect.bottom+1;}));
+      const goalkeeper = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[0]);
+      const striker = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[9]);
+      add('A — ASSE goalkeeper is below the striker',goalkeeper&&striker&&rect(goalkeeper).top>rect(striker).top);
+
+      win.openPlayerPanel(names[9]);
+      await nextPaint();
+      const buttons = strip ? [...strip.querySelectorAll('button')] : [];
       const tops = buttons.map(button => Math.round(rect(button).top));
-      add('All primary actions on one row',buttons.length>=10 && Math.max(...tops)-Math.min(...tops)<=1,`${buttons.length} buttons; row tops ${[...new Set(tops)].join(', ')}`);
-      add('Primary actions are visible and at least 48px',buttons.length>0 && buttons.every(button => visible(win,button) && rect(button).width>=47.5 && rect(button).height>=47.5),buttons.map(button => `${button.textContent.trim()}: ${Math.round(rect(button).width)}×${Math.round(rect(button).height)}`).join('; '));
-      let allReachable = buttons.length>0;
+      add('B — player selection opens the ASSE strip',visible(win,panel) && doc.querySelector('.slot.selected')?.dataset.name===names[9]);
+      add('B — all ASSE actions stay on one row',buttons.length===10 && Math.max(...tops)-Math.min(...tops)<=1,`${buttons.length} buttons; row tops ${[...new Set(tops)].join(', ')}`);
+      add('B — ASSE actions keep 48px touch targets',buttons.length===10 && buttons.every(button => visible(win,button) && rect(button).width>=47.5 && rect(button).height>=47.5));
+      let allReachable = buttons.length===10;
       if(strip) {
         const previousScroll = strip.scrollLeft;
         for(const button of buttons) {
@@ -155,22 +170,30 @@
         }
         strip.scrollLeft=previousScroll;
       }
-      add('Every action reachable using only strip scroll',allReachable);
-      add('Pitch has a large landscape surface',pitchRect.width>pitchRect.height && pitchRect.width>=Math.min(300,viewport.width-24) && pitchRect.height>=Math.min(220,viewport.height*.3),`${Math.round(pitchRect.width)} × ${Math.round(pitchRect.height)}px`);
-      add('Action panel does not cover the pitch',panel && !overlaps(rect(panel),pitchRect));
-      const benchRect = bench ? rect(bench) : {left:0,right:0,top:0,bottom:0};
-      const benchSlots = bench ? [...bench.querySelectorAll('.slot')] : [];
-      const benchSlotsInside = benchSlots.every(slot => {const slotRect=rect(slot);return slotRect.left>=benchRect.left-1 && slotRect.right<=benchRect.right+1 && slotRect.top>=benchRect.top-1 && slotRect.bottom<=benchRect.bottom+1 && !overlaps(slotRect,pitchRect);});
-      add('Substitutes stay outside the pitch',bench && !overlaps(benchRect,pitchRect) && benchSlots.length===3 && benchSlotsInside,`${benchSlots.length} substitutes`);
-      add('All eleven starters are inside the pitch',pitch && pitch.querySelectorAll('.slot').length===11 && [...pitch.querySelectorAll('.slot')].every(slot => {const s=rect(slot);return s.left>=pitchRect.left-1 && s.right<=pitchRect.right+1 && s.top>=pitchRect.top-1 && s.bottom<=pitchRect.bottom+1;}));
-      const wasPicking = !!win.__tabletFixtureStateSummary().zonePending;
-      if(!wasPicking) win.startZonePick({type:'player',key:'tirCadre',player:names[9]});
+      add('B — every ASSE action is reachable by local strip scroll',allReachable);
+      add('B — action panel does not overlap the pitch',!overlaps(rect(panel),rect(pitch)));
+
+      win.actionZone('tirCadre');
       await nextPaint();
       const zones = [...doc.querySelectorAll('#zoneOverlay .zoneCell')];
-      add('Nine numbered zones keep a minimum 44px touch area',zones.length===9 && new Set(zones.map(zone => zone.dataset.zone)).size===9 && zones.every(zone => visible(win,zone) && rect(zone).width>=44 && rect(zone).height>=44),zones.map(zone => `${zone.dataset.zone}: ${Math.round(rect(zone).width)}×${Math.round(rect(zone).height)}`).join('; '));
-      add('Every zone receives pointer hits at its center',zones.length===9 && zones.every(zone => {const z=rect(zone),hit=doc.elementFromPoint(z.left+z.width/2,z.top+z.height/2);return !!hit && (hit===zone || zone.contains(hit));}));
-      if(!wasPicking) win.closeZones();
-      const result = {viewport,passed:checks.every(check => check.pass),checks,metrics:{pitch:{width:Math.round(pitchRect.width),height:Math.round(pitchRect.height)},strip:{clientWidth:strip?.clientWidth,scrollWidth:strip?.scrollWidth},starters:pitch?.querySelectorAll('.slot').length,bench:bench?.querySelectorAll('.slot').length}};
+      const zoneById = id => zones.find(zone=>zone.dataset.zone===String(id));
+      add('C — nine unchanged zone IDs have 44px touch areas',zones.length===9 && new Set(zones.map(zone=>zone.dataset.zone)).size===9 && zones.every(zone=>visible(win,zone)&&rect(zone).width>=44&&rect(zone).height>=44));
+      add('C — zone IDs keep top-to-bottom order',rect(zoneById(1)).top<rect(zoneById(4)).top && rect(zoneById(4)).top<rect(zoneById(7)).top);
+      add('C — every zone receives pointer hits at its center',zones.every(zone=>{const z=rect(zone),hit=doc.elementFromPoint(z.left+z.width/2,z.top+z.height/2);return !!hit&&(hit===zone||zone.contains(hit));}));
+      win.closeZones();
+
+      win.showActionMenu('adv');
+      await nextPaint();
+      const opponentButtons = [...doc.querySelectorAll('#actionMenu .subActionGrid button')];
+      const opponentTops = opponentButtons.map(button=>Math.round(rect(button).top));
+      add('D — opponent selector opens only existing opponent actions',panel.classList.contains('advOnly') && visible(win,panel) && !visible(win,strip) && opponentButtons.length===9,`${opponentButtons.length} controls`);
+      add('D — opponent actions stay on one row and remain touch-friendly',opponentButtons.length===9 && Math.max(...opponentTops)-Math.min(...opponentTops)<=1 && opponentButtons.every(button=>rect(button).height>=47.5));
+      win.hideActionMenu();
+      win.__prepareTabletFixture();
+      await nextPaint();
+      add('E — closing/resetting restores zero action-strip space',!visible(win,panel) && rect(panel).height===0);
+      add('E — pitch recovers its initial height',Math.abs(rect(pitch).height-initialPitchRect.height)<=1,`${Math.round(rect(pitch).height)} / ${Math.round(initialPitchRect.height)}px`);
+      const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{pitch:{width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},strip:{clientWidth:strip?.clientWidth,scrollWidth:strip?.scrollWidth},starters:pitch?.querySelectorAll('.slot').length,bench:bench?.querySelectorAll('.slot').length}};
       api.lastResult=result;
       const results = document.getElementById('results');
       results.replaceChildren();

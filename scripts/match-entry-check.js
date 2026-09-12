@@ -181,6 +181,18 @@ async function main() {
     assert.equal(h.getNode('zoneOverlay').style.pointerEvents, 'none');
   });
 
+  await test('vertical pitch events preserve low, central, high and opponent zone IDs', () => {
+    const h = matchHarness();
+    h.run("zoneStat('recup');zoneClick(8);zoneStat('recup');zoneClick(5);actionZone('tirCadre');zoneClick(2);advZone('tirCadreAdv');zoneClick(1);");
+    const state = h.state();
+    assert.deepEqual(state.log.map(event => event.zone).filter(Number.isInteger), [8, 5, 2, 1]);
+    assert.equal(state.players['TEST BEA'].zones.recup[8], 1);
+    assert.equal(state.players['TEST BEA'].zones.recup[5], 1);
+    assert.equal(state.players['TEST BEA'].zones.tirCadre[2], 1);
+    assert.equal(state.opp.zones.tirCadreAdv[1], 1);
+    assert.equal(state.selected, 'TEST BEA');
+  });
+
   await test('goal, assist, score and action undo', () => {
     const h = matchHarness();
     h.run("goalFlow();zoneClick(6);assistForGoal('TEST ALICE');");

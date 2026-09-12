@@ -172,7 +172,7 @@ body.embedded-page .tt-nav.tabs button.active .nav-ico{color:initial!important;t
 <div class="matchName" id="liveMatchName"></div><span class="phaseBadge" id="phaseBadge"></span>
 <div class="systemQuickButtons" id="systemQuickButtons"></div>
 </div>
-<div class="liveLayout"><div class="card pitchCard"><div class="fullPitchHint">V2.1 : terrain adaptatif tablette. Touche une joueuse = actions. Appui long / glisser = changement. Bouton adversaire toujours visible.</div><div class="playerActionPanel" id="playerActionPanel"><div class="playerPanelTop"><div><b id="panelPlayerName">Sélectionne une joueuse</b><span id="panelPlayerInfo">Puis touche une action · glisse le bandeau pour tout voir</span></div><div class="matchActionTools"><button class="bad" onclick="showActionMenu('adv')">Adversaire</button><button class="ghost" onclick="closePlayerPanel()" aria-label="Fermer les actions adverses ou la passe décisive">✕</button></div></div><div class="zoneBar" id="zoneBar"><span id="zoneTitle">Zone</span><button class="bad" onclick="closeZones()">Fermer</button></div><div class="playerPanelActions v310Actions" role="group" aria-label="Actions ASSE — défilement horizontal" tabindex="0">
+<div class="liveLayout"><div class="card pitchCard"><div class="fullPitchHint">V2.1 : terrain adaptatif tablette. Touche une joueuse = actions. Appui long / glisser = changement. Bouton adversaire toujours visible.</div><div class="matchSelectionRow"><div class="matchDirection" aria-label="Sens du terrain"><strong>↑ BUT ADVERSE</strong><span>ASSE attaque vers le haut · Nos cages en bas</span></div><button class="bad opponentActionTrigger" id="opponentActionTrigger" onclick="showActionMenu('adv')" aria-controls="playerActionPanel">🔴 Adversaire</button></div><div class="playerActionPanel" id="playerActionPanel"><div class="playerPanelTop"><div><b id="panelPlayerName">Sélectionne une joueuse</b><span id="panelPlayerInfo">Puis touche une action · glisse le bandeau pour tout voir</span></div><div class="matchActionTools"><button class="ghost" onclick="closePlayerPanel()" aria-label="Fermer les actions adverses ou la passe décisive">✕</button></div></div><div class="zoneBar" id="zoneBar"><span id="zoneTitle">Zone</span><button class="bad" onclick="closeZones()">Fermer</button></div><div class="playerPanelActions v310Actions" role="group" aria-label="Actions ASSE — défilement horizontal" tabindex="0">
 <button class="good" onclick="goalFlow()">⚽ But</button>
 <button class="blue" onclick="stat('passe')">🎯 Passe décisive</button>
 <button class="blue" onclick="actionZone('tirCadre')">🥅 Tir cadré</button>
@@ -311,7 +311,6 @@ function renderLive(){const teamName=state.team||'ASSE';document.getElementById(
 function renderPitch(){const pitch=document.getElementById('pitch');if(!pitch)return;document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());const pos=POSITIONS[state.system]||[];pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,p[1],p[2],false)});state.bench.forEach((name,i)=>addSlot('Banc',name,91,16+i*10,true))}
 function addSlot(pos,name,x,y,bench){
  const pitch=document.getElementById(bench?'matchBench':'pitch')||document.getElementById('pitch');
- if(!bench){const oldX=x;x=100-y;y=oldX;}
  const d=document.createElement('div');
  d.className='slot '+(bench?'bench':'player')+(state.selected===name?' selected':'');
  d.style.left=bench?'0px':`calc(${x}% - var(--match-slot-size, 88px) / 2)`;
@@ -441,7 +440,7 @@ function movePlayer(name,from,to,targetName=''){
  state.selected=name;
  save();renderAll();
 }
-function openPlayerPanel(name){if(!name)return;state.selected=name;const panel=document.getElementById('playerActionPanel');if(panel){panel.classList.add('show');renderPlayerPanel();}}
+function openPlayerPanel(name){if(!name)return;state.selected=name;document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(slot=>slot.classList.toggle('selected',slot.dataset.name===name));const panel=document.getElementById('playerActionPanel');if(panel){panel.classList.add('show');renderPlayerPanel();}}
 function closePlayerPanel(){document.getElementById('playerActionPanel')?.classList.remove('show','advOnly');hideActionMenu();}
 function renderPlayerPanel(){const panel=document.getElementById('playerActionPanel');if(!panel)return;const name=state.selected;const n=document.getElementById('panelPlayerName');const info=document.getElementById('panelPlayerInfo');if(panel.classList.contains('advOnly'))return;if(!name){panel.classList.remove('show');return}panel.classList.remove('advOnly');const p=state.players[name]||blank();if(n)n.textContent=short(name);if(info)info.textContent=`${findPos(name)||mainPosition(p)||'Banc'} · ${fmt(p.seconds||0)} · ${positionsText(p)} · ⚽ ${p.but||0} · 🎯 ${p.passe||0} · 🥅 ${(p.tirCadre||0)+(p.tirNonCadre||0)} · 📍 ${p.recup||0}`;}
 
@@ -457,7 +456,7 @@ function showActionMenu(type){const box=document.getElementById('actionMenu');if
 function goalFlow(){if(!state.selected){CoachStatsNotify.warn('Sélectionne la buteuse avant de valider le but.');return}startZonePick({type:'player',key:'but',player:state.selected,after:'assist'})}
 function showAssistMenu(scorer){const box=document.getElementById('actionMenu');if(!box)return;const onField=Object.values(state.lineup||{}).filter(n=>n&&n!==scorer);const others=(onField.length?onField:state.called.filter(n=>n!==scorer));box.innerHTML=`<div class="actionMenuTitle">⚽ But validé pour ${short(scorer)}</div><div class="assistHint">Passe décisive ?</div><div class="subActionGrid"><button class="ghost" onclick="hideActionMenu()">Aucune passe D</button>${others.map(n=>`<button class="blue" onclick="assistForGoal('${esc(n)}')">🎯 ${short(n)}</button>`).join('')}</div>`;box.classList.add('show')}
 function assistForGoal(name){if(!name||!state.players[name])return;state.players[name].passe++;pushLog(name,'Passe D');save();renderAll();showUndo();hideActionMenu()}
-function hideActionMenu(){document.getElementById('actionMenu')?.classList.remove('show');document.getElementById('playerActionPanel')?.classList.remove('advOnly')}
+function hideActionMenu(){document.getElementById('actionMenu')?.classList.remove('show');const panel=document.getElementById('playerActionPanel');panel?.classList.remove('advOnly');if(panel&&!state.selected)panel.classList.remove('show')}
 function stat(k){if(!state.selected){CoachStatsNotify.warn('Sélectionne une joueuse avant de prendre la stat.');return}recordPlayerAction(state.selected,k,null)}
 function actionZone(k){if(!state.selected){CoachStatsNotify.warn('Sélectionne une joueuse avant de prendre la stat.');return}startZonePick({type:'player',key:k,player:state.selected})}
 function zoneStat(k){if(!state.selected){CoachStatsNotify.warn('Sélectionne une joueuse avant de choisir une zone.');return}startZonePick({type:'player',key:k,player:state.selected})}
