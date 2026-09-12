@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CoachPulse Match tablet fixture</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font:14px system-ui,sans-serif;background:#dce5df;color:#15251c}
+    #matchFrame{display:block;width:100vw;height:100vh;border:0;background:#fff}
+    #tools{position:fixed;right:8px;bottom:8px;z-index:1000;max-width:min(620px,calc(100vw - 16px));max-height:85vh;overflow:auto;background:#fff;border:2px solid #176239;border-radius:12px;box-shadow:0 8px 32px #0003}
+    #tools summary{padding:10px 14px;cursor:pointer;font-weight:800;background:#e7f3eb}#tools[open] summary{border-bottom:1px solid #c5dbcc}
+    .controls{padding:10px;display:flex;gap:6px;flex-wrap:wrap}button{min-height:40px;border:1px solid #b5cabc;border-radius:6px;background:#f5faf6;color:#16452b;padding:8px 10px;cursor:pointer;font:inherit;font-weight:700}
+    button.primary{background:#176239;color:#fff}.hint,#status{margin:0;padding:8px 12px;font-size:12px}#results{padding:0 12px 10px;max-height:42vh;overflow:auto}#results p{margin:5px 0}.pass{color:#176239}.fail{color:#b31d26}#metrics{white-space:pre-wrap;font:12px ui-monospace,monospace;margin:8px 0}.hidden{display:none!important}
+  </style>
+</head>
+<body>
+  <iframe id="matchFrame" title="Actual Match module with synthetic data"></iframe>
+  <details id="tools" open>
+    <summary>Match tablet test tools</summary>
+    <p class="hint">Actual module and CSS. Fourteen synthetic players. Storage remains in memory; no Firebase connection. Close or hide this drawer for screenshots. Press Alt+T to show it again.</p>
+    <div class="controls" id="presets">
+      <button data-size="1024,768">1024 × 768</button><button data-size="1180,820">1180 × 820</button><button data-size="1366,1024">1366 × 1024</button><button data-size="768,1024">768 × 1024</button><button data-size="390,844">390 × 844</button><button data-size="1440,900">1440 × 900</button><button id="browserSize">Use browser size</button>
+    </div>
+    <div class="controls">
+      <button id="prepare">Prepare match</button><button id="pickZones">Pick zones</button><button id="verify" class="primary">Verify layout</button><button id="reload">Reload module</button><button id="hideTools">Hide test tools</button>
+    </div>
+    <p id="status" role="status">Loading fixture…</p>
+    <div id="results" aria-live="polite"></div>
+  </details>
+  <script>
+    'use strict';
+    const frame = document.getElementById('matchFrame');
+    const tools = document.getElementById('tools');
+    const status = document.getElementById('status');
+    const fixturePlayers = Array.from({length:14}, (_, index) => ({
+      name: `TEST JOUEUSE ${String(index + 1).padStart(2,'0')}`,
+      firstName: `JOUEUSE ${String(index + 1).padStart(2,'0')}`, lastName:'TEST',
+      playerId:`tablet-player-${index + 1}`, id:`tablet-player-${index + 1}`,
+      team:'U13 A',teamId:'team-u13-a',teamIds:['team-u13-a'],
+      category:'U13',subCategory:'U13',season:'2026-2027',foot:'DROIT',photo:''
+    }));
+    const names = fixturePlayers.map(player => player.name);
+    const positions = ['GB','DG','DCG','DCD','DD','MCG','MDC','MCD','AIG','BU','AID'];
+    const fixtureState = {
+      matchId:1900012345000,team:'U13 A',teamId:'team-u13-a',opponent:'ÉQUIPE TEST',
+      format:'11',system:'4-3-3',duration:90,elapsed:0,running:false,
+      phase:'not_started',matchEnded:false,called:names,
+      lineup:Object.fromEntries(positions.map((position,index) => [position,names[index]])),
+      bench:names.slice(11),players:{},selected:null,zoneMode:null,zonePending:null,
+      scoreUs:0,scoreThem:0,opp:{},log:[],savedMatches:[],
+      possessionTeam:'none',kickoffTeam:'none',possessionUs:0,possessionAdv:0
+    };
+    let ready = false;
+    const nextPaint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const api = window.matchTabletHarness = {frame,fixturePlayers,fixtureState,lastResult:null};
+
+    function memoryBootstrap(seed) {
+      const memory = new Map([['coachStatsV170',JSON.stringify(seed)]]);
+      const makeStorage = () => ({
+        __tabletFixtureMemory:true,
+        get length(){return memory.size;},
+        key(index){return [...memory.keys()][index] ?? null;},
+        getItem(key){return memory.has(String(key)) ? memory.get(String(key)) : null;},
+        setItem(key,value){memory.set(String(key),String(value));},
+        removeItem(key){memory.delete(String(key));},clear(){memory.clear();}
+      });
+      Object.defineProperty(window,'localStorage',{value:makeStorage(),configurable:false});
+      Object.defineProperty(window,'sessionStorage',{value:makeStorage(),configurable:false});
+      window.__tabletFixtureMemory = memory;
+      window.__tabletFixtureState = seed;
+    }
+
+    async function loadModule() {
+      ready = false;
+      status.textContent = 'Loading actual Match module with synthetic players…';
+      const sourceUrl = new URL('../pages/coach-stats.html',location.href);
+      const response = await fetch(sourceUrl,{cache:'no-store'});
+      if(!response.ok) throw new Error(`Module HTTP ${response.status}`);
+      let source = await response.text();
+      const dataStart = source.indexOf('const PLAYER_DB=');
+      const dataEnd = source.indexOf('\nconst ROSTER=',dataStart);
+      if(dataStart < 0 || dataEnd < dataStart) throw new Error('Embedded player fixture boundary not found.');
+      // Replace only the embedded data; all production handlers, markup and CSS remain intact.
+      source = source.slice(0,dataStart) + `const PLAYER_DB=${JSON.stringify(fixturePlayers)};` + source.slice(dataEnd);
+      const boot = `<base href="${new URL('.',sourceUrl).href}"><script>(${memoryBootstrap.toString()})(${JSON.stringify(fixtureState)});<\/script>`;
+      source = source.replace(/<head>/i,`<head>${boot}`);
+      const setup = `<script>
+        window.__prepareTabletFixture=function(){
+          state=JSON.parse(JSON.stringify(window.__tabletFixtureState));
+          ensure();buildSystem();closeZones();hideActionMenu();save();renderAll();
+          var liveTab=Array.from(document.querySelectorAll('.tabs button')).find(b=>(b.getAttribute('onclick')||'').includes("'live'"));
+          showTab('live',liveTab);window.scrollTo(0,0);
+          return {matchId:state.matchId,starters:Object.values(state.lineup).filter(Boolean).length,bench:state.bench.length};
+        };
+        window.__tabletFixtureStateSummary=function(){return JSON.parse(JSON.stringify(state))};
+        window.addEventListener('load',function(){
+          window.__prepareTabletFixture();
+          parent.postMessage({type:'tablet-fixture-ready'},'*');
+        },{once:true});
+      <\/script>`;
+      source = source.replace(/<\/body>/i,`${setup}</body>`);
+      frame.srcdoc = source;
+    }
+
+    function requireReady() {
+      if(!ready) throw new Error('The Match module is still loading.');
+      return frame.contentWindow;
+    }
+    function prepare() {
+      const result = requireReady().__prepareTabletFixture();
+      status.textContent = `Prepared ${result.starters} starters + ${result.bench} substitutes; fixture matchId ${result.matchId}.`;
+      return result;
+    }
+    function pickZones() {
+      const win = requireReady();
+      win.openPlayerPanel(names[9]);
+      win.actionZone('tirCadre');
+      status.textContent = 'Shot zone picker open. Touch any of the nine production zones.';
+    }
+    function resize(width,height) {
+      frame.style.width = width ? `${width}px` : '100vw';
+      frame.style.height = height ? `${height}px` : '100vh';
+      status.textContent = width ? `Iframe viewport: ${width} × ${height}.` : 'Iframe follows the browser viewport.';
+    }
+    const rect = node => node.getBoundingClientRect();
+    const visible = (win,node) => !!node && rect(node).width > 0 && rect(node).height > 0 && win.getComputedStyle(node).visibility !== 'hidden' && win.getComputedStyle(node).display !== 'none';
+    const overlaps = (a,b) => Math.min(a.right,b.right)-Math.max(a.left,b.left)>1 && Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1;
+
+    async function verify() {
+      const win = requireReady();
+      const doc = win.document;
+      const checks = [];
+      const add = (name,pass,detail='') => checks.push({name,pass:!!pass,detail});
+      const strip = doc.querySelector('.playerPanelActions');
+      const pitch = doc.getElementById('pitch');
+      const bench = doc.getElementById('matchBench');
+      const panel = doc.getElementById('playerActionPanel');
+      const buttons = strip ? [...strip.querySelectorAll('button')] : [];
+      await nextPaint();
+      const pitchRect = pitch ? rect(pitch) : {width:0,height:0};
+      const viewport = {width:doc.documentElement.clientWidth,height:doc.documentElement.clientHeight};
+      add('Fixture storage isolated',win.localStorage.__tabletFixtureMemory && !window.CoachPulseCentralData);
+      add('Page has no horizontal overflow',Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)<=viewport.width+1,`${Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)} / ${viewport.width}px`);
+      const tops = buttons.map(button => Math.round(rect(button).top));
+      add('All primary actions on one row',buttons.length>=10 && Math.max(...tops)-Math.min(...tops)<=1,`${buttons.length} buttons; row tops ${[...new Set(tops)].join(', ')}`);
+      add('Primary actions are visible and at least 48px',buttons.length>0 && buttons.every(button => visible(win,button) && rect(button).width>=47.5 && rect(button).height>=47.5),buttons.map(button => `${button.textContent.trim()}: ${Math.round(rect(button).width)}×${Math.round(rect(button).height)}`).join('; '));
+      let allReachable = buttons.length>0;
+      if(strip) {
+        const previousScroll = strip.scrollLeft;
+        for(const button of buttons) {
+          strip.scrollLeft += rect(button).left - rect(strip).left - 3;
+          await nextPaint();
+          const b = rect(button),s = rect(strip);
+          if(b.left<s.left-1 || b.right>s.right+1) allReachable=false;
+        }
+        strip.scrollLeft=previousScroll;
+      }
+      add('Every action reachable using only strip scroll',allReachable);
+      add('Pitch has a large landscape surface',pitchRect.width>pitchRect.height && pitchRect.width>=Math.min(300,viewport.width-24) && pitchRect.height>=Math.min(220,viewport.height*.3),`${Math.round(pitchRect.width)} × ${Math.round(pitchRect.height)}px`);
+      add('Action panel does not cover the pitch',panel && !overlaps(rect(panel),pitchRect));
+      const benchRect = bench ? rect(bench) : {left:0,right:0,top:0,bottom:0};
+      const benchSlots = bench ? [...bench.querySelectorAll('.slot')] : [];
+      const benchSlotsInside = benchSlots.every(slot => {const slotRect=rect(slot);return slotRect.left>=benchRect.left-1 && slotRect.right<=benchRect.right+1 && slotRect.top>=benchRect.top-1 && slotRect.bottom<=benchRect.bottom+1 && !overlaps(slotRect,pitchRect);});
+      add('Substitutes stay outside the pitch',bench && !overlaps(benchRect,pitchRect) && benchSlots.length===3 && benchSlotsInside,`${benchSlots.length} substitutes`);
+      add('All eleven starters are inside the pitch',pitch && pitch.querySelectorAll('.slot').length===11 && [...pitch.querySelectorAll('.slot')].every(slot => {const s=rect(slot);return s.left>=pitchRect.left-1 && s.right<=pitchRect.right+1 && s.top>=pitchRect.top-1 && s.bottom<=pitchRect.bottom+1;}));
+      const wasPicking = !!win.__tabletFixtureStateSummary().zonePending;
+      if(!wasPicking) win.startZonePick({type:'player',key:'tirCadre',player:names[9]});
+      await nextPaint();
+      const zones = [...doc.querySelectorAll('#zoneOverlay .zoneCell')];
+      add('Nine numbered zones keep a minimum 44px touch area',zones.length===9 && new Set(zones.map(zone => zone.dataset.zone)).size===9 && zones.every(zone => visible(win,zone) && rect(zone).width>=44 && rect(zone).height>=44),zones.map(zone => `${zone.dataset.zone}: ${Math.round(rect(zone).width)}×${Math.round(rect(zone).height)}`).join('; '));
+      add('Every zone receives pointer hits at its center',zones.length===9 && zones.every(zone => {const z=rect(zone),hit=doc.elementFromPoint(z.left+z.width/2,z.top+z.height/2);return !!hit && (hit===zone || zone.contains(hit));}));
+      if(!wasPicking) win.closeZones();
+      const result = {viewport,passed:checks.every(check => check.pass),checks,metrics:{pitch:{width:Math.round(pitchRect.width),height:Math.round(pitchRect.height)},strip:{clientWidth:strip?.clientWidth,scrollWidth:strip?.scrollWidth},starters:pitch?.querySelectorAll('.slot').length,bench:bench?.querySelectorAll('.slot').length}};
+      api.lastResult=result;
+      const results = document.getElementById('results');
+      results.replaceChildren();
+      for(const check of checks) {const row=document.createElement('p');row.className=check.pass?'pass':'fail';row.textContent=`${check.pass?'PASS':'FAIL'} ${check.name}${check.detail?' — '+check.detail:''}`;results.appendChild(row);}
+      const metrics=document.createElement('pre');metrics.id='metrics';metrics.textContent=JSON.stringify({viewport,...result.metrics},null,2);results.appendChild(metrics);
+      status.textContent=`${result.passed?'PASS':'FAIL'} — ${checks.filter(check=>check.pass).length}/${checks.length} checks at ${viewport.width} × ${viewport.height}.`;
+      tools.open=true;
+      return result;
+    }
+    Object.assign(api,{prepare,pickZones,verify,resize,reload:loadModule,showTools(){tools.classList.remove('hidden');tools.open=true;},hideTools(){tools.classList.add('hidden');}});
+    function action(callback){return () => Promise.resolve().then(callback).catch(error => {status.textContent=error.message;tools.open=true;console.error(error);});}
+    document.getElementById('prepare').onclick=action(prepare);
+    document.getElementById('pickZones').onclick=action(pickZones);
+    document.getElementById('verify').onclick=action(verify);
+    document.getElementById('reload').onclick=action(loadModule);
+    document.getElementById('hideTools').onclick=api.hideTools;
+    document.getElementById('browserSize').onclick=()=>resize();
+    document.querySelectorAll('[data-size]').forEach(button=>button.onclick=()=>resize(...button.dataset.size.split(',').map(Number)));
+    window.addEventListener('keydown',event=>{if(event.altKey && event.key.toLowerCase()==='t'){event.preventDefault();api.showTools();}});
+    window.addEventListener('message',event=>{if(event.source===frame.contentWindow && event.data?.type==='tablet-fixture-ready'){ready=true;status.textContent=`Ready: synthetic 11 + 3 squad, actual module, ${frame.contentWindow.innerWidth} × ${frame.contentWindow.innerHeight}.`;}});
+    loadModule().catch(error=>{status.textContent=error.message;console.error(error);});
+  </script>
+</body>
+</html>
