@@ -12,6 +12,7 @@
     "audit:players": "node scripts/audit-player-data.js",
     "deploy:prod": "firebase deploy --project coach-pulse-ee6b0",
     "deploy:dev": "firebase hosting:channel:deploy dev --project coach-pulse-ee6b0",
-    "firebase:project": "firebase use"
+    "firebase:project": "firebase use",
+    "test:match": "node scripts/match-entry-check.js"
   }
 }
