@@ -993,6 +993,22 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(rulesSource.includes('match /matches/{matchId}') && rulesSource.includes('match /matchEvents/{eventId}'), 'Les règles doivent couvrir matches et matchEvents.');
 }
 
+function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const loadFirebase = appSource.match(/async function loadFirebaseFns[\s\S]*?\n}/)?.[0] || '';
+  const boundaryInstrumentation = appSource.match(/function instrumentCentralDataBoundaries[\s\S]*?\ninstrumentCentralDataBoundaries\(\);/)?.[0] || '';
+  const safeTracker = appSource.match(/function safeLoadingCall[\s\S]*?\n}\nasync function trackLoadingTask[\s\S]*?\n}/)?.[0] || '';
+
+  assert(loadFirebase.includes('installFirebasePerfInstrumentation()'), 'Le chargement Firebase doit conserver uniquement l’instrumentation performance historique.');
+  assert(!loadFirebase.includes('installFirebaseInstrumentation()'), 'L’indicateur ne doit jamais monkey-patcher les exports Firebase.');
+  assert(!appSource.includes('__coachpulseInstrumented'), 'Aucun marqueur de monkey-patching UX ne doit subsister sur Firebase.');
+  assert(boundaryInstrumentation.includes('original.apply(receiver, args)'), 'Les fonctions métier originales doivent rester la source de vérité.');
+  assert(boundaryInstrumentation.includes('trackLoadingTask(label'), 'L’indicateur doit observer les frontières applicatives contrôlées.');
+  assert(safeTracker.includes('catch(error)') && safeTracker.includes('const result = await work()'), 'Une panne de l’indicateur ne doit pas empêcher le travail métier de s’exécuter.');
+  assert(appSource.includes("safeLoadingCall('start', ['profile:listen'"), 'Le premier snapshot profil doit être observé au niveau du callback applicatif.');
+  assert(appSource.includes("safeLoadingCall('start', ['cloud:listen'"), 'Le premier snapshot cloud doit être observé sans remplacer onSnapshot.');
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -1025,6 +1041,7 @@ testPresenceInteractionsStayNonBlocking();
 testPerformanceCriticalPathStaysNonBlocking();
 testTechnicalHistoryCompatibilityAndScoping();
 testMatchCloudSyncIsOfflineFirstAndIdempotent();
+testLoadingIndicatorCannotReplaceFirebaseDataApi();
 
 Promise.resolve()
   .then(testScopedPlayerReadFiltersInFirestore)

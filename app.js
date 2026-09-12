@@ -50,7 +50,7 @@ const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260911-global-loading-v79';
+const APP_SHELL_VERSION = '20260912-global-loading-safe-v80';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -102,93 +102,56 @@ function recordPerfEvent(type, detail={}){
   if(perfState.events.length > 250) perfState.events.shift();
   console.info('[CoachPulse perf]', event);
 }
-function firestoreOperationLabel(method, value){
-  const segments = value?.path?.segments || value?._key?.path?.segments || value?._query?.path?.segments || value?._path?.segments || [];
-  const path = Array.isArray(segments) ? segments.join('/') : String(value?.path || '');
-  const collection = path.split('/').filter(Boolean)[0] || 'firestore';
-  return `${collection}:${method}`;
-}
-function installFirebaseInstrumentation(){
-  if(!firebaseFns || firebaseFns.__coachpulseInstrumented) return;
-  const instrumented = ['getDoc','getDocs','setDoc','updateDoc','addDoc','deleteDoc','runTransaction'];
-  instrumented.forEach(method => {
-    const original = firebaseFns[method];
-    if(typeof original !== 'function') return;
-    firebaseFns[method] = function(){
-      const args = arguments;
-      const label = firestoreOperationLabel(method, args[0]);
-      const isRead = method === 'getDoc' || method === 'getDocs';
-      const operation = loadingIndicator()?.start(label, {kind:'sync'});
-      const startedAt = performance.now();
-      if(debugPerfEnabled() && isRead){
-        perfState.firestoreRequests += 1;
-        perfState.activeRequests += 1;
-        perfState.maxConcurrentRequests = Math.max(perfState.maxConcurrentRequests, perfState.activeRequests);
-      }
-      let result;
-      try{ result = original.apply(this, args); }
-      catch(error){ operation?.fail(error); throw error; }
-      return Promise.resolve(result).then(value => {
-        if(debugPerfEnabled() && isRead){
-          const documents = method === 'getDocs' ? Number(value?.size || 0) : (value?.exists?.() ? 1 : 0);
-          perfState.firestoreDocuments += documents;
-          recordPerfEvent(`firestore:${method}`, {durationMs:Math.round(performance.now() - startedAt), documents});
-        }
-        operation?.end();
-        return value;
-      }, error => {
-        operation?.fail(error);
-        throw error;
-      }).finally(() => {
-        if(debugPerfEnabled() && isRead) perfState.activeRequests = Math.max(0, perfState.activeRequests - 1);
-      });
-    };
-  });
+function installFirebasePerfInstrumentation(){
+  if(!debugPerfEnabled() || !firebaseFns || firebaseFns.__coachpulsePerfInstrumented) return;
+  const originalGetDocs = firebaseFns.getDocs;
   const originalOnSnapshot = firebaseFns.onSnapshot;
+  firebaseFns.getDocs = async function(){
+    const startedAt = performance.now();
+    perfState.firestoreRequests += 1;
+    perfState.activeRequests += 1;
+    perfState.maxConcurrentRequests = Math.max(perfState.maxConcurrentRequests, perfState.activeRequests);
+    try{
+      const snap = await originalGetDocs.apply(this, arguments);
+      const documents = Number(snap?.size || 0);
+      perfState.firestoreDocuments += documents;
+      recordPerfEvent('firestore:getDocs', {durationMs:Math.round(performance.now() - startedAt), documents});
+      return snap;
+    }finally{
+      perfState.activeRequests = Math.max(0, perfState.activeRequests - 1);
+    }
+  };
   firebaseFns.onSnapshot = function(){
-    const args = [...arguments];
-    const operation = loadingIndicator()?.start(firestoreOperationLabel('listen', args[0]), {kind:'sync'});
-    const callbackIndex = args.findIndex((value, index) => index > 0 && typeof value === 'function');
-    const errorIndex = args.findIndex((value, index) => index > callbackIndex && typeof value === 'function');
-    const observerIndex = args.findIndex((value, index) => index > 0 && value && typeof value === 'object' && (typeof value.next === 'function' || typeof value.error === 'function'));
-    if(callbackIndex >= 0){
-      const callback = args[callbackIndex];
-      args[callbackIndex] = function(){ operation?.end(); return callback.apply(this, arguments); };
-    }
-    if(errorIndex >= 0){
-      const errorCallback = args[errorIndex];
-      args[errorIndex] = function(error){ operation?.fail(error); return errorCallback.apply(this, arguments); };
-    }
-    if(callbackIndex < 0 && observerIndex >= 0){
-      const observer = args[observerIndex];
-      args[observerIndex] = {
-        ...observer,
-        next(){ operation?.end(); return observer.next?.apply(this, arguments); },
-        error(error){ operation?.fail(error); return observer.error?.call(this, error); }
-      };
-    }
-    let unsubscribe;
-    try{ unsubscribe = originalOnSnapshot.apply(this, args); }
-    catch(error){ operation?.fail(error); throw error; }
-    if(debugPerfEnabled()){
-      perfState.listeners += 1;
-      recordPerfEvent('firestore:listener-open', {listeners:perfState.listeners});
-    }
+    const unsubscribe = originalOnSnapshot.apply(this, arguments);
+    perfState.listeners += 1;
+    recordPerfEvent('firestore:listener-open', {listeners:perfState.listeners});
     let active = true;
     return () => {
-      operation?.end();
       if(active){
         active = false;
-        if(debugPerfEnabled()){
-          perfState.listeners = Math.max(0, perfState.listeners - 1);
-          recordPerfEvent('firestore:listener-close', {listeners:perfState.listeners});
-        }
+        perfState.listeners = Math.max(0, perfState.listeners - 1);
+        recordPerfEvent('firestore:listener-close', {listeners:perfState.listeners});
       }
       return unsubscribe();
     };
   };
-  firebaseFns.__coachpulseInstrumented = true;
+  firebaseFns.__coachpulsePerfInstrumented = true;
   window.CoachPulsePerf = {state:perfState, snapshot:() => cloneData(perfState)};
+}
+function safeLoadingCall(method, args=[]){
+  try{ return loadingIndicator()?.[method]?.(...args); }
+  catch(error){ if(debugPerfEnabled()) console.warn(`[CoachPulse Loading] ${method} indisponible`, error); return null; }
+}
+async function trackLoadingTask(label, options, work){
+  const operation = safeLoadingCall('start', [label, options]);
+  try{
+    const result = await work();
+    try{ operation?.end?.(); }catch(error){ if(debugPerfEnabled()) console.warn('[CoachPulse Loading] fin indisponible', error); }
+    return result;
+  }catch(error){
+    try{ operation?.fail?.(error); }catch(indicatorError){ if(debugPerfEnabled()) console.warn('[CoachPulse Loading] erreur indicateur indisponible', indicatorError); }
+    throw error;
+  }
 }
 async function measureAsync(label, work){
   if(!debugPerfEnabled()) return work();
@@ -911,14 +874,14 @@ async function refreshHomeTeamDashboard(options={}){
   const requestId = ++homeDashboardRequestId;
   if(!options.silent) renderHomeTeamDashboardLoading();
   try{
-    const teams = await homeAuthorizedTeams();
+    const teams = await trackLoadingTask('dashboard:teams', {kind:'loading'}, () => homeAuthorizedTeams());
     if(requestId !== homeDashboardRequestId) return;
     if(!teams.length) return renderHomeTeamDashboardEmpty('Aucune équipe autorisée n’est associée à ce compte.');
     const savedTeamId = storage.get(HOME_TEAM_SELECTION_KEY, '');
     const selectedTeam = teams.find(team => homeTeamId(team) === savedTeamId && canAccessTeamId(savedTeamId)) || teams[0];
     const selectedTeamId = homeTeamId(selectedTeam);
     storage.set(HOME_TEAM_SELECTION_KEY, selectedTeamId, {recover:true});
-    const data = await teamProfileLoadData({teamId:selectedTeamId, homeDashboard:true});
+    const data = await trackLoadingTask('dashboard:data', {kind:'sync'}, () => teamProfileLoadData({teamId:selectedTeamId, homeDashboard:true}));
     if(requestId !== homeDashboardRequestId) return;
     renderHomeTeamDashboard(selectedTeam, teams, data);
   }catch(error){
@@ -1043,7 +1006,7 @@ async function loadFirebaseFns(){
   const authMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
   const fs = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js');
   firebaseFns = {...app, ...authMod, ...fs};
-  installFirebaseInstrumentation();
+  installFirebasePerfInstrumentation();
   return firebaseFns;
 }
 
@@ -1128,7 +1091,9 @@ function startStaffProfileSubscription(){
   stopStaffProfileSubscription();
   if(!db || !currentUser || !firebaseFns?.onSnapshot) return;
   const uid = currentUser.uid;
-  staffProfileUnsub = firebaseFns.onSnapshot(firebaseFns.doc(db, 'staff_members', uid), snap => {
+  const loadingOperation = safeLoadingCall('start', ['profile:listen', {kind:'sync'}]);
+  const unsubscribe = firebaseFns.onSnapshot(firebaseFns.doc(db, 'staff_members', uid), snap => {
+    try{ loadingOperation?.end?.(); }catch(_error){}
     if(!snap.exists() || currentUser?.uid !== uid) return;
     const next = normalizeLoadedStaffProfile({uid, ...snap.data()});
     if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(next.status || '').toUpperCase())){
@@ -1140,7 +1105,11 @@ function startStaffProfileSubscription(){
     updateRoleUi();
     notifyFramesAccessUpdated();
     if(currentTool && !canAccessTool(currentTool)) showHome();
-  }, error => console.warn('Actualisation des autorisations indisponible', cleanError(error)));
+  }, error => {
+    try{ loadingOperation?.fail?.(error); }catch(_error){}
+    console.warn('Actualisation des autorisations indisponible', cleanError(error));
+  });
+  staffProfileUnsub = () => { try{ loadingOperation?.end?.(); }catch(_error){} return unsubscribe(); };
 }
 
 async function initFirebase(){
@@ -1164,7 +1133,7 @@ async function initFirebaseInternal(){
       updateSyncState(user ? 'Cloud connecté' : 'Connexion staff requise');
       if(user){
         try{
-          await ensureUserProfile(user);
+          await trackLoadingTask('profile:load', {kind:'loading'}, () => ensureUserProfile(user));
         }catch(e){
           $('#authError').textContent = cleanError(e);
           await clearFirebaseAuthBrowserCache('profile-load-failed');
@@ -1378,7 +1347,9 @@ function startRealtimeSync(){
   stopRealtimeSync();
   const ref = getCloudRef();
   if(!ref) return;
-  realtimeUnsub = firebaseFns.onSnapshot(ref, snap => {
+  const loadingOperation = safeLoadingCall('start', ['cloud:listen', {kind:'sync'}]);
+  const unsubscribe = firebaseFns.onSnapshot(ref, snap => {
+    try{ loadingOperation?.end?.(); }catch(_error){}
     if(!snap.exists()) { updateSyncState('Cloud prêt'); return; }
     const data = snap.data() || {};
     const items = data.items || {};
@@ -1408,9 +1379,11 @@ function startRealtimeSync(){
       applyingCloud = false;
     }
   }, err => {
+    try{ loadingOperation?.fail?.(err); }catch(_error){}
     console.error(err);
     updateSyncState('Erreur écoute cloud · local OK');
   });
+  realtimeUnsub = () => { try{ loadingOperation?.end?.(); }catch(_error){} return unsubscribe(); };
 }
 function notifyFramesCloudUpdated(){
   invalidateAppDataCaches('all');
@@ -5739,17 +5712,34 @@ function presenceSubscribeEvents(onChange){
     }
   }
   let initialized = 0;
-  const unsubs = queries.map(queryRef => firebaseFns.onSnapshot(queryRef, () => {
+  const subscriptions = queries.map((queryRef, index) => {
+    const loadingOperation = safeLoadingCall('start', [`attendance:listen:${index + 1}`, {kind:'sync'}]);
+    const unsubscribe = firebaseFns.onSnapshot(queryRef, () => {
+    try{ loadingOperation?.end?.(); }catch(_error){}
     invalidateAppDataCaches('presences');
     if(initialized++ >= queries.length) onChange();
-  }, error => console.warn('[Présences] Écoute temps réel indisponible', cleanError(error))));
-  return () => unsubs.forEach(unsub => { try{ unsub(); }catch(_error){} });
+    }, error => {
+      try{ loadingOperation?.fail?.(error); }catch(_error){}
+      console.warn('[Présences] Écoute temps réel indisponible', cleanError(error));
+    });
+    return {loadingOperation, unsubscribe};
+  });
+  return () => subscriptions.forEach(({loadingOperation, unsubscribe}) => {
+    try{ loadingOperation?.end?.(); }catch(_error){}
+    try{ unsubscribe(); }catch(_error){}
+  });
 }
 function presenceSubscribeSettings(onChange){
   if(!db || !currentUser || typeof onChange !== 'function') return () => {};
-  return firebaseFns.onSnapshot(firebaseFns.doc(db, 'settings', 'presence-module'), snap => {
+  const loadingOperation = safeLoadingCall('start', ['attendance-settings:listen', {kind:'sync'}]);
+  const unsubscribe = firebaseFns.onSnapshot(firebaseFns.doc(db, 'settings', 'presence-module'), snap => {
+    try{ loadingOperation?.end?.(); }catch(_error){}
     if(snap.exists()) onChange(firestoreSafeData(snap.data()?.value || {}));
-  }, error => console.warn('[Présences] Écoute paramètres indisponible', cleanError(error)));
+  }, error => {
+    try{ loadingOperation?.fail?.(error); }catch(_error){}
+    console.warn('[Présences] Écoute paramètres indisponible', cleanError(error));
+  });
+  return () => { try{ loadingOperation?.end?.(); }catch(_error){} return unsubscribe(); };
 }
 async function presenceSaveEvent(event={}){
   if(!canEditModule('presences')) throw new Error('Modification Présences non autorisée.');
@@ -5886,11 +5876,36 @@ var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
 window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {technicalDataStatus, accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
+function instrumentCentralDataBoundaries(){
+  const operations = {
+    listPlayers:['players:load','sync'], listTeams:['teams:load','sync'], getPlayer:['player:load','loading'],
+    playerProfileLoadData:['player-profile:load','loading'], teamProfileLoadData:['team-profile:load','loading'],
+    matchSaveToFirestore:['matches:save','sync'], matchListFromFirestore:['matches:load','sync'],
+    playerMeasurementsList:['measurements:load','sync'], playerMeasurementsAdd:['measurements:save','sync'], playerMeasurementsUpdate:['measurements:save','sync'], playerMeasurementsDelete:['measurements:delete','sync'],
+    medicalListPlayers:['medical:players','sync'], medicalListData:['medical:load','sync'], medicalSaveInjury:['medical:save','sync'], medicalAddUpdate:['medical:save','sync'], medicalDeleteInjuries:['medical:delete','sync'],
+    athleticListData:['athletic-tests:load','sync'], athleticSaveTest:['athletic-tests:save','sync'], athleticDeleteTest:['athletic-tests:delete','sync'],
+    technicalListData:['technical-tests:load','sync'], technicalSaveTest:['technical-tests:save','sync'], technicalDeleteTest:['technical-tests:delete','sync'],
+    presenceListEvents:['attendance:load','sync'], presenceSaveEvent:['attendance:save','sync'], presenceDeleteEvent:['attendance:delete','sync'],
+    presenceLoadSettings:['attendance-settings:load','sync'], presenceSaveSettings:['attendance-settings:save','sync'],
+    adminListPlayers:['admin-players:load','sync'], adminListTeamsAndSettings:['admin-teams:load','sync'], adminReadChangeLogs:['admin-logs:load','sync']
+  };
+  Object.entries(operations).forEach(([name, [label, kind]]) => {
+    const original = window.CoachPulseCentralData[name];
+    if(typeof original !== 'function') return;
+    window.CoachPulseCentralData[name] = function(){
+      const receiver = this;
+      const args = arguments;
+      return trackLoadingTask(label, {kind}, () => original.apply(receiver, args));
+    };
+  });
+}
+instrumentCentralDataBoundaries();
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   snapshotLocalData({fromCloud:true});
   if(!navigator.onLine){ storage.markPendingSync(); return updateSyncState('Hors ligne · local OK'); }
   if(!db || !currentUser) return updateSyncState('Connexion staff requise');
+  const loadingOperation = safeLoadingCall('start', ['cloud:sync', {kind:'sync'}]);
   try{
     updateSyncState('🔄 Synchronisation...');
     const ref = getCloudRef();
@@ -5910,8 +5925,10 @@ async function syncCloud(manual=false){
     storage.clearPendingSync();
     updateCloudKpis();
     updateSyncState('Cloud synchronisé');
+    try{ loadingOperation?.end?.(); }catch(_error){}
     if(manual) notifySuccess('Synchronisation cloud OK.');
   }catch(e){
+    try{ loadingOperation?.fail?.(e); }catch(_error){}
     storage.markPendingSync();
     updateSyncState('Erreur cloud · local OK');
     if(manual) notifyError('Sync cloud impossible : '+cleanError(e));
