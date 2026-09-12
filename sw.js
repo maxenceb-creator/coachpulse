@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-80-global-loading-safe';
+const CACHE_NAME = 'coachpulse-v6-4-81-firestore-payload';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
@@ -9,6 +9,7 @@ const CORE_ASSETS = [
   './shared/services/presence-events-service.js',
   './shared/services/technical-tests-service.js',
   './shared/utils/storage-service.js',
+  './shared/utils/firestore-payload-service.js',
   './shared/utils/notifications-service.js',
   './shared/utils/module-registry.js',
   './shared/ui/global-loading-indicator.js',

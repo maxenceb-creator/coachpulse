@@ -12,6 +12,8 @@ const FIREBASE_CONFIG = {
 
 const storage = window.CoachPulseStorage;
 if(!storage) throw new Error('CoachPulseStorage doit être chargé avant app.js');
+const firestorePayloadService = window.CoachPulseFirestorePayload;
+if(!firestorePayloadService) throw new Error('CoachPulseFirestorePayload doit être chargé avant app.js');
 const notifier = window.CoachPulseNotify;
 function notifyUser(message, type='info', options={}){
   if(notifier?.show) return notifier.show(message, {...options, type});
@@ -45,12 +47,21 @@ let appRefreshInProgress = false;
 let localChangeSnapshotTimer = null;
 const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
   'coachpulse:presenceEvents:v1',
-  'coachpulse:presenceSettings:v1'
+  'coachpulse:presenceSettings:v1',
+  'coachpulse:centralPlayers',
+  'coachpulse:athleticTests',
+  'coachpulse:medicalData',
+  'coachpulse:technicalPlayerFootHints'
+]);
+const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
+  'coachpulse:pendingSync', 'coachpulse:lastCloudSync', 'coachpulse:lastAutoSave',
+  'coachpulse:lastPlayersCloudRefresh', 'coachpulse:appShellVersion', 'coachpulse:appShellRefreshVersion',
+  'coachpulse:debugPerf', 'coachpulse:technicalTestsPending'
 ]);
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260912-global-loading-safe-v80';
+const APP_SHELL_VERSION = '20260912-firestore-payload-v81';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -73,22 +84,10 @@ function cloneData(value){
   return JSON.parse(JSON.stringify(value));
 }
 function firestoreSafeValue(value){
-  if(value === undefined || typeof value === 'function' || typeof value === 'symbol') return undefined;
-  if(value === null || typeof value !== 'object') return value;
-  if(value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toISOString();
-  // Array.prototype.map conserve l'espèce du tableau source. Pour une valeur
-  // venant d'une iframe, cela produit un Array d'un autre realm que Firestore
-  // refuse comme "custom Array object". Array.from recrée un tableau local.
-  if(Array.isArray(value)) return Array.from(value, firestoreSafeValue).filter(item => item !== undefined);
-  const out = {};
-  Object.entries(value).forEach(([key, item]) => {
-    const safe = firestoreSafeValue(item);
-    if(safe !== undefined) out[key] = safe;
-  });
-  return out;
+  return firestorePayloadService.sanitize(value);
 }
 function firestoreSafeData(data={}){
-  return firestoreSafeValue(data) || {};
+  return firestorePayloadService.prepare(data) || {};
 }
 function debugPerfEnabled(){
   return storage.get('coachpulse:debugPerf') === '1';
@@ -1221,7 +1220,11 @@ function cleanError(e){
 
 function collectLocalStorage(){
   return Object.fromEntries(storage.entries({
-    exclude:key => key.startsWith('coachpulse:autoBackup') || key === 'coachpulse:firebaseConfig'
+    exclude:key => key.startsWith('coachpulse:autoBackup')
+      || key.startsWith('firestore_')
+      || key === 'coachpulse:firebaseConfig'
+      || FIRESTORE_MANAGED_LOCAL_KEYS.has(key)
+      || CLOUD_SYNC_LOCAL_ONLY_KEYS.has(key)
   }));
 }
 function purgeUnauthorizedLocalData(){
@@ -5910,16 +5913,20 @@ async function syncCloud(manual=false){
     updateSyncState('🔄 Synchronisation...');
     const ref = getCloudRef();
     const payload = buildPayload();
-    const itemsHash = hashItems(payload.items);
-    await firebaseFns.setDoc(ref, {
-      ...payload,
+    const safePayload = firestorePayloadService.prepare(payload, {rootPath:'$', maxBytes:950 * 1024});
+    const itemsHash = hashItems(safePayload.items);
+    const cloudDocument = {
+      ...safePayload,
       updatedAt:firebaseFns.serverTimestamp(),
       updatedAtIso:new Date().toISOString(),
       updatedBy:currentUser.uid,
       updatedByEmail:currentUser.email,
       updatedByClient:CLIENT_ID,
       itemsHash
-    }, {merge:true});
+    };
+    // mergeFields conserve les autres champs racine mais remplace entièrement
+    // items : les anciens caches volumineux ne restent pas imbriqués dans le document.
+    await firebaseFns.setDoc(ref, cloudDocument, {mergeFields:Object.keys(cloudDocument)});
     lastCloudItemsHash = itemsHash;
     storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
     storage.clearPendingSync();
@@ -5928,6 +5935,12 @@ async function syncCloud(manual=false){
     try{ loadingOperation?.end?.(); }catch(_error){}
     if(manual) notifySuccess('Synchronisation cloud OK.');
   }catch(e){
+    if(e?.name === 'FirestorePayloadError' && debugPerfEnabled()){
+      console.error('[CoachPulse sync] Payload Firestore refusé avant écriture', {
+        collection:'coachpulse_common_base', documentId:currentUser?.uid || '', operation:'setDoc', property:'items',
+        path:e.path || '$.items', valueType:e.valueType || 'unknown', reason:e.reason || e.message
+      });
+    }
     try{ loadingOperation?.fail?.(e); }catch(_error){}
     storage.markPendingSync();
     updateSyncState('Erreur cloud · local OK');

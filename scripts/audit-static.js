@@ -14,6 +14,7 @@ const requiredFiles = [
   'shared/services/player-measurements-service.js',
   'shared/services/players-service.js',
   'shared/services/teams-service.js',
+  'shared/utils/firestore-payload-service.js',
   'shared/ui/global-loading-indicator.js',
   'scripts/pwa-tablet-check.js',
   'docs/pwa-tablet-checklist.md'
@@ -95,6 +96,7 @@ const sw = read('sw.js');
   './pages/team-profile/teamProfile.js',
   './shared/services/permissions-service.js',
   './shared/services/player-measurements-service.js',
+  './shared/utils/firestore-payload-service.js',
   './shared/ui/global-loading-indicator.js',
   './css/responsive.css'
 ].forEach(asset => {

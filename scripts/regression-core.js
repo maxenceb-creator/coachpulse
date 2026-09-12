@@ -9,6 +9,7 @@ const modules = require('../shared/utils/module-registry.js');
 const playerDataAudit = require('./audit-player-data.js');
 const measurements = require('../shared/services/player-measurements-service.js');
 const technicalTests = require('../shared/services/technical-tests-service.js');
+const firestorePayload = require('../shared/utils/firestore-payload-service.js');
 
 function loadBrowserScript(filePath, windowOverrides={}){
   const window = {
@@ -911,7 +912,7 @@ function testPresenceInteractionsStayNonBlocking(){
   const presenceSource = fs.readFileSync('pages/presences.html', 'utf8');
 
   assert(appSource.includes("FIRESTORE_MANAGED_LOCAL_KEYS.has(String(key || ''))"), 'Les écritures Présence gérées par Firestore ne doivent pas déclencher une sauvegarde globale lourde.');
-  assert(appSource.includes('if(Array.isArray(value)) return Array.from(value, firestoreSafeValue)'), 'Les tableaux provenant des iframes doivent être recréés dans le realm principal avant Firestore.');
+  assert(appSource.includes('return firestorePayloadService.sanitize(value);'), 'Les valeurs provenant des iframes doivent passer par la frontière de sérialisation Firestore.');
   assert(!appSource.includes("setInterval(snapshotLocalData, 15000)"), 'La sauvegarde complète ne doit plus être exécutée toutes les 15 secondes.');
   assert(presenceSource.includes('schedulePresenceEventCloudSave(eventId);'), 'Les clics de présence doivent utiliser une sauvegarde cloud regroupée.');
   assert(!presenceSource.includes('await pushPresenceEventToCloud(events[index]);'), 'Un clic de présence ne doit pas attendre directement l’écriture Firestore complète.');
@@ -1009,6 +1010,59 @@ function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
   assert(appSource.includes("safeLoadingCall('start', ['cloud:listen'"), 'Le premier snapshot cloud doit être observé sans remplacer onSnapshot.');
 }
 
+function testFirestorePayloadBoundary(){
+  const standard = firestorePayload.prepare({items:[{id:'1', label:'A'}, {id:'2', label:'B'}]});
+  assert.deepEqual(standard, {items:[{id:'1', label:'A'}, {id:'2', label:'B'}]});
+  const nested = firestorePayload.prepare({items:[{players:[{id:'p1'}]}]});
+  assert.deepEqual(nested, {items:[{players:[{id:'p1'}]}]});
+
+  const foreignPayload = vm.runInNewContext(`({
+    items:{
+      standard:['a', {nested:true}],
+      custom:Object.assign(Object.create({inherited:'ignored'}), {value:7}),
+      removable:[undefined, function(){}, Symbol('x'), 'kept']
+    }
+  })`);
+  const safe = firestorePayload.prepare(foreignPayload);
+  assert.equal(Object.getPrototypeOf(safe), Object.prototype, 'Le document doit être reconstruit dans le realm Firestore courant.');
+  assert.equal(Object.getPrototypeOf(safe.items), Object.prototype, 'La propriété items doit devenir un objet littéral natif.');
+  assert.equal(Object.getPrototypeOf(safe.items.standard), Array.prototype, 'Un tableau imbriqué provenant d’une iframe doit devenir un Array natif.');
+  assert.deepEqual(safe.items.standard, ['a', {nested:true}]);
+  assert.deepEqual(safe.items.custom, {value:7}, 'Les prototypes personnalisés ne doivent pas atteindre Firestore.');
+  assert.deepEqual(safe.items.removable, ['kept'], 'Les valeurs non sérialisables facultatives doivent être retirées.');
+
+  class Timestamp {
+    toDate(){ return new Date(0); }
+    toMillis(){ return 0; }
+  }
+  const timestamp = new Timestamp();
+  assert.equal(firestorePayload.prepare({timestamp}).timestamp, timestamp, 'Un type atomique Firestore valide doit être préservé.');
+
+  const circular = {items:{rows:[]}};
+  circular.items.rows.push(circular.items);
+  const circularResult = firestorePayload.validate(circular);
+  assert.equal(circularResult.valid, false);
+  assert.equal(circularResult.issues[0].path, '$.items.rows[0]', 'Le validateur doit donner le chemin imbriqué exact.');
+  assert.match(circularResult.issues[0].reason, /circulaire/);
+
+  const domResult = firestorePayload.validate({items:{node:{nodeType:1, nodeName:'DIV'}}});
+  assert.equal(domResult.valid, false);
+  assert.equal(domResult.issues[0].path, '$.items.node');
+
+  const oversized = firestorePayload.validate({items:{small:'a', largest:'x'.repeat(100)}}, {maxBytes:50});
+  assert.equal(oversized.valid, false);
+  assert.equal(oversized.issues[0].path, '$.items.largest', 'Le diagnostic de taille doit identifier la valeur qui contribue le plus.');
+
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  assert(appSource.includes("const safePayload = firestorePayloadService.prepare(payload, {rootPath:'$', maxBytes:950 * 1024});"), 'La synchronisation globale doit nettoyer et borner le document juste avant setDoc.');
+  assert(appSource.includes('...safePayload,'), 'setDoc doit recevoir le payload reconstruit, jamais le payload brut.');
+  assert(appSource.includes("key.startsWith('firestore_')"), 'Les clés internes IndexedDB/Firestore ne doivent jamais être sauvegardées comme données métier.');
+  assert(appSource.includes('FIRESTORE_MANAGED_LOCAL_KEYS.has(key)'), 'Les caches déjà persistés dans les collections centrales doivent être exclus de l’agrégat legacy.');
+  assert(appSource.includes('{mergeFields:Object.keys(cloudDocument)}'), 'La propriété items doit être remplacée pour retirer les anciens caches volumineux déjà présents.');
+  assert(appSource.includes("e?.name === 'FirestorePayloadError' && debugPerfEnabled()"), 'Le diagnostic détaillé doit rester réservé au mode debug.');
+  assert(appSource.includes("collection:'coachpulse_common_base'"), 'Le diagnostic doit identifier la collection exacte.');
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -1042,6 +1096,7 @@ testPerformanceCriticalPathStaysNonBlocking();
 testTechnicalHistoryCompatibilityAndScoping();
 testMatchCloudSyncIsOfflineFirstAndIdempotent();
 testLoadingIndicatorCannotReplaceFirebaseDataApi();
+testFirestorePayloadBoundary();
 
 Promise.resolve()
   .then(testScopedPlayerReadFiltersInFirestore)
