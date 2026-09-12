@@ -1010,6 +1010,28 @@ function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
   assert(appSource.includes("safeLoadingCall('start', ['cloud:listen'"), 'Le premier snapshot cloud doit être observé sans remplacer onSnapshot.');
 }
 
+async function testPresenceLoadingBoundaryReturnsSameRows(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const trackerSource = appSource.match(/function safeLoadingCall[\s\S]*?\n}\nasync function trackLoadingTask[\s\S]*?\n}/)?.[0] || '';
+  const rows = Array.from({length:14}, (_, index) => ({id:`session-${index}`, order:index}));
+  const context = vm.createContext({
+    rows,
+    console,
+    debugPerfEnabled:() => false,
+    loadingIndicator:() => ({start:() => ({end(){}, fail(){}})})
+  });
+  vm.runInContext(`${trackerSource}; this.runBoundary = () => trackLoadingTask('attendance:load', {kind:'sync'}, async () => rows);`, context);
+  const result = await context.runBoundary();
+  assert.equal(result.length, 14, 'Le wrapper loading doit restituer les 14 séances.');
+  assert.deepEqual(result.map(row => row.id), rows.map(row => row.id), 'Le wrapper doit préserver le contenu et l’ordre des séances.');
+  assert(appSource.includes('const cacheGeneration = presenceCacheGeneration;'), 'Une lecture Présences doit mémoriser la génération de cache.');
+  assert(appSource.includes('cacheGeneration === presenceCacheGeneration'), 'Une réponse antérieure à une invalidation ne doit pas repeupler le cache.');
+  assert(appSource.includes('appDataCache.presenceEvents.pending === trackedLoad'), 'Une ancienne Promise ne doit pas effacer une nouvelle lecture après invalidation.');
+  assert(appSource.includes("code.includes('resource-exhausted')"), 'Une erreur de quota Firestore ne doit jamais devenir un tableau vide réussi.');
+  assert(appSource.includes("console.info('[Présences debug]'"), 'Le mode debug doit exposer les compteurs du pipeline Présences.');
+  assert(appSource.includes('await waitForInitialCloudHydration();'), 'La preview doit hydrater common_base avant d’ouvrir le dernier module.');
+}
+
 function testFirestorePayloadBoundary(){
   const standard = firestorePayload.prepare({items:[{id:'1', label:'A'}, {id:'2', label:'B'}]});
   assert.deepEqual(standard, {items:[{id:'1', label:'A'}, {id:'2', label:'B'}]});
@@ -1058,7 +1080,8 @@ function testFirestorePayloadBoundary(){
   assert(appSource.includes('...safePayload,'), 'setDoc doit recevoir le payload reconstruit, jamais le payload brut.');
   assert(appSource.includes("key.startsWith('firestore_')"), 'Les clés internes IndexedDB/Firestore ne doivent jamais être sauvegardées comme données métier.');
   assert(appSource.includes('FIRESTORE_MANAGED_LOCAL_KEYS.has(key)'), 'Les caches déjà persistés dans les collections centrales doivent être exclus de l’agrégat legacy.');
-  assert(appSource.includes('{mergeFields:Object.keys(cloudDocument)}'), 'La propriété items doit être remplacée pour retirer les anciens caches volumineux déjà présents.');
+  assert(appSource.includes('PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS.has(key)'), 'Les données Présences historiques doivent rester dans common_base avant migration complète.');
+  assert(appSource.includes('firebaseFns.setDoc(ref, cloudDocument, {merge:true})'), 'La synchronisation legacy ne doit supprimer aucune clé common_base existante.');
   assert(appSource.includes("e?.name === 'FirestorePayloadError' && debugPerfEnabled()"), 'Le diagnostic détaillé doit rester réservé au mode debug.');
   assert(appSource.includes("collection:'coachpulse_common_base'"), 'Le diagnostic doit identifier la collection exacte.');
 }
@@ -1099,6 +1122,7 @@ testLoadingIndicatorCannotReplaceFirebaseDataApi();
 testFirestorePayloadBoundary();
 
 Promise.resolve()
+  .then(testPresenceLoadingBoundaryReturnsSameRows)
   .then(testScopedPlayerReadFiltersInFirestore)
   .then(testPresenceScopedRosterSurvivesColdReloadReconnect)
   .then(testMeasurementSaveWithoutSelectedInjuryPersistsAfterReload)

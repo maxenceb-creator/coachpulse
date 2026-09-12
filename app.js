@@ -39,12 +39,15 @@ let staffProfileUnsub = null;
 let currentUserRole = 'STAFF';
 let syncTimer = null;
 let realtimeUnsub = null;
+let initialCloudHydrationPromise = Promise.resolve();
+let resolveInitialCloudHydration = null;
 let cloudWriteTimer = null;
 let applyingCloud = false;
 let lastCloudItemsHash = '';
 let adminAccessChoiceCache = null;
 let appRefreshInProgress = false;
 let localChangeSnapshotTimer = null;
+let presenceCacheGeneration = 0;
 const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
   'coachpulse:presenceEvents:v1',
   'coachpulse:presenceSettings:v1',
@@ -52,6 +55,10 @@ const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
   'coachpulse:athleticTests',
   'coachpulse:medicalData',
   'coachpulse:technicalPlayerFootHints'
+]);
+const PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS = new Set([
+  'coachpulse:presenceEvents:v1',
+  'coachpulse:presenceSettings:v1'
 ]);
 const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
   'coachpulse:pendingSync', 'coachpulse:lastCloudSync', 'coachpulse:lastAutoSave',
@@ -61,7 +68,7 @@ const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260912-firestore-payload-v81';
+const APP_SHELL_VERSION = '20260912-presence-loading-v82';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -178,6 +185,7 @@ function invalidateAppDataCaches(scope='all'){
     technicalPlayerFootHintsCache = null;
   }
   if(scope === 'all' || scope === 'presence' || scope === 'presences'){
+    presenceCacheGeneration += 1;
     appDataCache.presenceEvents.rows = null;
     appDataCache.presenceEvents.loadedAt = 0;
     appDataCache.presenceEvents.key = '';
@@ -1145,6 +1153,7 @@ async function initFirebaseInternal(){
         setLocked(false);
         startStaffProfileSubscription();
         try{ startRealtimeSync(); }catch(e){ console.warn('Realtime sync unavailable after login', e); }
+        await waitForInitialCloudHydration();
         const last = storage.get('coachpulse:lastTool', 'home');
         routeTo((last === 'admin' && !isSuperAdmin()) ? 'home' : last);
         recordPerfEvent('auth:usable', {durationMs:Math.round(performance.now() - authCallbackStartedAt), route:last});
@@ -1223,7 +1232,7 @@ function collectLocalStorage(){
     exclude:key => key.startsWith('coachpulse:autoBackup')
       || key.startsWith('firestore_')
       || key === 'coachpulse:firebaseConfig'
-      || FIRESTORE_MANAGED_LOCAL_KEYS.has(key)
+      || (FIRESTORE_MANAGED_LOCAL_KEYS.has(key) && !PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS.has(key))
       || CLOUD_SYNC_LOCAL_ONLY_KEYS.has(key)
   }));
 }
@@ -1350,9 +1359,14 @@ function startRealtimeSync(){
   stopRealtimeSync();
   const ref = getCloudRef();
   if(!ref) return;
+  initialCloudHydrationPromise = new Promise(resolve => { resolveInitialCloudHydration = resolve; });
+  const finishInitialHydration = () => {
+    if(resolveInitialCloudHydration){ resolveInitialCloudHydration(); resolveInitialCloudHydration = null; }
+  };
   const loadingOperation = safeLoadingCall('start', ['cloud:listen', {kind:'sync'}]);
   const unsubscribe = firebaseFns.onSnapshot(ref, snap => {
     try{ loadingOperation?.end?.(); }catch(_error){}
+    finishInitialHydration();
     if(!snap.exists()) { updateSyncState('Cloud prêt'); return; }
     const data = snap.data() || {};
     const items = data.items || {};
@@ -1382,11 +1396,15 @@ function startRealtimeSync(){
       applyingCloud = false;
     }
   }, err => {
+    finishInitialHydration();
     try{ loadingOperation?.fail?.(err); }catch(_error){}
     console.error(err);
     updateSyncState('Erreur écoute cloud · local OK');
   });
   realtimeUnsub = () => { try{ loadingOperation?.end?.(); }catch(_error){} return unsubscribe(); };
+}
+async function waitForInitialCloudHydration(timeoutMs=3500){
+  await Promise.race([initialCloudHydrationPromise, new Promise(resolve => setTimeout(resolve, timeoutMs))]);
 }
 function notifyFramesCloudUpdated(){
   invalidateAppDataCaches('all');
@@ -5538,6 +5556,8 @@ async function presenceListEvents(options={}){
   if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const includeRetiredPresenceSeasons = options.includeRetiredPresenceSeasons === true;
+  const presenceDebug = debugPerfEnabled();
+  const readStats = {queries:0, queryResults:[], queryErrors:[]};
   const authorizedTeamIds = getAuthorizedTeamIds();
   const cacheKey = [
     currentUser.uid,
@@ -5564,17 +5584,29 @@ async function presenceListEvents(options={}){
     return rows;
   };
   const readWhere = async (collectionName, field, operator, value) => {
+    readStats.queries += 1;
     const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, operator, value));
-    return docsFromSnap(await firebaseFns.getDocs(q));
+    const rows = docsFromSnap(await firebaseFns.getDocs(q));
+    readStats.queryResults.push({collection:collectionName, fields:[field], documents:rows.length});
+    return rows;
   };
   const readWhereSafe = async (collectionName, constraints=[]) => {
+    readStats.queries += 1;
     try{
       const q = firebaseFns.query(
         firebaseFns.collection(db, collectionName),
         ...constraints.map(item => firebaseFns.where(item.field, item.operator, item.value))
       );
-      return docsFromSnap(await firebaseFns.getDocs(q));
+      const rows = docsFromSnap(await firebaseFns.getDocs(q));
+      readStats.queryResults.push({collection:collectionName, fields:constraints.map(item => item.field), documents:rows.length});
+      return rows;
     }catch(error){
+      const code = String(error?.code || '').toLowerCase();
+      readStats.queryErrors.push({collection:collectionName, fields:constraints.map(item => item.field), code:code || 'unknown'});
+      if(code === '8' || code.includes('resource-exhausted') || code.includes('permission-denied') || code.includes('unauthenticated') || code.includes('unavailable')){
+        if(presenceDebug) console.error('[Présences debug] Lecture Firestore fatale', {...readStats, teamId:options.teamId || '', code:code || 'unknown'});
+        throw error;
+      }
       console.warn('[Présences] Lecture cloud ignorée', collectionName, constraints.map(item => item.field).join(','), cleanError(error));
       return [];
     }
@@ -5642,12 +5674,14 @@ async function presenceListEvents(options={}){
   const teamChunks = [];
   for(let i=0;i<authorizedTeamIds.length;i+=10) teamChunks.push(authorizedTeamIds.slice(i,i+10));
   const loadEvents = async () => {
+    const cacheGeneration = presenceCacheGeneration;
     const sessionRows = isAdmin()
       ? await readPresenceSessionsForAllPlayersScope()
       : canAccessAllPlayersForModule('presences')
         ? await readPresenceSessionsForAllPlayersScope()
         : await readPresenceSessionsForTeams(teamChunks);
-    const sessions = scopedRecordsForModuleAccess(sessionRows, 'presences')
+    const authorizedSessions = scopedRecordsForModuleAccess(sessionRows, 'presences');
+    const sessions = authorizedSessions
       .filter(row => row.sessionId || row.id)
       .filter(row => isPresenceSessionVisibleToModule(row, {includeRetiredPresenceSeasons}))
       .filter(row => includeRetiredPresenceSeasons || !isRetiredPresenceSeasonSession(row));
@@ -5664,14 +5698,26 @@ async function presenceListEvents(options={}){
       .map(session => presenceCloudEventFromSession(session, attendance))
       .filter(event => event.id && event.date)
       .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
-    appDataCache.presenceEvents = {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey, pending:null};
+    if(presenceDebug){
+      console.info('[Présences debug]', {
+        teamId:options.teamId || '', period:options.period || '', startDate:options.startDate || '', endDate:options.endDate || '',
+        firestoreQueries:readStats.queries, queryResults:readStats.queryResults, queryErrors:readStats.queryErrors,
+        firestoreDocuments:sessionRows.length, beforeFiltering:sessionRows.length,
+        afterNormalization:events.length, afterAuthorization:authorizedSessions.length, afterVisibility:sessions.length, returned:events.length
+      });
+    }
+    if(cacheGeneration === presenceCacheGeneration && appDataCache.presenceEvents.key === cacheKey){
+      appDataCache.presenceEvents = {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey, pending:null};
+    }
     return events;
   };
   appDataCache.presenceEvents.key = cacheKey;
-  appDataCache.presenceEvents.pending = loadEvents().finally(() => {
-    if(appDataCache.presenceEvents.key === cacheKey) appDataCache.presenceEvents.pending = null;
+  const pendingLoad = loadEvents();
+  const trackedLoad = pendingLoad.finally(() => {
+    if(appDataCache.presenceEvents.pending === trackedLoad) appDataCache.presenceEvents.pending = null;
   });
-  return cloneData(await appDataCache.presenceEvents.pending);
+  appDataCache.presenceEvents.pending = trackedLoad;
+  return cloneData(await trackedLoad);
 }
 function presenceSettingsAdminAllowed(){
   return getCurrentPermissionLevel() === 'ADMIN' || getCurrentUserRole() === 'ADMIN';
@@ -5924,9 +5970,9 @@ async function syncCloud(manual=false){
       updatedByClient:CLIENT_ID,
       itemsHash
     };
-    // mergeFields conserve les autres champs racine mais remplace entièrement
-    // items : les anciens caches volumineux ne restent pas imbriqués dans le document.
-    await firebaseFns.setDoc(ref, cloudDocument, {mergeFields:Object.keys(cloudDocument)});
+    // La map legacy reste fusionnée sans suppression : certaines previews
+    // dépendent encore de ses données Présences avant migration complète.
+    await firebaseFns.setDoc(ref, cloudDocument, {merge:true});
     lastCloudItemsHash = itemsHash;
     storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
     storage.clearPendingSync();

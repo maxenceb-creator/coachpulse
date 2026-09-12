@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-81-firestore-payload';
+const CACHE_NAME = 'coachpulse-v6-4-82-presence-loading';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
