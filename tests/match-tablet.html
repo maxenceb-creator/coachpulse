@@ -33,7 +33,7 @@
     const tools = document.getElementById('tools');
     const status = document.getElementById('status');
     const fixturePlayers = Array.from({length:14}, (_, index) => ({
-      name: `TEST JOUEUSE ${String(index + 1).padStart(2,'0')}`,
+      name: index===13?'AKTEPE<br>NUR':`TEST JOUEUSE ${String(index + 1).padStart(2,'0')}`,
       firstName: `JOUEUSE ${String(index + 1).padStart(2,'0')}`, lastName:'TEST',
       playerId:`tablet-player-${index + 1}`, id:`tablet-player-${index + 1}`,
       team:'U13 A',teamId:'team-u13-a',teamIds:['team-u13-a'],
@@ -73,7 +73,7 @@
     async function loadModule() {
       ready = false;
       status.textContent = 'Loading actual Match module with synthetic players…';
-      const sourceUrl = new URL('../pages/coach-stats.html?tablet-fixture-source=landscape-v4',location.href);
+      const sourceUrl = new URL('../pages/coach-stats.html?tablet-fixture-source=landscape-v6',location.href);
       const response = await fetch(sourceUrl,{cache:'no-store'});
       if(!response.ok) throw new Error(`Module HTTP ${response.status}`);
       let source = await response.text();
@@ -93,6 +93,11 @@
           return {matchId:state.matchId,starters:Object.values(state.lineup).filter(Boolean).length,bench:state.bench.length};
         };
         window.__tabletFixtureStateSummary=function(){return JSON.parse(JSON.stringify(state))};
+        window.__setTabletSystem=function(format,system){
+          state.format=String(format);state.system=system;const slots=POSITIONS[system]||[];
+          state.lineup=Object.fromEntries(slots.map((entry,index)=>[entry[0],state.called[index]||'']));
+          state.bench=state.called.slice(slots.length);buildSystem();renderAll();window.scrollTo(0,0);
+        };
         window.addEventListener('load',function(){
           window.__prepareTabletFixture();
           parent.postMessage({type:'tablet-fixture-ready'},'*');
@@ -150,7 +155,7 @@
       add('A — fixture storage isolated',win.localStorage.__tabletFixtureMemory && !window.CoachPulseCentralData);
       add('A — no horizontal page overflow',Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)<=viewport.width+1,`${Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)} / ${viewport.width}px`);
       add('A — no action strip or reserved space before selection',panel && !visible(win,panel) && rect(panel).height===0,`panel ${Math.round(rect(panel).width)}×${Math.round(rect(panel).height)}px`);
-      add('A — pitch is horizontal and uses most of the tablet width',initialPitchRect.width>initialPitchRect.height && initialPitchRect.width>=viewport.width*.8,`${Math.round(initialPitchRect.width)} × ${Math.round(initialPitchRect.height)}px; ${Math.round(initialPitchRect.width/viewport.width*100)}% viewport width`);
+      add('A — pitch is horizontal and uses nearly all tablet width',initialPitchRect.width>initialPitchRect.height && initialPitchRect.width>=viewport.width*.95,`${Math.round(initialPitchRect.width)} × ${Math.round(initialPitchRect.height)}px; ${Math.round(initialPitchRect.width/viewport.width*100)}% viewport width`);
       add('A — complete pitch fits below the unchanged upper band',initialPitchRect.top>=upperBandRect.bottom-1&&initialPitchRect.bottom<=viewport.height-4,`band ${Math.round(upperBandRect.height)}px; pitch ${Math.round(initialPitchRect.top)}–${Math.round(initialPitchRect.bottom)} / viewport ${viewport.height}px`);
       const benchRect = bench ? rect(bench) : {left:0,right:0,top:0,bottom:0};
       const benchSlots = bench ? [...bench.querySelectorAll('.slot')] : [];
@@ -159,6 +164,7 @@
       add('A — all eleven starters stay inside the pitch',pitch && pitch.querySelectorAll('.slot').length===11 && [...pitch.querySelectorAll('.slot')].every(slot => {const s=rect(slot);return s.left>=initialPitchRect.left-1 && s.right<=initialPitchRect.right+1 && s.top>=initialPitchRect.top-1 && s.bottom<=initialPitchRect.bottom+1;}));
       const starterSlots = [...pitch.querySelectorAll('.slot')];
       add('A — starter touch targets do not overlap',starterSlots.every((slot,index)=>starterSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other)))));
+      add('A — player labels never expose raw br markup',[...doc.querySelectorAll('#pitch .slotName,#matchBench .slotName')].every(label=>!/<br|&lt;br/i.test(label.textContent||'')&&!/&lt;br/i.test(label.innerHTML)));
       const goalkeeper = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[0]);
       const striker = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[9]);
       add('A — ASSE goalkeeper is left of the striker',goalkeeper&&striker&&rect(goalkeeper).left<rect(striker).left);
@@ -180,7 +186,7 @@
         {label:'gardienne',name:names[0],expected:'right'},
         {label:'défenseure',name:names[1],expected:'right'},
         {label:'milieu',name:names[6]},
-        {label:'attaquante',name:names[10],expected:'left'},
+        {label:'attaquante',name:names[10],expected:'edge'},
         {label:'remplaçante',name:names[11]}
       ];
       const contextDetails=[];
@@ -198,7 +204,7 @@
         const near=Math.min(horizontalGap||Infinity,verticalGap||Infinity)<=14;
         const insideBounds=menuRect.left>=boundsRect.left+6&&menuRect.right<=boundsRect.right-6&&menuRect.top>=boundsRect.top+6&&menuRect.bottom<=boundsRect.bottom-6;
         const insideViewport=menuRect.left>=6&&menuRect.right<=viewport.width-6&&menuRect.top>=safeTop-1&&menuRect.bottom<=viewport.height-6;
-        const expectedEdgePlacement=testCase.expected||null;
+        const expectedEdgePlacement=testCase.expected==='edge'?(slotRect.right+12+menuRect.width<=Math.min(boundsRect.right-8,viewport.width-8)?'right':'left'):(testCase.expected||null);
         const placementOk=!expectedEdgePlacement||panel.dataset.placement===expectedEdgePlacement;
         const valid=visible(win,panel)&&panel.dataset.anchor===testCase.name&&!overlaps(menuRect,slotRect)&&near&&insideBounds&&insideViewport&&placementOk;
         if(!valid)allContextsValid=false;
@@ -262,6 +268,22 @@
       await nextPaint();
       add('E — closing/resetting removes the contextual overlay',!visible(win,panel) && rect(panel).height===0);
       add('E — pitch recovers its initial height',Math.abs(rect(pitch).height-initialPitchRect.height)<=1,`${Math.round(rect(pitch).height)} / ${Math.round(initialPitchRect.height)}px`);
+      const systemDetails=[];
+      let systemsValid=true;
+      for(const spec of [{format:8,system:'3-2-2',count:8},{format:8,system:'3-3-1',count:8},{format:11,system:'4-3-3',count:11},{format:11,system:'4-4-2',count:11},{format:11,system:'3-5-2',count:11}]){
+        win.__setTabletSystem(spec.format,spec.system);
+        await nextPaint();
+        const systemPitch=rect(pitch),systemSlots=[...pitch.querySelectorAll('.slot')],labels=systemSlots.map(slot=>slot.querySelector('.slotName')).filter(Boolean);
+        const inside=systemSlots.every(slot=>{const r=rect(slot);return r.left>=systemPitch.left-1&&r.right<=systemPitch.right+1&&r.top>=systemPitch.top-1&&r.bottom<=systemPitch.bottom+1;});
+        const clear=systemSlots.every((slot,index)=>systemSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other))));
+        const labelsClear=labels.every((label,index)=>labels.slice(index+1).every(other=>!overlaps(rect(label),rect(other))));
+        const valid=systemSlots.length===spec.count&&inside&&clear&&labelsClear&&systemSlots.every(slot=>rect(slot).width>=48&&rect(slot).height>=48);
+        if(!valid)systemsValid=false;
+        systemDetails.push(`${spec.system}:${valid?'ok':`count=${systemSlots.length},inside=${inside},slots=${clear},labels=${labelsClear}`}`);
+      }
+      add('E — foot 8 and foot 11 systems remain spaced, readable and tactile',systemsValid,systemDetails.join('; '));
+      win.__prepareTabletFixture();
+      await nextPaint();
       const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{upperBand:{height:Math.round(upperBandRect.height)},workspace:{top:Math.round(workspaceRect.top),height:Math.round(workspaceRect.height)},availableHeight:Math.round(fieldAvailableHeight),availableWidth:Math.round(fieldAvailableWidth),pitch:{top:Math.round(initialPitchRect.top),bottom:Math.round(initialPitchRect.bottom),width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},page:{clientWidth:doc.documentElement.clientWidth,scrollWidth:doc.documentElement.scrollWidth,globalHorizontalScroll:doc.documentElement.scrollWidth>doc.documentElement.clientWidth+1},contextMenu:{width:Math.round(opponentRect.width),height:Math.round(opponentRect.height),columns:opponentColumns.size},starters:pitch?.querySelectorAll('.slot').length,bench:bench?.querySelectorAll('.slot').length}};
       api.lastResult=result;
       const results = document.getElementById('results');

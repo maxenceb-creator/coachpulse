@@ -682,7 +682,7 @@ function positionSummaryHTML(){return activePlayers().map(p=>`<div class="positi
 function label(a){return {but:'But',passe:'Passe D',tirCadre:'Tir cadré',tirNonCadre:'Tir non cadré',entree20:'Entrée 20m',recup:'Récupération',butAdv:'But adverse',tirCadreAdv:'Tir cadré adverse',tirNonCadreAdv:'Tir non cadré adverse',entree20Adv:'Entrée 20m adverse',centre:'Centre',progression:'Progression',centreAdv:'Centre adverse',progressionAdv:'Progression adverse'}[a]||a}
 function keyFromLabel(x){return {'But':'but','Passe D':'passe','Tir cadré':'tirCadre','Tir non cadré':'tirNonCadre','Entrée 20m':'entree20','Centre':'centre','Progression':'progression','Récupération':'recup'}[x.split(' zone')[0]]}
 function keyFromAdvLabel(x){return {'But adverse':'butAdv','But':'butAdv','Tir cadré adverse':'tirCadreAdv','Tir non cadré adverse':'tirNonCadreAdv','Entrée 20m adverse':'entree20Adv','Centre adverse':'centreAdv','Progression adverse':'progressionAdv'}[x.split(' zone')[0]]}
-function fmt(s){s=Math.max(0,Math.round(s||0));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}function short(n){return n?`${n.split(' ')[0]}<br>${n.split(' ').slice(1).join(' ')}`:'—'}
+function fmt(s){s=Math.max(0,Math.round(s||0));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}function short(n){if(!n)return'—';return String(n).replace(/<br\s*\/?>/gi,' ').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim()||'—'}
 function setVal(id,v){const e=document.getElementById(id);if(e)e.value=v}function esc(s){return String(s).replace(/'/g,"\\'").replace(/\"/g,'&quot;')}function flash(id){setTimeout(()=>{const e=document.getElementById(id);e?.classList.add('scoreFlash');setTimeout(()=>e?.classList.remove('scoreFlash'),650)},30)}
 function csvEscape(v){return '"'+String(v??'').replace(/"/g,'""')+'"'}
 function toCSV(rows){return rows.map(r=>r.map(csvEscape).join(';')).join('\n')}
@@ -2060,5 +2060,5 @@ body.match-mode .matchTop.v310Compact .possBox b{font-size:clamp(30px,2.8vw,42px
   window.addEventListener("resize",function(){if(typeof requestAnimationFrame==="function")requestAnimationFrame(syncMatchWorkspaceHeight);},{passive:true});
 })();
 </script>
-<link rel="stylesheet" href="coach-stats/match-entry.css?v=162-landscape-pitch-2">
+<link rel="stylesheet" href="coach-stats/match-entry.css?v=162-landscape-fill-2">
 </body></html>
