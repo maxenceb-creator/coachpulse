@@ -10,20 +10,20 @@ body.match-mode #live, #live .liveLayout, #live .pitchCard { min-width:0; max-wi
 /* Direct children avoid implicit grid tracks and the old fixed/absolute scoreboard. */
 body.match-mode #live .matchTop.v310Compact {
   display:grid!important; grid-template-columns:repeat(12,minmax(0,1fr))!important;
-  grid-template-areas:none!important; grid-auto-rows:auto!important; gap:6px!important;
+  grid-template-areas:none!important; grid-template-rows:repeat(2,44px)!important; grid-auto-rows:0!important; gap:4px!important;
   position:relative!important; inset:auto!important; width:100%!important;
-  height:auto!important; min-height:0!important; margin:0 0 6px!important;
-  padding:6px!important; border:0!important; border-radius:12px!important; overflow:visible!important;
+  height:auto!important; min-height:0!important; margin:0 0 4px!important;
+  padding:4px!important; border:0!important; border-radius:10px!important; overflow:visible!important;
 }
 body.match-mode #live .matchTop::before, body.match-mode #live .matchTop::after { content:none!important; }
 body.match-mode #live .matchTop > :is(.score,.timer,.chronoControls,.possessionStrip,.liveSystemPanel,.possessionSetup,.resetMatchRow) {
   position:relative!important; inset:auto!important; transform:none!important; grid-area:auto!important;
   width:100%!important; max-width:none!important; min-width:0!important; height:auto!important;
-  min-height:48px!important; margin:0!important; padding:4px!important; border:0!important;
+  min-height:44px!important; margin:0!important; padding:0!important; border:0!important;
   border-radius:8px!important; box-shadow:none!important; align-self:stretch!important;
   background:rgba(255,255,255,.08)!important; overflow:visible!important;
 }
-body.match-mode #live .matchTop > .score { grid-column:span 4!important; display:grid!important; grid-template-columns:minmax(0,1fr) 44px 12px 44px minmax(0,1fr)!important; gap:4px!important; font-size:0!important; align-items:center!important; }
+body.match-mode #live .matchTop > .score { grid-column:span 4!important; display:grid!important; grid-template-columns:minmax(0,1fr) 44px 12px 44px minmax(0,1fr)!important; grid-template-rows:44px!important; grid-auto-rows:0!important; gap:0 4px!important; font-size:0!important; align-items:center!important; overflow:hidden!important; }
 body.match-mode #live .matchTop .score::before { content:none!important; }
 body.match-mode #live .matchTop .score::after { content:'–'!important; position:static!important; transform:none!important; grid-column:3!important; grid-row:1!important; font-size:22px!important; color:#fff!important; }
 body.match-mode #live .matchTop .score :is(#teamLabel,#opponentScoreLabel) { display:block!important; position:static!important; transform:none!important; grid-row:1!important; width:auto!important; min-width:0!important; max-width:100%!important; height:auto!important; padding:0!important; font-size:12px!important; line-height:1.2!important; text-align:center!important; white-space:normal!important; overflow-wrap:anywhere; color:#fff!important; background:none!important; border:0!important; }
@@ -40,19 +40,20 @@ body.match-mode #live .matchTop .possBox { min-width:0!important; min-height:44p
 body.match-mode #live .matchTop .possBox b { font-size:22px!important; margin:0!important; }
 body.match-mode #live .matchTop > .liveSystemPanel { grid-column:span 4!important; display:grid!important; grid-template-columns:minmax(0,1fr) auto!important; gap:4px!important; }
 body.match-mode #live .matchTop > .possessionSetup { grid-column:span 3!important; display:grid!important; grid-template-columns:repeat(2,minmax(0,1fr))!important; gap:4px!important; }
-body.match-mode #live .matchTop > .resetMatchRow { grid-column:span 5!important; display:flex!important; flex-wrap:wrap!important; gap:4px!important; }
-body.match-mode #live .matchTop .resetMatchRow button { flex:1 1 60px; }
+body.match-mode #live .matchTop > .resetMatchRow { grid-column:span 5!important; display:grid!important; grid-template-columns:repeat(5,minmax(0,1fr))!important; gap:4px!important; }
+body.match-mode #live .matchTop .resetMatchRow button { min-width:0!important; }
 body.match-mode #live .matchTop :is(button,select) { position:static!important; transform:none!important; width:auto!important; min-width:44px!important; max-width:100%!important; min-height:44px!important; height:auto!important; margin:0!important; padding:6px!important; border-radius:7px!important; font-size:12px!important; line-height:1.15!important; white-space:normal!important; overflow:visible!important; text-overflow:clip!important; touch-action:manipulation; }
 body.match-mode #live .matchTop > .matchModeRow { display:none!important; }
+body.match-mode #live .matchTop > :is(.matchName,.phaseBadge,.systemQuickButtons) { display:none!important; }
 /* The existing undo control was hidden by a theme patch. Keep it in the command row. */
 body.match-mode #live .matchTop .resetMatchRow .v345Undo { display:block!important; }
 
 /* The selector stays compact; actions float next to the selected player. */
 #live .matchSelectionRow { display:flex; align-items:center; justify-content:center; gap:10px; min-width:0; padding:2px 4px; }
-body.match-mode #live .matchSelectionRow { padding:4px 6px; color:#fff; background:rgba(3,21,12,.76); border-radius:12px; }
-#live .matchDirection { display:flex; flex-direction:column; align-items:center; min-width:0; font-size:11px; line-height:14px; font-weight:900; color:#14532d; text-align:center; }
+body.match-mode #live .matchSelectionRow { gap:6px; padding:2px 4px; color:#fff; background:rgba(3,21,12,.76); border-radius:10px; }
+#live .matchDirection { display:flex; flex-direction:column; align-items:center; min-width:0; font-size:10px; line-height:12px; font-weight:900; color:#14532d; text-align:center; }
 body.match-mode #live .matchDirection { color:#fff; }
-#live .matchDirection strong { font-size:12px; }
+#live .matchDirection strong { font-size:11px; }
 #live #playerActionPanel + .matchDirection { display:none; }
 #live .opponentActionTrigger { flex:0 0 auto; min-width:112px; min-height:44px; padding:6px 10px; }
 #live:has(#playerActionPanel.advOnly) .opponentActionTrigger { outline:4px solid #facc15!important; outline-offset:1px; }
@@ -107,7 +108,7 @@ body.match-mode #live #pitch {
   grid-column:1; grid-row:1;
   width:calc(100cqw - 8px)!important; height:100cqh!important; aspect-ratio:auto;
   max-width:100%!important; max-height:100%!important; align-self:start; justify-self:center;
-  min-height:0!important; border:3px solid #fff!important; border-radius:12px!important;
+  position:relative!important; min-height:0!important; border:3px solid #fff!important; border-radius:12px!important;
   box-shadow:inset 0 0 0 1px #ffffff88!important;
 }
 body.match-mode:has(#format option[value="11"]:checked) #live #pitch { --match-slot-size:clamp(56px,5.5vw,78px); }
@@ -127,13 +128,13 @@ body.match-mode:has(#format option[value="11"]:checked) #live #pitch { --match-s
 #live .slot .slotName { display:-webkit-box!important; width:clamp(64px,8vw,96px)!important; max-width:96px!important; max-height:2.3em; font-size:clamp(9.5px,1vw,12px)!important; line-height:1.15!important; left:50%!important; right:auto!important; bottom:2px!important; transform:translateX(-50%)!important; overflow:hidden!important; overflow-wrap:anywhere; white-space:normal!important; text-overflow:ellipsis!important; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 #live .slot .pos { font-size:clamp(9px,1vw,12px)!important; bottom:-14px!important; }
 #live .slot .min { font-size:clamp(9px,1vw,12px)!important; }
-#live #matchBench { --match-slot-size:clamp(44px,4.4vw,52px); position:absolute; top:calc(100cqh + 4px); left:4px; right:4px; display:flex; flex-wrap:nowrap; align-items:center; width:auto; max-width:none; min-width:0; gap:14px 10px; min-height:62px; padding:6px 8px 14px; margin:0; background:#eef4f0; border-radius:8px; overflow-x:auto; overflow-y:hidden; }
+#live #matchBench { --match-slot-size:clamp(44px,4.4vw,52px); position:relative; inset:auto; display:flex; flex-wrap:nowrap; align-items:center; width:100%; max-width:100%; min-width:0; gap:14px 10px; min-height:62px; padding:6px 8px 14px; margin:0 0 8px; background:#eef4f0; border:1px solid #d8e4dc; border-radius:8px; overflow-x:auto; overflow-y:hidden; }
 #live #matchBench .slot { position:relative; flex:0 0 var(--match-slot-size); }
 #live #matchBench .slot:not(.dragging) { left:auto!important; right:auto!important; top:0!important; bottom:auto!important; }
 #live .matchBenchLabel { font-size:12px; font-weight:900; color:#405e4c; }
 #live #matchBench .slot.dragging { z-index:10001!important; }
 #live #matchBench:has(.slot.dragging) { z-index:10001; }
-#live #pitch .zoneOverlay { grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(3,minmax(0,1fr)); background:#07111f88!important; }
+#live #pitch .zoneOverlay { top:14px!important; right:0!important; bottom:-20px!important; left:0!important; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(3,minmax(0,1fr)); background:#07111f88!important; }
 #live #pitch .zoneCell[data-zone="1"] { grid-column:3; grid-row:1; }
 #live #pitch .zoneCell[data-zone="2"] { grid-column:3; grid-row:2; }
 #live #pitch .zoneCell[data-zone="3"] { grid-column:3; grid-row:3; }
@@ -147,6 +148,7 @@ body.match-mode:has(#format option[value="11"]:checked) #live #pitch { --match-s
 #live #pitch .zoneCell.pressed { background:#22c55e99!important; }
 #live .liveBelow { grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); gap:8px; }
 #live .liveBelow .card { min-width:0; margin:0!important; padding:10px!important; }
+#live .playerAnalysisCard { display:flex; flex-direction:column; min-width:0; }
 #live .liveMiniKpis { grid-template-columns:repeat(3,minmax(0,1fr)); }
 #live .logRow { min-width:0; overflow-wrap:anywhere; }
 /* Undo already remains in the command row; its floating duplicate must not cover the field. */

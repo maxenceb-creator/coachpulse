@@ -141,6 +141,7 @@
       const strip = doc.querySelector('.playerPanelActions');
       const pitch = doc.getElementById('pitch');
       const bench = doc.getElementById('matchBench');
+      const analysis = doc.querySelector('.playerAnalysisCard');
       const panel = doc.getElementById('playerActionPanel');
       pitch.style.display='none';
       void pitch.offsetHeight;
@@ -158,9 +159,13 @@
       add('A — pitch is horizontal and uses nearly all tablet width',initialPitchRect.width>initialPitchRect.height && initialPitchRect.width>=viewport.width*.95,`${Math.round(initialPitchRect.width)} × ${Math.round(initialPitchRect.height)}px; ${Math.round(initialPitchRect.width/viewport.width*100)}% viewport width`);
       add('A — complete pitch fits below the unchanged upper band',initialPitchRect.top>=upperBandRect.bottom-1&&initialPitchRect.bottom<=viewport.height-4,`band ${Math.round(upperBandRect.height)}px; pitch ${Math.round(initialPitchRect.top)}–${Math.round(initialPitchRect.bottom)} / viewport ${viewport.height}px`);
       const benchRect = bench ? rect(bench) : {left:0,right:0,top:0,bottom:0};
+      const analysisRect = analysis ? rect(analysis) : {left:0,right:0,top:0,bottom:0};
       const benchSlots = bench ? [...bench.querySelectorAll('.slot')] : [];
       const benchSlotsInside = benchSlots.every(slot => {const slotRect=rect(slot);return slotRect.top>=benchRect.top-1 && slotRect.bottom<=benchRect.bottom+1 && !overlaps(slotRect,initialPitchRect);});
       add('A — substitutes stay outside the pitch',bench && !overlaps(benchRect,initialPitchRect) && benchSlots.length===3 && benchSlotsInside,`${benchSlots.length} substitutes`);
+      add('A — bench and selected-player analysis have separate non-overlapping layout zones',bench&&analysis&&analysis.contains(bench)&&!overlaps(benchRect,rect(analysis.querySelector('.selectedBanner'))),`bench ${Math.round(benchRect.top)}–${Math.round(benchRect.bottom)}px; analysis ${Math.round(analysisRect.top)}–${Math.round(analysisRect.bottom)}px`);
+      add('A — compact upper band stays within two tactile control rows',upperBandRect.height<=116,`${Math.round(upperBandRect.height)}px`);
+      add('A — enlarged pitch exceeds the previous viewport baseline',initialPitchRect.height>({768:528,820:556,1024:760}[viewport.height]||0),`${Math.round(initialPitchRect.height)}px`);
       add('A — all eleven starters stay inside the pitch',pitch && pitch.querySelectorAll('.slot').length===11 && [...pitch.querySelectorAll('.slot')].every(slot => {const s=rect(slot);return s.left>=initialPitchRect.left-1 && s.right<=initialPitchRect.right+1 && s.top>=initialPitchRect.top-1 && s.bottom<=initialPitchRect.bottom+1;}));
       const starterSlots = [...pitch.querySelectorAll('.slot')];
       add('A — starter touch targets do not overlap',starterSlots.every((slot,index)=>starterSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other)))));
@@ -193,16 +198,18 @@
       let allContextsValid=true;
       for(const testCase of contextCases){
         const slot=[...doc.querySelectorAll('#pitch .slot,#matchBench .slot')].find(node=>node.dataset.name===testCase.name);
+        slot?.scrollIntoView({block:'center',inline:'nearest'});
+        await nextPaint();
         let slotRect=rect(slot);
         win.openPlayerPanel(testCase.name);
         await nextPaint();
         slotRect=rect(slot);
-        const menuRect=rect(panel),fieldRect=rect(pitch),boundsRect=rect(doc.querySelector('.pitchCard')),stickyRect=doc.querySelector('.tt-header.v364-header')?.getBoundingClientRect();
+        const menuRect=rect(panel),fieldRect=rect(pitch),boundsRect=rect(slot.closest('#pitch')||slot.closest('.playerAnalysisCard')||doc.querySelector('.pitchCard')),stickyRect=doc.querySelector('.tt-header.v364-header')?.getBoundingClientRect();
         const safeTop=stickyRect&&stickyRect.top<=8&&stickyRect.bottom>8?stickyRect.bottom+8:8;
         const horizontalGap=Math.max(slotRect.left-menuRect.right,menuRect.left-slotRect.right,0);
         const verticalGap=Math.max(slotRect.top-menuRect.bottom,menuRect.top-slotRect.bottom,0);
         const near=Math.min(horizontalGap||Infinity,verticalGap||Infinity)<=14;
-        const insideBounds=menuRect.left>=boundsRect.left+6&&menuRect.right<=boundsRect.right-6&&menuRect.top>=boundsRect.top+6&&menuRect.bottom<=boundsRect.bottom-6;
+        const insideBounds=slot.closest('#matchBench')||menuRect.left>=boundsRect.left+6&&menuRect.right<=boundsRect.right-6&&menuRect.top>=boundsRect.top+6&&menuRect.bottom<=boundsRect.bottom-6;
         const insideViewport=menuRect.left>=6&&menuRect.right<=viewport.width-6&&menuRect.top>=safeTop-1&&menuRect.bottom<=viewport.height-6;
         const expectedEdgePlacement=testCase.expected==='edge'?(slotRect.right+12+menuRect.width<=Math.min(boundsRect.right-8,viewport.width-8)?'right':'left'):(testCase.expected||null);
         const placementOk=!expectedEdgePlacement||panel.dataset.placement===expectedEdgePlacement;
@@ -237,7 +244,8 @@
       const overlayRect = rect(doc.getElementById('zoneOverlay'));
       const zoneById = id => zones.find(zone=>zone.dataset.zone===String(id));
       add('C — nine unchanged zone IDs have 44px touch areas',zones.length===9 && new Set(zones.map(zone=>zone.dataset.zone)).size===9 && zones.every(zone=>visible(win,zone)&&rect(zone).width>=44&&rect(zone).height>=44));
-      add('C — the 3×3 overlay covers the complete enlarged pitch',Math.abs(overlayRect.left-rect(pitch).left)<=3 && Math.abs(overlayRect.right-rect(pitch).right)<=3 && Math.abs(overlayRect.top-rect(pitch).top)<=3 && Math.abs(overlayRect.bottom-rect(pitch).bottom)<=3);
+      const currentPitchRect=rect(pitch);
+      add('C — the 3×3 overlay covers the complete enlarged pitch',Math.abs(overlayRect.left-currentPitchRect.left)<=3 && Math.abs(overlayRect.right-currentPitchRect.right)<=3 && Math.abs(overlayRect.top-currentPitchRect.top)<=3 && Math.abs(overlayRect.bottom-currentPitchRect.bottom)<=3);
       add('C — unchanged zone IDs rotate from defensive left to offensive right',rect(zoneById(7)).left<rect(zoneById(4)).left && rect(zoneById(4)).left<rect(zoneById(1)).left);
       let everyZoneReachable = true;
       const zoneHitDetails = [];
@@ -284,7 +292,7 @@
       add('E — foot 8 and foot 11 systems remain spaced, readable and tactile',systemsValid,systemDetails.join('; '));
       win.__prepareTabletFixture();
       await nextPaint();
-      const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{upperBand:{height:Math.round(upperBandRect.height)},workspace:{top:Math.round(workspaceRect.top),height:Math.round(workspaceRect.height)},availableHeight:Math.round(fieldAvailableHeight),availableWidth:Math.round(fieldAvailableWidth),pitch:{top:Math.round(initialPitchRect.top),bottom:Math.round(initialPitchRect.bottom),width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},page:{clientWidth:doc.documentElement.clientWidth,scrollWidth:doc.documentElement.scrollWidth,globalHorizontalScroll:doc.documentElement.scrollWidth>doc.documentElement.clientWidth+1},contextMenu:{width:Math.round(opponentRect.width),height:Math.round(opponentRect.height),columns:opponentColumns.size},starters:pitch?.querySelectorAll('.slot').length,bench:bench?.querySelectorAll('.slot').length}};
+      const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{upperBand:{height:Math.round(upperBandRect.height)},workspace:{top:Math.round(workspaceRect.top),height:Math.round(workspaceRect.height)},availableHeight:Math.round(fieldAvailableHeight),availableWidth:Math.round(fieldAvailableWidth),pitch:{top:Math.round(initialPitchRect.top),bottom:Math.round(initialPitchRect.bottom),width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},bench:{top:Math.round(benchRect.top),bottom:Math.round(benchRect.bottom),height:Math.round(benchRect.height)},analysis:{top:Math.round(analysisRect.top),bottom:Math.round(analysisRect.bottom),height:Math.round(analysisRect.height),overlapsBench:overlaps(benchRect,rect(analysis.querySelector('.selectedBanner')))},page:{clientWidth:doc.documentElement.clientWidth,scrollWidth:doc.documentElement.scrollWidth,globalHorizontalScroll:doc.documentElement.scrollWidth>doc.documentElement.clientWidth+1},contextMenu:{width:Math.round(opponentRect.width),height:Math.round(opponentRect.height),columns:opponentColumns.size},starters:pitch?.querySelectorAll('.slot').length,benchPlayers:bench?.querySelectorAll('.slot').length}};
       api.lastResult=result;
       const results = document.getElementById('results');
       results.replaceChildren();
