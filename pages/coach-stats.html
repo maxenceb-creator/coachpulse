@@ -172,7 +172,7 @@ body.embedded-page .tt-nav.tabs button.active .nav-ico{color:initial!important;t
 <div class="matchName" id="liveMatchName"></div><span class="phaseBadge" id="phaseBadge"></span>
 <div class="systemQuickButtons" id="systemQuickButtons"></div>
 </div>
-<div class="liveLayout"><div class="card pitchCard"><div class="fullPitchHint">V2.1 : terrain adaptatif tablette. Touche une joueuse = actions. Appui long / glisser = changement. Bouton adversaire toujours visible.</div><div class="matchSelectionRow"><div class="matchDirection" aria-label="Sens du terrain"><strong>↑ BUT ADVERSE</strong><span>ASSE attaque vers le haut · Nos cages en bas</span></div><button class="bad opponentActionTrigger" id="opponentActionTrigger" onclick="showActionMenu('adv')" aria-controls="playerActionPanel">🔴 Adversaire</button></div><div class="playerActionPanel" id="playerActionPanel"><div class="playerPanelTop"><div><b id="panelPlayerName">Sélectionne une joueuse</b><span id="panelPlayerInfo">Puis touche une action · glisse le bandeau pour tout voir</span></div><div class="matchActionTools"><button class="ghost" onclick="closePlayerPanel()" aria-label="Fermer les actions adverses ou la passe décisive">✕</button></div></div><div class="zoneBar" id="zoneBar"><span id="zoneTitle">Zone</span><button class="bad" onclick="closeZones()">Fermer</button></div><div class="playerPanelActions v310Actions" role="group" aria-label="Actions ASSE — défilement horizontal" tabindex="0">
+<div class="liveLayout"><div class="card pitchCard"><div class="fullPitchHint">V2.1 : terrain adaptatif tablette. Touche une joueuse = actions. Appui long / glisser = changement. Bouton adversaire toujours visible.</div><div class="matchSelectionRow"><div class="matchDirection" aria-label="Sens du terrain"><strong>← BUT ASSE · ATTAQUE →</strong><span>Défense à gauche · BUT ADVERSE à droite</span></div><button class="bad opponentActionTrigger" id="opponentActionTrigger" onclick="showActionMenu('adv')" aria-controls="playerActionPanel">🔴 Adversaire</button></div><div class="playerActionPanel" id="playerActionPanel"><div class="playerPanelTop"><div><b id="panelPlayerName">Sélectionne une joueuse</b><span id="panelPlayerInfo">Puis touche une action · glisse le bandeau pour tout voir</span></div><div class="matchActionTools"><button class="ghost" onclick="closePlayerPanel()" aria-label="Fermer les actions adverses ou la passe décisive">✕</button></div></div><div class="zoneBar" id="zoneBar"><span id="zoneTitle">Zone</span><button class="bad" onclick="closeZones()">Fermer</button></div><div class="playerPanelActions v310Actions" role="group" aria-label="Actions ASSE — défilement horizontal" tabindex="0">
 <button class="good" onclick="goalFlow()"><span aria-hidden="true">⚽</span><span>But</span></button>
 <button class="blue" onclick="stat('passe')"><span aria-hidden="true">🎯</span><span>Passe D.</span></button>
 <button class="blue" onclick="actionZone('tirCadre')"><span aria-hidden="true">🥅</span><span>Tir cadré</span></button>
@@ -442,11 +442,11 @@ function movePlayer(name,from,to,targetName=''){
 }
 function contextActionAnchor(){const panel=document.getElementById('playerActionPanel');if(panel?.classList.contains('advOnly'))return document.getElementById('opponentActionTrigger');return [...document.querySelectorAll('#pitch .slot,#matchBench .slot')].find(slot=>slot.dataset.name===state.selected)||null}
 function positionContextActionMenu(anchor=contextActionAnchor()){
- const panel=document.getElementById('playerActionPanel'),card=document.querySelector('#live .pitchCard');
+ const panel=document.getElementById('playerActionPanel'),card=document.querySelector('#live .pitchCard'),pitch=document.getElementById('pitch');
  if(!panel||!anchor||!card||typeof panel.getBoundingClientRect!=='function')return;
  panel.style.visibility='hidden';
  const menu=panel.getBoundingClientRect(),target=anchor.getBoundingClientRect(),cardBox=card.getBoundingClientRect();
- const bounds=card.getBoundingClientRect();
+ const bounds=(anchor.closest?.('#pitch')?pitch:card).getBoundingClientRect();
  const vw=window.visualViewport?.width||window.innerWidth,vh=window.visualViewport?.height||window.innerHeight,gap=12,pad=8;
  const sticky=document.querySelector('.tt-header.v364-header')?.getBoundingClientRect();
  const safeTop=sticky&&sticky.top<=pad&&sticky.bottom>pad?sticky.bottom+pad:pad;
@@ -459,7 +459,9 @@ function positionContextActionMenu(anchor=contextActionAnchor()){
   {placement:'below',left:centeredLeft,top:target.bottom+gap},
   {placement:'above',left:centeredLeft,top:target.top-menu.height-gap}
  ];
- const fits=o=>o.left>=minLeft&&o.left<=maxLeft&&o.top>=minTop&&o.top<=maxTop;
+ const fits=o=>o.placement==='right'||o.placement==='left'
+  ? o.left>=minLeft&&o.left<=maxLeft
+  : o.top>=minTop&&o.top<=maxTop;
  let choice=options.find(fits);
  if(!choice){const room=[vw-target.right,target.left,target.top,vh-target.bottom];choice=options[room.indexOf(Math.max(...room))]}
  const clamp=(value,min,max)=>Math.min(Math.max(value,min),Math.max(min,max));
@@ -892,10 +894,10 @@ function zoneFootballLabel(z, isAdv=false){
   z=Number(z);
   const row=Math.ceil(z/3);
   const col=((z-1)%3)+1;
-  const rowsUs={1:'Zone haute',2:'Zone médiane',3:'Zone basse'};
-  const rowsAdv={1:'Zone basse',2:'Zone médiane',3:'Zone haute'};
-  const cols={1:'gauche',2:'axe',3:'droite'};
-  return {main:(isAdv?rowsAdv[row]:rowsUs[row])||'Zone', sub:cols[col]||'', num:z};
+  const rowsUs={1:'Zone offensive',2:'Zone médiane',3:'Zone défensive'};
+  const rowsAdv={1:'Zone défensive',2:'Zone médiane',3:'Zone offensive'};
+  const levels={1:'haut',2:'axe',3:'bas'};
+  return {main:(isAdv?rowsAdv[row]:rowsUs[row])||'Zone', sub:levels[col]||'', num:z};
 }
 function zoneCellHTML(z,isAdv=false){
   const lab=zoneFootballLabel(z,isAdv);
@@ -907,7 +909,7 @@ renderPitch=function(){
   if(!pitch)return;
   document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());
   const pos=POSITIONS[state.system]||[];
-  pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,p[1],p[2],false)});
+  pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,100-p[2],p[1],false)});
   const bench=state.bench||[];
   const n=Math.max(bench.length,1);
   bench.forEach((name,i)=>{
@@ -948,7 +950,7 @@ renderPitch=function(){
   if(!pitch)return;
   document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());
   const pos=POSITIONS[state.system]||[];
-  pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,p[1],p[2],false)});
+  pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,100-p[2],p[1],false)});
   const bench=state.bench||[];
   const n=Math.max(bench.length,1);
   bench.forEach((name,i)=>{
@@ -2058,5 +2060,5 @@ body.match-mode .matchTop.v310Compact .possBox b{font-size:clamp(30px,2.8vw,42px
   window.addEventListener("resize",function(){if(typeof requestAnimationFrame==="function")requestAnimationFrame(syncMatchWorkspaceHeight);},{passive:true});
 })();
 </script>
-<link rel="stylesheet" href="coach-stats/match-entry.css?v=162-viewport-fit-4">
+<link rel="stylesheet" href="coach-stats/match-entry.css?v=162-landscape-pitch-2">
 </body></html>

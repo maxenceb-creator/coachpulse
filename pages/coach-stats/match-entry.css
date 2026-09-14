@@ -3,9 +3,9 @@ body.match-mode .page { width:100%!important; max-width:none!important; padding:
 body.match-mode #live, #live .liveLayout, #live .pitchCard { min-width:0; max-width:100%; }
 #live .matchWorkspace { display:grid; grid-template-rows:auto minmax(0,1fr); height:var(--match-workspace-height,calc(100dvh - 76px)); min-height:0; }
 #live .liveLayout { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); gap:0; min-height:0; height:100%; }
-#live .pitchCard { position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)!important; grid-template-rows:auto auto minmax(0,1fr); min-height:0; min-width:0!important; height:100%; margin:0!important; padding:4px!important; border-radius:14px!important; box-shadow:none!important; overflow:hidden; }
-#live .pitchCard > .fullPitchHint { grid-column:1 / -1; grid-row:1; }
-#live .pitchCard > .matchSelectionRow { grid-column:1 / -1; grid-row:2; }
+#live .pitchCard { position:relative; display:grid; grid-template-columns:minmax(0,1fr)!important; grid-template-rows:minmax(0,1fr); container-type:size; min-height:0; min-width:0!important; height:100%; margin:0!important; padding:4px!important; border-radius:14px!important; box-shadow:none!important; overflow:visible; }
+#live .pitchCard > .fullPitchHint { display:none!important; }
+#live .pitchCard > .matchSelectionRow { position:absolute; top:10px; left:50%; z-index:30; transform:translateX(-50%); width:max-content; max-width:calc(100% - 24px); }
 
 /* Direct children avoid implicit grid tracks and the old fixed/absolute scoreboard. */
 body.match-mode #live .matchTop.v310Compact {
@@ -49,7 +49,9 @@ body.match-mode #live .matchTop .resetMatchRow .v345Undo { display:block!importa
 
 /* The selector stays compact; actions float next to the selected player. */
 #live .matchSelectionRow { display:flex; align-items:center; justify-content:center; gap:10px; min-width:0; padding:2px 4px; }
+body.match-mode #live .matchSelectionRow { padding:4px 6px; color:#fff; background:rgba(3,21,12,.76); border-radius:12px; }
 #live .matchDirection { display:flex; flex-direction:column; align-items:center; min-width:0; font-size:11px; line-height:14px; font-weight:900; color:#14532d; text-align:center; }
+body.match-mode #live .matchDirection { color:#fff; }
 #live .matchDirection strong { font-size:12px; }
 #live #playerActionPanel + .matchDirection { display:none; }
 #live .opponentActionTrigger { flex:0 0 auto; min-width:112px; min-height:44px; padding:6px 10px; }
@@ -99,23 +101,25 @@ body.zone-picking #live .playerPanelTop { display:none; }
 body.zone-picking #live #playerActionPanel { pointer-events:auto!important; }
 body.zone-picking #live .playerPanelActions, body.zone-picking #live #actionMenu { display:none!important; }
 
-/* A vertical field fills the available height and keeps the historical bottom-to-top flow. */
+/* Landscape pitch: old top-to-bottom coordinates are rotated clockwise for left-to-right play. */
 body.match-mode #live #pitch {
   --match-slot-size:clamp(56px,5.8vw,88px);
-  grid-column:2; grid-row:3; width:auto!important; height:100%!important; aspect-ratio:.92 / 1;
-  max-width:100%!important; max-height:100%!important; align-self:stretch; justify-self:center;
+  grid-column:1; grid-row:1;
+  width:min(calc(100cqw - 8px),calc(100cqh * 1.72))!important;
+  height:min(100cqh,calc((100cqw - 8px) * .5814))!important; aspect-ratio:1.72 / 1;
+  max-width:100%!important; max-height:100%!important; align-self:start; justify-self:center;
   min-height:0!important; border:3px solid #fff!important; border-radius:12px!important;
   box-shadow:inset 0 0 0 1px #ffffff88!important;
 }
-#live #pitch .fieldHalf { left:0; right:0; top:50%; bottom:auto; width:auto; height:2px; transform:none; }
+#live #pitch .fieldHalf { left:50%; right:auto; top:0; bottom:0; width:2px; height:auto; transform:none; }
 #live #pitch .fieldCenterCircle { width:24%; height:auto; aspect-ratio:1; max-height:24%; left:50%; top:50%; transform:translate(-50%,-50%); border-width:2px; }
-#live #pitch :is(.penaltyArea,.goalArea,.goalMouth) { left:50%; right:auto; width:60%; height:16%; transform:translateX(-50%); border:2px solid #ffffffbb; border-radius:0; }
-#live #pitch .top:is(.penaltyArea,.goalArea,.goalMouth) { top:-2px; bottom:auto; border-top:0; }
-#live #pitch .bot:is(.penaltyArea,.goalArea,.goalMouth) { top:auto; bottom:-2px; border-bottom:0; }
-#live #pitch .goalArea { width:34%; height:7%; }
-#live #pitch .goalMouth { width:20%; height:2%; }
-#live #pitch .penaltySpot.top { left:50%; top:11%; }
-#live #pitch .penaltySpot.bot { left:50%; top:89%; }
+#live #pitch :is(.penaltyArea,.goalArea,.goalMouth) { top:50%; bottom:auto; width:16%; height:60%; transform:translateY(-50%); border:2px solid #ffffffbb; border-radius:0; }
+#live #pitch .top:is(.penaltyArea,.goalArea,.goalMouth) { left:auto; right:-2px; border-right:0; }
+#live #pitch .bot:is(.penaltyArea,.goalArea,.goalMouth) { left:-2px; right:auto; border-left:0; }
+#live #pitch .goalArea { width:7%; height:34%; }
+#live #pitch .goalMouth { width:2%; height:20%; }
+#live #pitch .penaltySpot.top { left:89%; top:50%; }
+#live #pitch .penaltySpot.bot { left:11%; top:50%; }
 #live #pitch .benchZone, #live #pitch .benchZone::before, #live #pitch::after { display:none!important; }
 #live :is(#pitch,#matchBench) .slot { width:var(--match-slot-size)!important; height:var(--match-slot-size)!important; min-width:var(--match-slot-size)!important; min-height:var(--match-slot-size)!important; border-width:3px!important; box-shadow:none!important; }
 #live .slot.selected { outline:4px solid #facc15!important; transform:none!important; }
@@ -123,13 +127,22 @@ body.match-mode #live #pitch {
 #live .slot .slotName { width:max-content; max-width:var(--match-slot-size)!important; font-size:clamp(8px,.85vw,11px)!important; line-height:1.15!important; left:0!important; right:0!important; bottom:2px!important; overflow-wrap:anywhere; }
 #live .slot .pos { font-size:clamp(9px,1vw,12px)!important; bottom:-14px!important; }
 #live .slot .min { font-size:clamp(9px,1vw,12px)!important; }
-#live #matchBench { --match-slot-size:clamp(48px,5vw,60px); position:relative; grid-column:3; grid-row:3; align-self:start; justify-self:end; display:flex; flex-wrap:nowrap; align-items:center; width:min(100%,280px); max-width:100%; min-width:0; gap:18px 12px; min-height:76px; padding:8px 10px 18px; margin:0; background:#eef4f0; border-radius:8px; overflow-x:auto; overflow-y:hidden; }
+#live #matchBench { --match-slot-size:clamp(48px,5vw,60px); position:absolute; top:calc(min(100cqh,calc((100cqw - 8px) * .5814)) + 4px); left:4px; right:4px; display:flex; flex-wrap:nowrap; align-items:center; width:auto; max-width:none; min-width:0; gap:18px 12px; min-height:76px; padding:8px 10px 18px; margin:0; background:#eef4f0; border-radius:8px; overflow-x:auto; overflow-y:hidden; }
 #live #matchBench .slot { position:relative; flex:0 0 var(--match-slot-size); }
 #live #matchBench .slot:not(.dragging) { left:auto!important; right:auto!important; top:0!important; bottom:auto!important; }
 #live .matchBenchLabel { font-size:12px; font-weight:900; color:#405e4c; }
 #live #matchBench .slot.dragging { z-index:10001!important; }
 #live #matchBench:has(.slot.dragging) { z-index:10001; }
 #live #pitch .zoneOverlay { grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(3,minmax(0,1fr)); background:#07111f88!important; }
+#live #pitch .zoneCell[data-zone="1"] { grid-column:3; grid-row:1; }
+#live #pitch .zoneCell[data-zone="2"] { grid-column:3; grid-row:2; }
+#live #pitch .zoneCell[data-zone="3"] { grid-column:3; grid-row:3; }
+#live #pitch .zoneCell[data-zone="4"] { grid-column:2; grid-row:1; }
+#live #pitch .zoneCell[data-zone="5"] { grid-column:2; grid-row:2; }
+#live #pitch .zoneCell[data-zone="6"] { grid-column:2; grid-row:3; }
+#live #pitch .zoneCell[data-zone="7"] { grid-column:1; grid-row:1; }
+#live #pitch .zoneCell[data-zone="8"] { grid-column:1; grid-row:2; }
+#live #pitch .zoneCell[data-zone="9"] { grid-column:1; grid-row:3; }
 #live #pitch .zoneCell { min-width:0; min-height:0; border:1px solid #ffffffbb; font-size:26px; }
 #live #pitch .zoneCell.pressed { background:#22c55e99!important; }
 #live .liveBelow { grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); gap:8px; }

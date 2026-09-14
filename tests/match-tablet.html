@@ -73,7 +73,7 @@
     async function loadModule() {
       ready = false;
       status.textContent = 'Loading actual Match module with synthetic players…';
-      const sourceUrl = new URL('../pages/coach-stats.html',location.href);
+      const sourceUrl = new URL('../pages/coach-stats.html?tablet-fixture-source=landscape-v4',location.href);
       const response = await fetch(sourceUrl,{cache:'no-store'});
       if(!response.ok) throw new Error(`Module HTTP ${response.status}`);
       let source = await response.text();
@@ -146,10 +146,11 @@
       const upperBandRect = rect(doc.querySelector('.matchTop'));
       const workspaceRect = rect(doc.querySelector('.matchWorkspace'));
       const fieldAvailableHeight = viewport.height-initialPitchRect.top;
+      const fieldAvailableWidth = viewport.width-8;
       add('A — fixture storage isolated',win.localStorage.__tabletFixtureMemory && !window.CoachPulseCentralData);
       add('A — no horizontal page overflow',Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)<=viewport.width+1,`${Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)} / ${viewport.width}px`);
       add('A — no action strip or reserved space before selection',panel && !visible(win,panel) && rect(panel).height===0,`panel ${Math.round(rect(panel).width)}×${Math.round(rect(panel).height)}px`);
-      add('A — pitch uses the available viewport height and stays generously sized',initialPitchRect.height>initialPitchRect.width && initialPitchRect.width>=viewport.width*.39,`${Math.round(initialPitchRect.width)} × ${Math.round(initialPitchRect.height)}px; ${Math.round(initialPitchRect.width/viewport.width*100)}% viewport width`);
+      add('A — pitch is horizontal and uses most of the tablet width',initialPitchRect.width>initialPitchRect.height && initialPitchRect.width>=viewport.width*.8,`${Math.round(initialPitchRect.width)} × ${Math.round(initialPitchRect.height)}px; ${Math.round(initialPitchRect.width/viewport.width*100)}% viewport width`);
       add('A — complete pitch fits below the unchanged upper band',initialPitchRect.top>=upperBandRect.bottom-1&&initialPitchRect.bottom<=viewport.height-4,`band ${Math.round(upperBandRect.height)}px; pitch ${Math.round(initialPitchRect.top)}–${Math.round(initialPitchRect.bottom)} / viewport ${viewport.height}px`);
       const benchRect = bench ? rect(bench) : {left:0,right:0,top:0,bottom:0};
       const benchSlots = bench ? [...bench.querySelectorAll('.slot')] : [];
@@ -160,27 +161,26 @@
       add('A — starter touch targets do not overlap',starterSlots.every((slot,index)=>starterSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other)))));
       const goalkeeper = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[0]);
       const striker = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[9]);
-      add('A — ASSE goalkeeper is below the striker',goalkeeper&&striker&&rect(goalkeeper).top>rect(striker).top);
-      add('A — striker and goalkeeper are simultaneously visible without scrolling',goalkeeper&&striker&&rect(striker).top>=0&&rect(goalkeeper).bottom<=viewport.height,`striker ${Math.round(rect(striker).top)}px; goalkeeper ${Math.round(rect(goalkeeper).bottom)}px`);
+      add('A — ASSE goalkeeper is left of the striker',goalkeeper&&striker&&rect(goalkeeper).left<rect(striker).left);
+      add('A — goalkeeper and striker are simultaneously accessible without horizontal scrolling',goalkeeper&&striker&&rect(goalkeeper).left>=0&&rect(striker).right<=viewport.width,`goalkeeper ${Math.round(rect(goalkeeper).left)}px; striker ${Math.round(rect(striker).right)}px`);
 
       const scrollRoot=doc.scrollingElement;
       scrollRoot.style.setProperty('scroll-behavior','auto','important');
       doc.body.style.setProperty('scroll-behavior','auto','important');
       const originalScrollY=win.scrollY;
-      win.openPlayerPanel(names[9]);
-      await nextPaint();
       win.openPlayerPanel(names[0]);
       await nextPaint();
-      const goalkeeperAction=[...strip.querySelectorAll('button')].find(button=>(button.getAttribute('onclick')||'').includes("duelGagne"));
+      win.openPlayerPanel(names[9]);
+      await nextPaint();
+      const goalkeeperAction=[...strip.querySelectorAll('button')].find(button=>(button.getAttribute('onclick')||'').includes("duelPlayer('won')"));
       goalkeeperAction?.click();
       await nextPaint();
-      add('B — attacker, goalkeeper and a goalkeeper action work in sequence without scrolling',!!goalkeeperAction&&win.scrollY===originalScrollY,`${Math.round(originalScrollY)} → ${Math.round(win.scrollY)}px`);
+      add('B — goalkeeper, attacker and an action work in sequence without horizontal scrolling',!!goalkeeperAction&&win.scrollX===0,`scrollX ${Math.round(win.scrollX)}px`);
       const contextCases=[
-        {label:'centre',name:names[9]},
-        {label:'gauche',name:names[8]},
-        {label:'droite',name:names[10]},
-        {label:'milieu',name:names[5]},
-        {label:'gardienne',name:names[0]},
+        {label:'gardienne',name:names[0],expected:'right'},
+        {label:'défenseure',name:names[1],expected:'right'},
+        {label:'milieu',name:names[6]},
+        {label:'attaquante',name:names[10],expected:'left'},
         {label:'remplaçante',name:names[11]}
       ];
       const contextDetails=[];
@@ -198,7 +198,7 @@
         const near=Math.min(horizontalGap||Infinity,verticalGap||Infinity)<=14;
         const insideBounds=menuRect.left>=boundsRect.left+6&&menuRect.right<=boundsRect.right-6&&menuRect.top>=boundsRect.top+6&&menuRect.bottom<=boundsRect.bottom-6;
         const insideViewport=menuRect.left>=6&&menuRect.right<=viewport.width-6&&menuRect.top>=safeTop-1&&menuRect.bottom<=viewport.height-6;
-        const expectedEdgePlacement=testCase.label==='gauche'?'right':testCase.label==='droite'?(slotRect.right+12+menuRect.width<=Math.min(boundsRect.right-8,viewport.width-8)?'right':'left'):null;
+        const expectedEdgePlacement=testCase.expected||null;
         const placementOk=!expectedEdgePlacement||panel.dataset.placement===expectedEdgePlacement;
         const valid=visible(win,panel)&&panel.dataset.anchor===testCase.name&&!overlaps(menuRect,slotRect)&&near&&insideBounds&&insideViewport&&placementOk;
         if(!valid)allContextsValid=false;
@@ -206,7 +206,7 @@
         contextDetails.push(`${testCase.label}:${panel.dataset.placement}/${Math.round(menuRect.left)},${Math.round(menuRect.top)} ${Math.round(menuRect.width)}×${Math.round(menuRect.height)} [${flags.join(',')}]`);
       }
       add('B — contextual menu follows starters, edges, goal areas and substitutes',allContextsValid,contextDetails.join('; '));
-      add('B — field actions require no page scroll',win.scrollY===originalScrollY,`${Math.round(originalScrollY)} → ${Math.round(win.scrollY)}px`);
+      add('B — field actions create no horizontal page scroll',win.scrollX===0,`scrollX ${Math.round(win.scrollX)}px`);
       const buttons=strip?[...strip.querySelectorAll('button')]:[];
       const columns=new Set(buttons.map(button=>Math.round(rect(button).left)));
       const rows=new Set(buttons.map(button=>Math.round(rect(button).top)));
@@ -232,7 +232,7 @@
       const zoneById = id => zones.find(zone=>zone.dataset.zone===String(id));
       add('C — nine unchanged zone IDs have 44px touch areas',zones.length===9 && new Set(zones.map(zone=>zone.dataset.zone)).size===9 && zones.every(zone=>visible(win,zone)&&rect(zone).width>=44&&rect(zone).height>=44));
       add('C — the 3×3 overlay covers the complete enlarged pitch',Math.abs(overlayRect.left-rect(pitch).left)<=3 && Math.abs(overlayRect.right-rect(pitch).right)<=3 && Math.abs(overlayRect.top-rect(pitch).top)<=3 && Math.abs(overlayRect.bottom-rect(pitch).bottom)<=3);
-      add('C — zone IDs keep top-to-bottom order',rect(zoneById(1)).top<rect(zoneById(4)).top && rect(zoneById(4)).top<rect(zoneById(7)).top);
+      add('C — unchanged zone IDs rotate from defensive left to offensive right',rect(zoneById(7)).left<rect(zoneById(4)).left && rect(zoneById(4)).left<rect(zoneById(1)).left);
       let everyZoneReachable = true;
       const zoneHitDetails = [];
       for(const zone of zones) {
@@ -244,7 +244,7 @@
         if(!reached)everyZoneReachable=false;
         zoneHitDetails.push(`${zone.dataset.zone}:${reached?'ok':hits[0]?.id||hits[0]?.className||'none'}@${Math.round(z.top)}-${Math.round(z.bottom)}`);
       }
-      add('C — every zone is visible and receives pointer hits without scrolling',everyZoneReachable&&win.scrollY===originalScrollY,zoneHitDetails.join(', '));
+      add('C — every zone is visible and receives pointer hits without horizontal scrolling',everyZoneReachable&&win.scrollX===0,zoneHitDetails.join(', '));
       win.closeZones();
 
       win.showActionMenu('adv');
@@ -262,7 +262,7 @@
       await nextPaint();
       add('E — closing/resetting removes the contextual overlay',!visible(win,panel) && rect(panel).height===0);
       add('E — pitch recovers its initial height',Math.abs(rect(pitch).height-initialPitchRect.height)<=1,`${Math.round(rect(pitch).height)} / ${Math.round(initialPitchRect.height)}px`);
-      const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{upperBand:{height:Math.round(upperBandRect.height)},workspace:{top:Math.round(workspaceRect.top),height:Math.round(workspaceRect.height)},availableHeight:Math.round(fieldAvailableHeight),pitch:{top:Math.round(initialPitchRect.top),bottom:Math.round(initialPitchRect.bottom),width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},page:{clientHeight:doc.documentElement.clientHeight,scrollHeight:doc.documentElement.scrollHeight,globalScroll:doc.documentElement.scrollHeight>doc.documentElement.clientHeight+1,fieldRequiresScroll:initialPitchRect.bottom>viewport.height-4},contextMenu:{width:Math.round(opponentRect.width),height:Math.round(opponentRect.height),columns:opponentColumns.size},starters:pitch?.querySelectorAll('.slot').length,bench:bench?.querySelectorAll('.slot').length}};
+      const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{upperBand:{height:Math.round(upperBandRect.height)},workspace:{top:Math.round(workspaceRect.top),height:Math.round(workspaceRect.height)},availableHeight:Math.round(fieldAvailableHeight),availableWidth:Math.round(fieldAvailableWidth),pitch:{top:Math.round(initialPitchRect.top),bottom:Math.round(initialPitchRect.bottom),width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},page:{clientWidth:doc.documentElement.clientWidth,scrollWidth:doc.documentElement.scrollWidth,globalHorizontalScroll:doc.documentElement.scrollWidth>doc.documentElement.clientWidth+1},contextMenu:{width:Math.round(opponentRect.width),height:Math.round(opponentRect.height),columns:opponentColumns.size},starters:pitch?.querySelectorAll('.slot').length,bench:bench?.querySelectorAll('.slot').length}};
       api.lastResult=result;
       const results = document.getElementById('results');
       results.replaceChildren();
