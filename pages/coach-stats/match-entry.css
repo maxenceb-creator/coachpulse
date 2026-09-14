@@ -1,9 +1,11 @@
 /* Match entry only. Legacy theme rules use !important throughout coach-stats.html. */
 body.match-mode .page { width:100%!important; max-width:none!important; padding:6px!important; }
 body.match-mode #live, #live .liveLayout, #live .pitchCard { min-width:0; max-width:100%; }
-#live .matchWorkspace { display:grid; grid-template-rows:auto auto; min-height:max(680px,calc(100dvh - 12px)); }
-#live .liveLayout { grid-template-columns:minmax(0,1fr); grid-template-rows:auto; gap:0; min-height:0; }
-#live .pitchCard { position:relative; display:grid; grid-template-columns:minmax(0,1fr)!important; grid-template-rows:auto auto auto auto auto; min-height:0; min-width:0!important; margin:0!important; padding:4px!important; border-radius:14px!important; box-shadow:none!important; }
+#live .matchWorkspace { display:grid; grid-template-rows:auto minmax(0,1fr); height:var(--match-workspace-height,calc(100dvh - 76px)); min-height:0; }
+#live .liveLayout { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); gap:0; min-height:0; height:100%; }
+#live .pitchCard { position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)!important; grid-template-rows:auto auto minmax(0,1fr); min-height:0; min-width:0!important; height:100%; margin:0!important; padding:4px!important; border-radius:14px!important; box-shadow:none!important; overflow:hidden; }
+#live .pitchCard > .fullPitchHint { grid-column:1 / -1; grid-row:1; }
+#live .pitchCard > .matchSelectionRow { grid-column:1 / -1; grid-row:2; }
 
 /* Direct children avoid implicit grid tracks and the old fixed/absolute scoreboard. */
 body.match-mode #live .matchTop.v310Compact {
@@ -99,9 +101,9 @@ body.zone-picking #live .playerPanelActions, body.zone-picking #live #actionMenu
 
 /* A vertical field fills the available height and keeps the historical bottom-to-top flow. */
 body.match-mode #live #pitch {
-  --match-slot-size:clamp(58px,7vw,88px);
-  width:calc(100% - 8px)!important; height:calc((100dvw - 26px) * 1.1)!important; aspect-ratio:auto;
-  max-width:none!important; max-height:none!important; align-self:start; justify-self:center;
+  --match-slot-size:clamp(56px,5.8vw,88px);
+  grid-column:2; grid-row:3; width:auto!important; height:100%!important; aspect-ratio:.92 / 1;
+  max-width:100%!important; max-height:100%!important; align-self:stretch; justify-self:center;
   min-height:0!important; border:3px solid #fff!important; border-radius:12px!important;
   box-shadow:inset 0 0 0 1px #ffffff88!important;
 }
@@ -118,10 +120,10 @@ body.match-mode #live #pitch {
 #live :is(#pitch,#matchBench) .slot { width:var(--match-slot-size)!important; height:var(--match-slot-size)!important; min-width:var(--match-slot-size)!important; min-height:var(--match-slot-size)!important; border-width:3px!important; box-shadow:none!important; }
 #live .slot.selected { outline:4px solid #facc15!important; transform:none!important; }
 #live .slot .slotPhoto { width:100%!important; height:100%!important; inset:0!important; border-radius:50%!important; }
-#live .slot .slotName { width:max-content; max-width:calc(var(--match-slot-size) * 1.45)!important; font-size:clamp(10px,1.15vw,14px)!important; line-height:1.2!important; left:-6px!important; right:-6px!important; bottom:2px!important; overflow-wrap:anywhere; }
+#live .slot .slotName { width:max-content; max-width:var(--match-slot-size)!important; font-size:clamp(8px,.85vw,11px)!important; line-height:1.15!important; left:0!important; right:0!important; bottom:2px!important; overflow-wrap:anywhere; }
 #live .slot .pos { font-size:clamp(9px,1vw,12px)!important; bottom:-14px!important; }
 #live .slot .min { font-size:clamp(9px,1vw,12px)!important; }
-#live #matchBench { --match-slot-size:clamp(52px,6vw,72px); position:relative; display:flex; flex-wrap:wrap; align-items:center; width:100%; max-width:100%; min-width:0; gap:22px 18px; min-height:88px; padding:10px 12px 20px; margin:4px 0 0; background:#eef4f0; border-radius:8px; }
+#live #matchBench { --match-slot-size:clamp(48px,5vw,60px); position:relative; grid-column:3; grid-row:3; align-self:start; justify-self:end; display:flex; flex-wrap:nowrap; align-items:center; width:min(100%,280px); max-width:100%; min-width:0; gap:18px 12px; min-height:76px; padding:8px 10px 18px; margin:0; background:#eef4f0; border-radius:8px; overflow-x:auto; overflow-y:hidden; }
 #live #matchBench .slot { position:relative; flex:0 0 var(--match-slot-size); }
 #live #matchBench .slot:not(.dragging) { left:auto!important; right:auto!important; top:0!important; bottom:auto!important; }
 #live .matchBenchLabel { font-size:12px; font-weight:900; color:#405e4c; }
@@ -144,10 +146,14 @@ body.match-mode .undoFloat { display:none!important; }
   body.match-mode #live .matchTop > .liveSystemPanel, body.match-mode #live .matchTop > .possessionSetup { grid-column:span 6!important; }
   body.match-mode #live .matchTop > .resetMatchRow { grid-column:span 12!important; }
   body.match-mode #live .matchTop .liveSystemPanel { grid-template-columns:minmax(0,1fr)!important; }
-  #live .matchWorkspace { min-height:0; }
-  #live .pitchCard { grid-template-rows:auto auto auto auto auto; }
+  #live .matchWorkspace { height:auto; min-height:0; }
+  #live .liveLayout { height:auto; }
+  #live .pitchCard { grid-template-columns:minmax(0,1fr)!important; grid-template-rows:auto auto auto auto; height:auto; overflow:visible; }
+  #live .pitchCard > .fullPitchHint { grid-column:1; grid-row:1; }
+  #live .pitchCard > .matchSelectionRow { grid-column:1; grid-row:2; }
   #live .matchSelectionRow { justify-content:space-between; }
-  body.match-mode #live #pitch { --match-slot-size:44px; width:min(100%,330px)!important; height:auto!important; aspect-ratio:3 / 4; }
+  body.match-mode #live #pitch { --match-slot-size:44px; grid-column:1; grid-row:3; width:min(100%,330px)!important; height:auto!important; aspect-ratio:3 / 4; }
+  #live #matchBench { grid-column:1; grid-row:4; justify-self:stretch; width:100%; flex-wrap:wrap; min-height:0; margin-top:4px; overflow:visible; }
   #live #playerActionPanel { width:218px!important; max-height:65dvh!important; }
   #live .playerPanelActions.v310Actions, #live .actionMenu .subActionGrid { grid-template-columns:repeat(3,minmax(0,1fr))!important; }
   #live .playerPanelActions.v310Actions button, #live .actionMenu .subActionGrid button { min-height:50px!important; }
@@ -155,8 +161,18 @@ body.match-mode .undoFloat { display:none!important; }
   #live #panelPlayerInfo { display:none; }
   #live .liveBelow { grid-template-columns:minmax(0,1fr); }
 }
+@media (min-width:720px) and (max-height:850px) {
+  #live #playerActionPanel { width:clamp(264px,28vw,296px)!important; }
+  #live .playerPanelActions.v310Actions, #live .actionMenu .subActionGrid { grid-template-columns:repeat(4,minmax(0,1fr))!important; }
+}
 @media (min-width:720px) and (orientation:portrait) {
-  #live .matchWorkspace { min-height:min(100dvh,calc(65vw + 380px)); }
+  #live .matchWorkspace { height:auto; min-height:min(100dvh,calc(65vw + 380px)); }
+  #live .liveLayout { height:auto; }
+  #live .pitchCard { grid-template-columns:minmax(0,1fr)!important; grid-template-rows:auto auto auto auto; height:auto; overflow:visible; }
+  #live .pitchCard > .fullPitchHint { grid-column:1; grid-row:1; }
+  #live .pitchCard > .matchSelectionRow { grid-column:1; grid-row:2; }
+  body.match-mode #live #pitch { grid-column:1; grid-row:3; width:min(100%,calc(100dvh * .62))!important; height:auto!important; aspect-ratio:3 / 4; }
+  #live #matchBench { grid-column:1; grid-row:4; justify-self:stretch; width:100%; flex-wrap:wrap; min-height:0; margin-top:4px; overflow:visible; }
 }
 @media (prefers-reduced-motion:reduce) {
   #live *, body.match-mode { scroll-behavior:auto!important; animation:none!important; }

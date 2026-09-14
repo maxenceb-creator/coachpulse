@@ -442,11 +442,11 @@ function movePlayer(name,from,to,targetName=''){
 }
 function contextActionAnchor(){const panel=document.getElementById('playerActionPanel');if(panel?.classList.contains('advOnly'))return document.getElementById('opponentActionTrigger');return [...document.querySelectorAll('#pitch .slot,#matchBench .slot')].find(slot=>slot.dataset.name===state.selected)||null}
 function positionContextActionMenu(anchor=contextActionAnchor()){
- const panel=document.getElementById('playerActionPanel'),card=document.querySelector('#live .pitchCard'),pitch=document.getElementById('pitch');
+ const panel=document.getElementById('playerActionPanel'),card=document.querySelector('#live .pitchCard');
  if(!panel||!anchor||!card||typeof panel.getBoundingClientRect!=='function')return;
  panel.style.visibility='hidden';
  const menu=panel.getBoundingClientRect(),target=anchor.getBoundingClientRect(),cardBox=card.getBoundingClientRect();
- const onPitch=anchor.closest?.('#pitch'),bounds=(onPitch?pitch:card).getBoundingClientRect();
+ const bounds=card.getBoundingClientRect();
  const vw=window.visualViewport?.width||window.innerWidth,vh=window.visualViewport?.height||window.innerHeight,gap=12,pad=8;
  const sticky=document.querySelector('.tt-header.v364-header')?.getBoundingClientRect();
  const safeTop=sticky&&sticky.top<=pad&&sticky.bottom>pad?sticky.bottom+pad:pad;
@@ -2025,11 +2025,19 @@ body.match-mode .matchTop.v310Compact .possBox b{font-size:clamp(30px,2.8vw,42px
     var live=document.getElementById("live");
     return !!(live&&!live.classList.contains("hide"));
   }
+  function syncMatchWorkspaceHeight(){
+    var workspace=document.querySelector("#live .matchWorkspace");
+    if(!workspace||!document.body.classList.contains("match-mode"))return;
+    var documentTop=workspace.getBoundingClientRect().top+(window.scrollY||0);
+    var available=Math.max(420,window.innerHeight-documentTop-6);
+    workspace.style.setProperty("--match-workspace-height",available+"px");
+  }
   function setMatchBand(){
     var isLive=liveIsVisible();
     document.body.classList.toggle("match-mode",isLive);
     var btn=document.getElementById("matchModeBtn");
     if(btn)btn.textContent=isLive?"↩️ Quitter":"🎮 Mode Match";
+    if(isLive&&typeof requestAnimationFrame==="function")requestAnimationFrame(syncMatchWorkspaceHeight);
   }
   var previousToggle=window.toggleMatchMode;
   window.toggleMatchMode=function(){
@@ -2047,7 +2055,8 @@ body.match-mode .matchTop.v310Compact .possBox b{font-size:clamp(30px,2.8vw,42px
   }
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",setMatchBand,{once:true});else setMatchBand();
   window.addEventListener("load",function(){setTimeout(setMatchBand,120);});
+  window.addEventListener("resize",function(){if(typeof requestAnimationFrame==="function")requestAnimationFrame(syncMatchWorkspaceHeight);},{passive:true});
 })();
 </script>
-<link rel="stylesheet" href="coach-stats/match-entry.css">
+<link rel="stylesheet" href="coach-stats/match-entry.css?v=162-viewport-fit-4">
 </body></html>
