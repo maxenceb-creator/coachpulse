@@ -142,6 +142,7 @@
       const pitch = doc.getElementById('pitch');
       const bench = doc.getElementById('matchBench');
       const analysis = doc.querySelector('.playerAnalysisCard');
+      const matchLogCard = doc.querySelector('#liveLog')?.closest('.card');
       const panel = doc.getElementById('playerActionPanel');
       pitch.style.display='none';
       void pitch.offsetHeight;
@@ -169,7 +170,12 @@
       add('A — all eleven starters stay inside the pitch',pitch && pitch.querySelectorAll('.slot').length===11 && [...pitch.querySelectorAll('.slot')].every(slot => {const s=rect(slot);return s.left>=initialPitchRect.left-1 && s.right<=initialPitchRect.right+1 && s.top>=initialPitchRect.top-1 && s.bottom<=initialPitchRect.bottom+1;}));
       const starterSlots = [...pitch.querySelectorAll('.slot')];
       add('A — starter touch targets do not overlap',starterSlots.every((slot,index)=>starterSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other)))));
+      add('A — foot 11 player cards stay compact and predictable',starterSlots.length===11&&starterSlots.every(slot=>{const r=rect(slot);return r.width>=61&&r.width<=69&&r.height>=71&&r.height<=79}),starterSlots[0]?`${Math.round(rect(starterSlots[0]).width)} × ${Math.round(rect(starterSlots[0]).height)}px`:'missing');
+      add('A — avatar, short name, position and clock remain individually readable',starterSlots.every(slot=>['.slotPhoto','.slotName','.pos','.min'].every(selector=>visible(win,slot.querySelector(selector)))));
       add('A — player labels never expose raw br markup',[...doc.querySelectorAll('#pitch .slotName,#matchBench .slotName')].every(label=>!/<br|&lt;br/i.test(label.textContent||'')&&!/&lt;br/i.test(label.innerHTML)));
+      add('A — player names stay on one contained line',[...doc.querySelectorAll('#pitch .slotName')].every(label=>{const style=win.getComputedStyle(label);return rect(label).width<=rect(label.closest('.slot')).width&&rect(label).height<=14&&style.whiteSpace==='nowrap'&&style.overflow==='hidden'&&style.textOverflow==='ellipsis'}));
+      add('A — clock badges never cover avatars or names',starterSlots.every(slot=>{const clock=rect(slot.querySelector('.min')),photo=rect(slot.querySelector('.slotPhoto')),name=rect(slot.querySelector('.slotName'));return !overlaps(clock,photo)&&!overlaps(clock,name)}));
+      add('A — compact bench and match feed use separate layout columns',bench&&matchLogCard&&!overlaps(benchRect,rect(matchLogCard))&&benchSlots.every(slot=>rect(slot).height<=47&&rect(slot).width<=133));
       const goalkeeper = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[0]);
       const striker = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[9]);
       add('A — ASSE goalkeeper is left of the striker',goalkeeper&&striker&&rect(goalkeeper).left<rect(striker).left);
@@ -278,16 +284,18 @@
       add('E — pitch recovers its initial height',Math.abs(rect(pitch).height-initialPitchRect.height)<=1,`${Math.round(rect(pitch).height)} / ${Math.round(initialPitchRect.height)}px`);
       const systemDetails=[];
       let systemsValid=true;
-      for(const spec of [{format:8,system:'3-2-2',count:8},{format:8,system:'3-3-1',count:8},{format:11,system:'4-3-3',count:11},{format:11,system:'4-4-2',count:11},{format:11,system:'3-5-2',count:11}]){
+      for(const spec of [{format:8,system:'3-2-2',count:8},{format:8,system:'3-3-1',count:8},{format:11,system:'4-3-3',count:11},{format:11,system:'4-4-2',count:11},{format:11,system:'3-5-2',count:11},{format:11,system:'4-2-3-1',count:11}]){
         win.__setTabletSystem(spec.format,spec.system);
         await nextPaint();
         const systemPitch=rect(pitch),systemSlots=[...pitch.querySelectorAll('.slot')],labels=systemSlots.map(slot=>slot.querySelector('.slotName')).filter(Boolean);
         const inside=systemSlots.every(slot=>{const r=rect(slot);return r.left>=systemPitch.left-1&&r.right<=systemPitch.right+1&&r.top>=systemPitch.top-1&&r.bottom<=systemPitch.bottom+1;});
         const clear=systemSlots.every((slot,index)=>systemSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other))));
         const labelsClear=labels.every((label,index)=>labels.slice(index+1).every(other=>!overlaps(rect(label),rect(other))));
-        const valid=systemSlots.length===spec.count&&inside&&clear&&labelsClear&&systemSlots.every(slot=>rect(slot).width>=48&&rect(slot).height>=48);
+        const expectedSize=spec.format===11?{minW:61,maxW:69,minH:71,maxH:79}:{minW:69,maxW:81,minH:81,maxH:93};
+        const sizesOk=systemSlots.every(slot=>{const r=rect(slot);return r.width>=expectedSize.minW&&r.width<=expectedSize.maxW&&r.height>=expectedSize.minH&&r.height<=expectedSize.maxH});
+        const valid=systemSlots.length===spec.count&&inside&&clear&&labelsClear&&sizesOk;
         if(!valid)systemsValid=false;
-        systemDetails.push(`${spec.system}:${valid?'ok':`count=${systemSlots.length},inside=${inside},slots=${clear},labels=${labelsClear}`}`);
+        systemDetails.push(`${spec.system}:${valid?'ok':`count=${systemSlots.length},inside=${inside},slots=${clear},labels=${labelsClear},sizes=${sizesOk}`}`);
       }
       add('E — foot 8 and foot 11 systems remain spaced, readable and tactile',systemsValid,systemDetails.join('; '));
       win.__prepareTabletFixture();
