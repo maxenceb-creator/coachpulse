@@ -663,6 +663,9 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes("finalized:true") || appSource.includes('finalized,'), 'La finalisation des Tests athlétiques doit être persistée dans les documents physicalTests.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('rowFinalized'), 'L’historique des Tests athlétiques doit filtrer les lignes finalisées depuis la donnée partagée.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('function historyRows(){return rows.filter(r=>!rowFinalized(r))}'), 'L’historique des Tests athlétiques doit rester global et ne pas dépendre de la joueuse/catégorie sélectionnée.');
+  const technicalSource = fs.readFileSync('pages/tests-techniques.html', 'utf8');
+  assert(technicalSource.includes('function technicalRowMatches'), 'Les Tests techniques doivent comparer toutes les clés possibles d’une saisie provisoire.');
+  assert(technicalSource.includes('const pending=pendingRowForId(testId);const row=pending?sanitizeRow(pending):commonHistoryRows().find(r=>technicalRowMatches(r,testId));'), 'La validation définitive Tests techniques doit relire la ligne provisoire avant de chercher dans l’historique rendu.');
   assert(rulesSource.includes("allow delete: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests'))"), 'Les suppressions physicalTests doivent rester contrôlées par droits module et teamId/playerId.');
 
   [
