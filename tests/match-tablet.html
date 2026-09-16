@@ -190,8 +190,24 @@
       win.renderPitch();await nextPaint();
       const rerendered=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===dragName),rerenderedRect=rect(rerendered),pitchAfter=rect(pitch);
       add('A — relative placement survives a responsive re-render',Math.abs((rerenderedRect.left+rerenderedRect.width/2-pitchAfter.left)/pitchAfter.width-beforeRenderRatio.x)<.01&&Math.abs((rerenderedRect.top+rerenderedRect.height/2-pitchAfter.top)/pitchAfter.height-beforeRenderRatio.y)<.01);
+      win.openPlayerPanel(dragName);win.showPositionMenu();await nextPaint();
+      const positionMenu=doc.getElementById('actionMenu'),positionButtons=[...positionMenu.querySelectorAll('.positionChoiceGroup button')],menuBox=rect(positionMenu);
+      add('A — compact canonical position selector stays tactile and inside viewport',visible(win,positionMenu)&&positionButtons.length===win.canonicalMatchPositions().length&&positionButtons.every(button=>rect(button).width>=43.5&&rect(button).height>=43.5)&&menuBox.left>=6&&menuBox.right<=viewport.width-6&&menuBox.top>=6&&menuBox.bottom<=viewport.height-6,`${positionButtons.length} positions`);
+      const beforeRole=win.__tabletFixtureStateSummary(),beforeRolePoint={...beforeRole.tacticalPositions.DG},beforeRolePlayerId=beforeRole.players[dragName].playerId,beforeRoleSeconds=beforeRole.players[dragName].seconds;
+      positionButtons.find(button=>button.textContent.trim()==='MOC')?.click();await nextPaint();await nextPaint();
+      let roleState=win.__tabletFixtureStateSummary();
+      add('A — changing DG to MOC preserves identity, clock, roster and tactical coordinates',roleState.lineup.MOC===dragName&&!roleState.lineup.DG&&roleState.players[dragName].playerId===beforeRolePlayerId&&roleState.players[dragName].seconds===beforeRoleSeconds&&roleState.bench.length===beforeRole.bench.length&&Math.abs(roleState.tacticalPositions.MOC.x-beforeRolePoint.x)<.0001&&Math.abs(roleState.tacticalPositions.MOC.y-beforeRolePoint.y)<.0001);
+      const roleSlot=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===dragName);
+      add('A — position badge updates immediately without removing the player',roleSlot?.dataset.pos==='MOC'&&roleSlot.querySelector('.pos')?.textContent==='MOC'&&pitch.querySelectorAll('.slot').length===11);
+      const roleRect=rect(roleSlot),roleStart={x:roleRect.left+roleRect.width/2,y:roleRect.top+roleRect.height/2},roleEnd={x:roleStart.x+32,y:roleStart.y-28};
+      roleSlot.dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true,pointerId:33,pointerType:'touch',clientX:roleStart.x,clientY:roleStart.y}));
+      roleSlot.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true,pointerId:33,pointerType:'touch',clientX:roleEnd.x,clientY:roleEnd.y}));
+      roleSlot.dispatchEvent(new win.PointerEvent('pointerup',{bubbles:true,pointerId:33,pointerType:'touch',clientX:roleEnd.x,clientY:roleEnd.y}));
+      await nextPaint();roleState=win.__tabletFixtureStateSummary();
+      add('A — dragging after a role change updates coordinates without changing the role',roleState.lineup.MOC===dragName&&!!roleState.tacticalPositions.MOC&&Math.abs(roleState.tacticalPositions.MOC.x-beforeRolePoint.x)>.001);
       win.resetTacticalPlacement();await nextPaint();
-      add('A — reset placement clears only tactical coordinates',Object.keys(win.__tabletFixtureStateSummary().tacticalPositions||{}).length===0&&pitch.querySelectorAll('.slot').length===11);
+      roleState=win.__tabletFixtureStateSummary();
+      add('A — reset placement clears only tactical coordinates and preserves the changed role',Object.keys(roleState.tacticalPositions||{}).length===0&&roleState.lineup.MOC===dragName&&pitch.querySelectorAll('.slot').length===11);
 
       add('A — player labels never expose raw br markup',[...doc.querySelectorAll('#pitch .slotName,#matchBench .slotName')].every(label=>!/<br|&lt;br/i.test(label.textContent||'')&&!/&lt;br/i.test(label.innerHTML)));
       add('A — player names stay on one contained line',[...doc.querySelectorAll('#pitch .slotName')].every(label=>{const style=win.getComputedStyle(label);return rect(label).width<=rect(label.closest('.slot')).width&&rect(label).height<=14&&style.whiteSpace==='nowrap'&&style.overflow==='hidden'&&style.textOverflow==='ellipsis'}));
@@ -320,6 +336,11 @@
         systemDetails.push(`${spec.system}:${valid?'ok':`count=${systemSlots.length},inside=${inside},slots=${clear},labels=${labelsClear},sizes=${sizesOk}`}`);
       }
       add('E — foot 8 and foot 11 systems remain spaced, readable and tactile',systemsValid,systemDetails.join('; '));
+      win.__setTabletSystem(8,'3-2-2');await nextPaint();
+      const foot8Player=names[4],foot8Before=win.__tabletFixtureStateSummary(),foot8OldPos=Object.keys(foot8Before.lineup).find(pos=>foot8Before.lineup[pos]===foot8Player);
+      win.saveTacticalPlacement(foot8OldPos,.54,.24);win.changePlayerPosition(foot8Player,'MOC');await nextPaint();await nextPaint();
+      const foot8After=win.__tabletFixtureStateSummary();
+      add('E — foot 8 role changes preserve the eight-player lineup and tactical point',foot8After.lineup.MOC===foot8Player&&Object.values(foot8After.lineup).filter(Boolean).length===8&&Math.abs(foot8After.tacticalPositions.MOC.x-.54)<.001&&Math.abs(foot8After.tacticalPositions.MOC.y-.24)<.001&&pitch.querySelectorAll('.slot').length===8);
       win.__prepareTabletFixture();
       await nextPaint();
       const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{upperBand:{height:Math.round(upperBandRect.height)},workspace:{top:Math.round(workspaceRect.top),height:Math.round(workspaceRect.height)},availableHeight:Math.round(fieldAvailableHeight),availableWidth:Math.round(fieldAvailableWidth),pitch:{top:Math.round(initialPitchRect.top),bottom:Math.round(initialPitchRect.bottom),width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},bench:{top:Math.round(benchRect.top),bottom:Math.round(benchRect.bottom),height:Math.round(benchRect.height)},analysis:{top:Math.round(analysisRect.top),bottom:Math.round(analysisRect.bottom),height:Math.round(analysisRect.height),overlapsBench:overlaps(benchRect,rect(analysis.querySelector('.selectedBanner')))},page:{clientWidth:doc.documentElement.clientWidth,scrollWidth:doc.documentElement.scrollWidth,globalHorizontalScroll:doc.documentElement.scrollWidth>doc.documentElement.clientWidth+1},contextMenu:{width:Math.round(opponentRect.width),height:Math.round(opponentRect.height),columns:opponentColumns.size},starters:pitch?.querySelectorAll('.slot').length,benchPlayers:bench?.querySelectorAll('.slot').length}};

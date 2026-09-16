@@ -172,7 +172,7 @@ body.embedded-page .tt-nav.tabs button.active .nav-ico{color:initial!important;t
 <div class="matchName" id="liveMatchName"></div><span class="phaseBadge" id="phaseBadge"></span>
 <div class="systemQuickButtons" id="systemQuickButtons"></div>
 </div>
-<div class="liveLayout"><div class="card pitchCard"><div class="fullPitchHint">V2.1 : terrain adaptatif tablette. Touche une joueuse = actions. Appui long / glisser = changement. Bouton adversaire toujours visible.</div><div class="matchSelectionRow"><div class="matchDirection" aria-label="Sens du terrain"><strong>← BUT ASSE · ATTAQUE →</strong><span>Défense à gauche · BUT ADVERSE à droite</span></div><button class="placementResetBtn ghost" id="placementResetBtn" onclick="resetTacticalPlacement()" title="Revenir au placement initial du système">↺ Placement</button><button class="bad opponentActionTrigger" id="opponentActionTrigger" onclick="showActionMenu('adv')" aria-controls="playerActionPanel">🔴 Adversaire</button></div><div class="playerActionPanel" id="playerActionPanel"><div class="playerPanelTop"><div><b id="panelPlayerName">Sélectionne une joueuse</b><span id="panelPlayerInfo">Puis touche une action · glisse le bandeau pour tout voir</span></div><div class="matchActionTools"><button class="ghost" onclick="closePlayerPanel()" aria-label="Fermer les actions adverses ou la passe décisive">✕</button></div></div><div class="zoneBar" id="zoneBar"><span id="zoneTitle">Zone</span><button class="bad" onclick="closeZones()">Fermer</button></div><div class="playerPanelActions v310Actions" role="group" aria-label="Actions ASSE — défilement horizontal" tabindex="0">
+<div class="liveLayout"><div class="card pitchCard"><div class="fullPitchHint">V2.1 : terrain adaptatif tablette. Touche une joueuse = actions. Appui long / glisser = changement. Bouton adversaire toujours visible.</div><div class="matchSelectionRow"><div class="matchDirection" aria-label="Sens du terrain"><strong>← BUT ASSE · ATTAQUE →</strong><span>Défense à gauche · BUT ADVERSE à droite</span></div><button class="placementResetBtn ghost" id="placementResetBtn" onclick="resetTacticalPlacement()" title="Revenir au placement initial du système">↺ Placement</button><button class="bad opponentActionTrigger" id="opponentActionTrigger" onclick="showActionMenu('adv')" aria-controls="playerActionPanel">🔴 Adversaire</button></div><div class="playerActionPanel" id="playerActionPanel"><div class="playerPanelTop"><div><b id="panelPlayerName">Sélectionne une joueuse</b><span id="panelPlayerInfo">Puis touche une action · glisse le bandeau pour tout voir</span></div><div class="matchActionTools"><button class="positionMenuTrigger ghost" id="positionMenuTrigger" onclick="showPositionMenu()">⇄ Poste</button><button class="ghost" onclick="closePlayerPanel()" aria-label="Fermer les actions adverses ou la passe décisive">✕</button></div></div><div class="zoneBar" id="zoneBar"><span id="zoneTitle">Zone</span><button class="bad" onclick="closeZones()">Fermer</button></div><div class="playerPanelActions v310Actions" role="group" aria-label="Actions ASSE — défilement horizontal" tabindex="0"><span class="actionSectionLabel">Actions match</span>
 <button class="good" onclick="goalFlow()"><span aria-hidden="true">⚽</span><span>But</span></button>
 <button class="blue" onclick="stat('passe')"><span aria-hidden="true">🎯</span><span>Passe D.</span></button>
 <button class="blue" onclick="actionZone('tirCadre')"><span aria-hidden="true">🥅</span><span>Tir cadré</span></button>
@@ -300,7 +300,7 @@ function updateSetup(){syncStateTeam(document.getElementById('team').value||'');
 function updateFormat(){state.format=document.getElementById('format').value;state.system=SYSTEMS[state.format][0];state.tacticalPositions={};buildSystem();autoLineup(false);save();renderAll()}
 function updateDuration(){state.duration=+document.getElementById('duration').value;if(!state.elapsed)state.elapsed=0;save();renderAll()}
 function updateSystem(){state.system=document.getElementById('system').value;state.tacticalPositions={};autoLineup(false);save();renderAll()}
-function quickSystemChange(newSystem){if(!newSystem||newSystem===state.system)return;const oldSystem=state.system;const oldPos=(POSITIONS[oldSystem]||[]).map(p=>p[0]);const currentOnField=oldPos.map(pos=>state.lineup[pos]).filter(Boolean);const currentBench=(state.bench||[]).filter(Boolean);const ordered=[...currentOnField,...currentBench,...(state.called||[])].filter((n,i,a)=>n&&a.indexOf(n)===i);state.system=newSystem;state.tacticalPositions={};const newPos=POSITIONS[state.system]||[];state.lineup={};newPos.forEach((p,i)=>{state.lineup[p[0]]=ordered[i]||''});state.bench=ordered.slice(newPos.length);state.selected=null;state.log=state.log||[];state.log.push({t:fmt(state.elapsed||0),player:'Match',action:'Changement système '+oldSystem+' → '+newSystem,ts:Date.now(),system:true});buildSystem();save();renderAll()}
+function quickSystemChange(newSystem){if(!newSystem||newSystem===state.system)return;const oldSystem=state.system;const oldPos=(POSITIONS[oldSystem]||[]).map(p=>p[0]);const currentOnField=Object.values(state.lineup||{}).filter(Boolean);const currentBench=(state.bench||[]).filter(Boolean);const ordered=[...currentOnField,...currentBench,...(state.called||[])].filter((n,i,a)=>n&&a.indexOf(n)===i);state.system=newSystem;state.tacticalPositions={};const newPos=POSITIONS[state.system]||[];state.lineup={};newPos.forEach((p,i)=>{state.lineup[p[0]]=ordered[i]||''});state.bench=ordered.slice(newPos.length);state.selected=null;state.log=state.log||[];state.log.push({t:fmt(state.elapsed||0),player:'Match',action:'Changement système '+oldSystem+' → '+newSystem,ts:Date.now(),system:true});buildSystem();save();renderAll()}
 function toggleCalled(name){const i=state.called.indexOf(name);if(i>=0)state.called.splice(i,1);else state.called.push(name);autoLineup(false);save();renderAll()}
 function selectAllPlayers(){state.called=[...ROSTER];autoLineup(false);save();renderAll()}
 function clearCalled(){state.called=[];state.lineup={};state.bench=[];save();renderAll()}
@@ -309,6 +309,12 @@ function renderAll(){ensure();renderPrep();renderLive();renderPitch();renderBila
 function renderPrep(){buildTeamSelect();setVal('team',state.teamId||'');setVal('opponent',state.opponent);setVal('format',state.format);setVal('system',state.system);const list=filteredPlayers();const count=document.getElementById('playerCount');if(count)count.textContent=`${list.length} affichée${list.length>1?'s':''} · ${state.called.length} convoquée${state.called.length>1?'s':''}`;document.getElementById('playerPicker').innerHTML=list.map(p=>`<div class="playerChip ${state.called.includes(p.name)?'active':''}" onclick="toggleCalled('${esc(p.name)}')">${avatarHTML(p.name)}<div class="pInfo"><span class="pName">${p.name}</span><span class="pMeta">${metaLine(p.name)||'Infos non renseignées'}</span></div><b>${state.called.includes(p.name)?'✓':'+'}</b></div>`).join('');document.getElementById('prepSummary').innerHTML=[['Équipe',state.team||'Non sélectionnée'],['teamId',state.teamId||'—'],['Adversaire',state.opponent],['Format','Foot à '+state.format],['Système',state.system],['Convoquées',state.called.length]].map(x=>`<div class="summaryItem"><small>${x[0]}</small><b>${x[1]}</b></div>`).join('')}
 function renderLive(){const teamName=state.team||'ASSE';document.getElementById('liveMatchName').textContent=`${teamName} vs ${state.opponent} · Foot à ${state.format} · ${state.system} · chrono live`;document.getElementById('teamLabel').textContent=teamName;const timer=document.getElementById('timer');timer.textContent=fmt(state.elapsed||0);timer.className='timer '+(state.running?'running':state.matchEnded?'ended':state.phase==='mi-temps'?'halftime':'');document.getElementById('scoreUs').value=state.scoreUs;document.getElementById('scoreThem').value=state.scoreThem;const phaseText=state.matchEnded?'Match terminé':state.phase==='mi-temps'?'Mi-temps':state.running?(state.phase==='2e période'?'2e période en cours':'1ère période en cours'):'Match non démarré';const badge=document.getElementById('phaseBadge');if(badge)badge.textContent=phaseText;let sel=state.selected;document.getElementById('selectedName').textContent=sel||'Aucune joueuse';document.getElementById('selectedInfo').textContent=sel?`${findPos(sel)||'Banc'} · ${fmt(state.players[sel]?.seconds||0)}`:'Sélectionne une joueuse sur le terrain · changement uniquement par glisser-déposer';renderDomination();const mini=document.getElementById('liveMiniKpis');if(mini)mini.innerHTML=[['Score',`${state.scoreUs}-${state.scoreThem}`],['Tirs',sum('tirCadre')+sum('tirNonCadre')],['Progress.',sum('progression')],['Récup.',sum('recup')]].map(x=>`<div class="liveMiniKpi"><b>${x[1]}</b>${x[0]}</div>`).join('');document.getElementById('liveLog').innerHTML=logHTML(state.log.slice().reverse().slice(0,14));buildSystem();const qb=document.getElementById('systemQuickButtons');if(qb)qb.innerHTML='';renderPlayerPanel()}
 function clampTactical(value,min,max){return Math.min(max,Math.max(min,Number(value)||0))}
+function canonicalMatchPositions(){return [...new Set(Object.values(POSITIONS).flat().map(position=>position[0]))]}
+function defaultTacticalPlacement(pos){
+ const current=(POSITIONS[state.system]||[]).find(position=>position[0]===pos);
+ const canonical=current||Object.values(POSITIONS).flat().find(position=>position[0]===pos);
+ return canonical?{x:100-canonical[2],y:canonical[1]}:{x:50,y:50};
+}
 function tacticalPlacement(pos,defaultX,defaultY){
  const saved=state.tacticalPositions?.[pos];
  return saved&&Number.isFinite(saved.x)&&Number.isFinite(saved.y)?{x:clampTactical(saved.x,0,1)*100,y:clampTactical(saved.y,0,1)*100}:{x:defaultX,y:defaultY};
@@ -319,6 +325,32 @@ function saveTacticalPlacement(pos,x,y){
  save();
 }
 function resetTacticalPlacement(){state.tacticalPositions={};save();renderPitch();}
+function lineupEntriesForPitch(){
+ const systemOrder=(POSITIONS[state.system]||[]).map(position=>position[0]);
+ return Object.entries(state.lineup||{}).filter(([,name])=>name).sort(([a],[b])=>{
+  const ai=systemOrder.indexOf(a),bi=systemOrder.indexOf(b);
+  return (ai<0?999:ai)-(bi<0?999:bi);
+ });
+}
+function currentTacticalPlacement(pos){const fallback=defaultTacticalPlacement(pos);return tacticalPlacement(pos,fallback.x,fallback.y)}
+function changePlayerPosition(name,newPos){
+ if(!name||!newPos||!canonicalMatchPositions().includes(newPos))return false;
+ const oldPos=findPos(name);if(!oldPos||oldPos==='Banc'||oldPos===newPos)return false;
+ const targetName=state.lineup[newPos]||'';
+ const oldPoint=currentTacticalPlacement(oldPos),targetPoint=targetName?currentTacticalPlacement(newPos):null;
+ if(targetName){state.lineup[oldPos]=targetName;state.tacticalPositions[oldPos]={x:targetPoint.x/100,y:targetPoint.y/100}}
+ else {delete state.lineup[oldPos];delete state.tacticalPositions[oldPos]}
+ state.lineup[newPos]=name;state.tacticalPositions[newPos]={x:oldPoint.x/100,y:oldPoint.y/100};state.selected=name;
+ save();renderAll();setTimeout(()=>openPlayerPanel(name),0);return true;
+}
+function positionGroup(pos){if(pos==='GB')return'GB';if(pos.startsWith('D'))return'DEF';if(pos.startsWith('M'))return'MIL';return'ATT'}
+function showPositionMenu(){
+ const name=state.selected;if(!name||findPos(name)==='Banc')return;
+ const box=document.getElementById('actionMenu'),panel=document.getElementById('playerActionPanel');if(!box||!panel)return;
+ const current=findPos(name),groups=['GB','DEF','MIL','ATT'];
+ box.innerHTML=`<div class="actionMenuTitle">Gestion joueuse · changer le poste</div><div class="positionChoiceGroups">${groups.map(group=>{const positions=canonicalMatchPositions().filter(pos=>positionGroup(pos)===group);return `<div class="positionChoiceGroup"><b>${group}</b><div>${positions.map(pos=>`<button class="ghost${pos===current?' current':''}" onclick="changePlayerPosition('${esc(name)}','${pos}');hideActionMenu()" ${pos===current?'disabled':''}>${pos}${state.lineup[pos]&&state.lineup[pos]!==name?' ⇄':''}</button>`).join('')}</div></div>`}).join('')}</div>`;
+ box.classList.add('show','positionMenu');positionContextActionMenu();
+}
 function renderPitch(){const pitch=document.getElementById('pitch');if(!pitch)return;document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());const pos=POSITIONS[state.system]||[];pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,p[1],p[2],false)});state.bench.forEach((name,i)=>addSlot('Banc',name,91,16+i*10,true));const panel=document.getElementById('playerActionPanel');if(panel?.classList.contains('show'))requestAnimationFrame(()=>positionContextActionMenu())}
 function addSlot(pos,name,x,y,bench){
  const container=document.getElementById(bench?'matchBench':'pitch')||document.getElementById('pitch');
@@ -456,7 +488,7 @@ function showActionMenu(type){const box=document.getElementById('actionMenu');if
 function goalFlow(){if(!state.selected){CoachStatsNotify.warn('Sélectionne la buteuse avant de valider le but.');return}startZonePick({type:'player',key:'but',player:state.selected,after:'assist'})}
 function showAssistMenu(scorer){const box=document.getElementById('actionMenu');if(!box)return;const onField=Object.values(state.lineup||{}).filter(n=>n&&n!==scorer);const others=(onField.length?onField:state.called.filter(n=>n!==scorer));box.innerHTML=`<div class="actionMenuTitle">⚽ But validé pour ${short(scorer)}</div><div class="assistHint">Passe décisive ?</div><div class="subActionGrid"><button class="ghost" onclick="hideActionMenu()">Aucune passe D</button>${others.map(n=>`<button class="blue" onclick="assistForGoal('${esc(n)}')">🎯 ${short(n)}</button>`).join('')}</div>`;box.classList.add('show');positionContextActionMenu()}
 function assistForGoal(name){if(!name||!state.players[name])return;state.players[name].passe++;pushLog(name,'Passe D');save();renderAll();showUndo();hideActionMenu()}
-function hideActionMenu(){document.getElementById('actionMenu')?.classList.remove('show');const panel=document.getElementById('playerActionPanel');panel?.classList.remove('advOnly');if(panel&&!state.selected&&!state.zonePending)panel.classList.remove('show');else if(panel?.classList.contains('show'))positionContextActionMenu()}
+function hideActionMenu(){document.getElementById('actionMenu')?.classList.remove('show','positionMenu');const panel=document.getElementById('playerActionPanel');panel?.classList.remove('advOnly');if(panel&&!state.selected&&!state.zonePending)panel.classList.remove('show');else if(panel?.classList.contains('show'))positionContextActionMenu()}
 document.addEventListener?.('pointerdown',event=>{const panel=document.getElementById('playerActionPanel');if(!panel?.classList.contains('show')||document.body.classList.contains('zone-picking'))return;if(event.target.closest?.('#playerActionPanel,#opponentActionTrigger,#pitch .slot,#matchBench .slot'))return;closePlayerPanel()},{passive:true});
 window.addEventListener('resize',()=>{const panel=document.getElementById('playerActionPanel');if(panel?.classList.contains('show'))requestAnimationFrame(()=>positionContextActionMenu())},{passive:true});
 function stat(k){if(!state.selected){CoachStatsNotify.warn('Sélectionne une joueuse avant de prendre la stat.');return}recordPlayerAction(state.selected,k,null)}
@@ -880,8 +912,7 @@ renderPitch=function(){
   const pitch=document.getElementById('pitch');
   if(!pitch)return;
   document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());
-  const pos=POSITIONS[state.system]||[];
-  pos.forEach(p=>{const name=state.lineup[p[0]]||'';const point=tacticalPlacement(p[0],100-p[2],p[1]);addSlot(p[0],name,point.x,point.y,false)});
+  lineupEntriesForPitch().forEach(([pos,name])=>{const point=currentTacticalPlacement(pos);addSlot(pos,name,point.x,point.y,false)});
   const bench=state.bench||[];
   const n=Math.max(bench.length,1);
   bench.forEach((name,i)=>{
@@ -921,8 +952,7 @@ renderPitch=function(){
   const pitch=document.getElementById('pitch');
   if(!pitch)return;
   document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());
-  const pos=POSITIONS[state.system]||[];
-  pos.forEach(p=>{const name=state.lineup[p[0]]||'';const point=tacticalPlacement(p[0],100-p[2],p[1]);addSlot(p[0],name,point.x,point.y,false)});
+  lineupEntriesForPitch().forEach(([pos,name])=>{const point=currentTacticalPlacement(pos);addSlot(pos,name,point.x,point.y,false)});
   const bench=state.bench||[];
   const n=Math.max(bench.length,1);
   bench.forEach((name,i)=>{

@@ -140,6 +140,49 @@ async function main() {
     assert.deepEqual(h.state().tacticalPositions, {});
   });
 
+  await test('on-field role changes preserve identity, stats, time, placement and substitutions', () => {
+    const h = matchHarness();
+    h.run(`
+      state.lineup={MC:ROSTER[0],BU:ROSTER[1]};state.bench=[ROSTER[2]];
+      state.players[ROSTER[0]].seconds=127;state.players[ROSTER[0]].recup=2;
+      state.tacticalPositions={MC:{x:.42,y:.31}};state.log=[];
+    `);
+    const before = h.state(), playerId = before.players['TEST ALICE'].playerId;
+    assert.equal(h.run("changePlayerPosition('TEST ALICE','MOC')"), true);
+    let state = h.state();
+    assert.equal(state.lineup.MOC, 'TEST ALICE');
+    assert.equal(state.lineup.MC, undefined);
+    assert.equal(state.players['TEST ALICE'].playerId, playerId);
+    assert.equal(state.players['TEST ALICE'].seconds, 127);
+    assert.equal(state.players['TEST ALICE'].recup, 2);
+    assert.deepEqual(state.tacticalPositions.MOC, {x:.42,y:.31});
+    assert.deepEqual(state.bench, ['TEST CLEO']);
+    assert.equal(state.log.length, 0);
+    h.run("changePlayerPosition('TEST BEA','MOC');");
+    state = h.state();
+    assert.equal(state.lineup.MOC, 'TEST BEA');
+    assert.equal(state.lineup.BU, 'TEST ALICE');
+    assert.deepEqual(state.bench, ['TEST CLEO']);
+    h.run("changePlayerPosition('TEST ALICE','MOC');");
+    state = h.state();
+    assert.equal(state.lineup.MOC, 'TEST ALICE');
+    assert.equal(state.lineup.BU, 'TEST BEA');
+    assert.equal(state.players['TEST ALICE'].seconds, 127);
+    h.run("state.selected='TEST ALICE';stat('passe');");
+    state = h.state();
+    assert.equal(state.players['TEST ALICE'].passe, 1);
+    assert.equal(state.log.at(-1).player, 'TEST ALICE');
+    h.run("movePlayer('TEST CLEO','Banc','MOC','TEST ALICE');");
+    state = h.state();
+    assert.equal(state.lineup.MOC, 'TEST CLEO');
+    assert.deepEqual(state.bench, ['TEST ALICE']);
+    h.run("movePlayer('TEST ALICE','Banc','MOC','TEST CLEO');changePlayerPosition('TEST ALICE','AIG');resetTacticalPlacement();");
+    state = h.state();
+    assert.equal(state.lineup.AIG, 'TEST ALICE');
+    assert.equal(state.players['TEST ALICE'].seconds, 127);
+    assert.deepEqual(state.tacticalPositions, {});
+  });
+
   await test('timer, match phases and starter/bench playing time', () => {
     const h = matchHarness();
     h.run('startMatch();startMatch();tick();tick();');
