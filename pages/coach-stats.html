@@ -172,7 +172,7 @@ body.embedded-page .tt-nav.tabs button.active .nav-ico{color:initial!important;t
 <div class="matchName" id="liveMatchName"></div><span class="phaseBadge" id="phaseBadge"></span>
 <div class="systemQuickButtons" id="systemQuickButtons"></div>
 </div>
-<div class="liveLayout"><div class="card pitchCard"><div class="fullPitchHint">V2.1 : terrain adaptatif tablette. Touche une joueuse = actions. Appui long / glisser = changement. Bouton adversaire toujours visible.</div><div class="matchSelectionRow"><div class="matchDirection" aria-label="Sens du terrain"><strong>← BUT ASSE · ATTAQUE →</strong><span>Défense à gauche · BUT ADVERSE à droite</span></div><button class="bad opponentActionTrigger" id="opponentActionTrigger" onclick="showActionMenu('adv')" aria-controls="playerActionPanel">🔴 Adversaire</button></div><div class="playerActionPanel" id="playerActionPanel"><div class="playerPanelTop"><div><b id="panelPlayerName">Sélectionne une joueuse</b><span id="panelPlayerInfo">Puis touche une action · glisse le bandeau pour tout voir</span></div><div class="matchActionTools"><button class="ghost" onclick="closePlayerPanel()" aria-label="Fermer les actions adverses ou la passe décisive">✕</button></div></div><div class="zoneBar" id="zoneBar"><span id="zoneTitle">Zone</span><button class="bad" onclick="closeZones()">Fermer</button></div><div class="playerPanelActions v310Actions" role="group" aria-label="Actions ASSE — défilement horizontal" tabindex="0">
+<div class="liveLayout"><div class="card pitchCard"><div class="fullPitchHint">V2.1 : terrain adaptatif tablette. Touche une joueuse = actions. Appui long / glisser = changement. Bouton adversaire toujours visible.</div><div class="matchSelectionRow"><div class="matchDirection" aria-label="Sens du terrain"><strong>← BUT ASSE · ATTAQUE →</strong><span>Défense à gauche · BUT ADVERSE à droite</span></div><button class="placementResetBtn ghost" id="placementResetBtn" onclick="resetTacticalPlacement()" title="Revenir au placement initial du système">↺ Placement</button><button class="bad opponentActionTrigger" id="opponentActionTrigger" onclick="showActionMenu('adv')" aria-controls="playerActionPanel">🔴 Adversaire</button></div><div class="playerActionPanel" id="playerActionPanel"><div class="playerPanelTop"><div><b id="panelPlayerName">Sélectionne une joueuse</b><span id="panelPlayerInfo">Puis touche une action · glisse le bandeau pour tout voir</span></div><div class="matchActionTools"><button class="ghost" onclick="closePlayerPanel()" aria-label="Fermer les actions adverses ou la passe décisive">✕</button></div></div><div class="zoneBar" id="zoneBar"><span id="zoneTitle">Zone</span><button class="bad" onclick="closeZones()">Fermer</button></div><div class="playerPanelActions v310Actions" role="group" aria-label="Actions ASSE — défilement horizontal" tabindex="0">
 <button class="good" onclick="goalFlow()"><span aria-hidden="true">⚽</span><span>But</span></button>
 <button class="blue" onclick="stat('passe')"><span aria-hidden="true">🎯</span><span>Passe D.</span></button>
 <button class="blue" onclick="actionZone('tirCadre')"><span aria-hidden="true">🥅</span><span>Tir cadré</span></button>
@@ -200,7 +200,7 @@ function syncStateTeam(team){const t=officialTeamForValue(team||state.teamId||st
 function buildTeamSelect(){const sel=document.getElementById('team');if(!sel)return;const teams=officialTeams();const current=state.teamId||officialTeamForValue(state.team)?.teamId||'';sel.innerHTML='<option value="">Choisir une équipe...</option>'+teams.map(t=>`<option value="${t.teamId}">${t.name}</option>`).join('');sel.value=current}
 function blank(){return{seconds:0,positionSeconds:{},but:0,passe:0,tirCadre:0,tirNonCadre:0,centre:0,progression:0,entree20:0,recup:0,zones:{but:{},passe:{},tirCadre:{},tirNonCadre:{},centre:{},progression:{},entree20:{},recup:{}}}}
 function load(){try{const saved=window.CoachStatsStorage.get('coachStatsV170','');if(saved)state=JSON.parse(saved)}catch(e){}ensure();buildSystem();buildZones();renderAll();setInterval(tick,1000);setTimeout(()=>reconcileMatchesWithCloud(),50)}
-function ensure(){syncStateTeam();state.matchId=state.matchId||Date.now();if(!SYSTEMS[state.format])state.format='8';state.called=state.called||ROSTER.slice(0,12);state.players=state.players||{};ROSTER.forEach(n=>{if(!state.players[n])state.players[n]=blank();['seconds','but','passe','tirCadre','tirNonCadre','centre','progression','entree20','recup'].forEach(k=>{if(typeof state.players[n][k]!=='number')state.players[n][k]=0});state.players[n].zones=state.players[n].zones||{recup:{},entree20:{}};state.players[n].positionSeconds=state.players[n].positionSeconds||{};hydrateMatchPlayer(n)});if(!state.system)state.system=SYSTEMS[state.format][0];if(!state.lineup||!Object.keys(state.lineup).length)autoLineup(false);state.bench=state.bench||[];state.opp=state.opp||{};['tirCadreAdv','tirNonCadreAdv','centreAdv','progressionAdv','entree20Adv','butAdv'].forEach(k=>{if(typeof state.opp[k]!=='number')state.opp[k]=0});state.log=state.log||[];state.savedMatches=state.savedMatches||[];state.savedMatches.forEach(ensureSavedMatchIdentity);if(typeof state.elapsed!=='number')state.elapsed=0;if(!state.phase)state.phase='not_started';if(typeof state.matchEnded!=='boolean')state.matchEnded=false}
+function ensure(){syncStateTeam();state.matchId=state.matchId||Date.now();if(!SYSTEMS[state.format])state.format='8';state.tacticalPositions=state.tacticalPositions&&typeof state.tacticalPositions==='object'?state.tacticalPositions:{};state.called=state.called||ROSTER.slice(0,12);state.players=state.players||{};ROSTER.forEach(n=>{if(!state.players[n])state.players[n]=blank();['seconds','but','passe','tirCadre','tirNonCadre','centre','progression','entree20','recup'].forEach(k=>{if(typeof state.players[n][k]!=='number')state.players[n][k]=0});state.players[n].zones=state.players[n].zones||{recup:{},entree20:{}};state.players[n].positionSeconds=state.players[n].positionSeconds||{};hydrateMatchPlayer(n)});if(!state.system)state.system=SYSTEMS[state.format][0];if(!state.lineup||!Object.keys(state.lineup).length)autoLineup(false);state.bench=state.bench||[];state.opp=state.opp||{};['tirCadreAdv','tirNonCadreAdv','centreAdv','progressionAdv','entree20Adv','butAdv'].forEach(k=>{if(typeof state.opp[k]!=='number')state.opp[k]=0});state.log=state.log||[];state.savedMatches=state.savedMatches||[];state.savedMatches.forEach(ensureSavedMatchIdentity);if(typeof state.elapsed!=='number')state.elapsed=0;if(!state.phase)state.phase='not_started';if(typeof state.matchEnded!=='boolean')state.matchEnded=false}
 function save(){window.CoachStatsStorage.setJson('coachStatsV170',state,{recover:true});try{window.parent?.postMessage({type:'coachpulse-local-change',key:'coachStatsV170'},'*')}catch(_){}}
 
 function stableMatchEventId(matchId,event,index){return String(event?.eventId||['event',matchId,event?.ts||event?.t||index,event?.playerId||event?.player||'',event?.key||event?.action||'',index].join('-').toLowerCase().replace(/[^a-z0-9_-]+/g,'-')).slice(0,120)}
@@ -297,10 +297,10 @@ function selectVisiblePlayers(){const visible=filteredPlayers().map(p=>p.name);s
 function buildSystem(){const options=(SYSTEMS[state.format]||[]).map(s=>`<option value="${s}">${s}</option>`).join('');const sel=document.getElementById('system');if(sel){sel.innerHTML=options;sel.value=state.system}const liveSel=document.getElementById('liveSystemSelect');if(liveSel){liveSel.innerHTML=options;liveSel.value=state.system}}
 function showTab(id,btn){document.querySelectorAll('.tab').forEach(t=>t.classList.add('hide'));document.getElementById(id).classList.remove('hide');document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderAll()}
 function updateSetup(){syncStateTeam(document.getElementById('team').value||'');state.opponent=document.getElementById('opponent').value||'Adversaire';save();renderAll()}
-function updateFormat(){state.format=document.getElementById('format').value;state.system=SYSTEMS[state.format][0];buildSystem();autoLineup(false);save();renderAll()}
+function updateFormat(){state.format=document.getElementById('format').value;state.system=SYSTEMS[state.format][0];state.tacticalPositions={};buildSystem();autoLineup(false);save();renderAll()}
 function updateDuration(){state.duration=+document.getElementById('duration').value;if(!state.elapsed)state.elapsed=0;save();renderAll()}
-function updateSystem(){state.system=document.getElementById('system').value;autoLineup(false);save();renderAll()}
-function quickSystemChange(newSystem){if(!newSystem||newSystem===state.system)return;const oldSystem=state.system;const oldPos=(POSITIONS[oldSystem]||[]).map(p=>p[0]);const currentOnField=oldPos.map(pos=>state.lineup[pos]).filter(Boolean);const currentBench=(state.bench||[]).filter(Boolean);const ordered=[...currentOnField,...currentBench,...(state.called||[])].filter((n,i,a)=>n&&a.indexOf(n)===i);state.system=newSystem;const newPos=POSITIONS[state.system]||[];state.lineup={};newPos.forEach((p,i)=>{state.lineup[p[0]]=ordered[i]||''});state.bench=ordered.slice(newPos.length);state.selected=null;state.log=state.log||[];state.log.push({t:fmt(state.elapsed||0),player:'Match',action:'Changement système '+oldSystem+' → '+newSystem,ts:Date.now(),system:true});buildSystem();save();renderAll()}
+function updateSystem(){state.system=document.getElementById('system').value;state.tacticalPositions={};autoLineup(false);save();renderAll()}
+function quickSystemChange(newSystem){if(!newSystem||newSystem===state.system)return;const oldSystem=state.system;const oldPos=(POSITIONS[oldSystem]||[]).map(p=>p[0]);const currentOnField=oldPos.map(pos=>state.lineup[pos]).filter(Boolean);const currentBench=(state.bench||[]).filter(Boolean);const ordered=[...currentOnField,...currentBench,...(state.called||[])].filter((n,i,a)=>n&&a.indexOf(n)===i);state.system=newSystem;state.tacticalPositions={};const newPos=POSITIONS[state.system]||[];state.lineup={};newPos.forEach((p,i)=>{state.lineup[p[0]]=ordered[i]||''});state.bench=ordered.slice(newPos.length);state.selected=null;state.log=state.log||[];state.log.push({t:fmt(state.elapsed||0),player:'Match',action:'Changement système '+oldSystem+' → '+newSystem,ts:Date.now(),system:true});buildSystem();save();renderAll()}
 function toggleCalled(name){const i=state.called.indexOf(name);if(i>=0)state.called.splice(i,1);else state.called.push(name);autoLineup(false);save();renderAll()}
 function selectAllPlayers(){state.called=[...ROSTER];autoLineup(false);save();renderAll()}
 function clearCalled(){state.called=[];state.lineup={};state.bench=[];save();renderAll()}
@@ -308,101 +308,68 @@ function autoLineup(doRender=true){const pos=POSITIONS[state.system]||[];state.l
 function renderAll(){ensure();renderPrep();renderLive();renderPitch();renderBilan();renderIndividual();renderTournamentPanel();renderHeatmaps&&renderHeatmaps()}
 function renderPrep(){buildTeamSelect();setVal('team',state.teamId||'');setVal('opponent',state.opponent);setVal('format',state.format);setVal('system',state.system);const list=filteredPlayers();const count=document.getElementById('playerCount');if(count)count.textContent=`${list.length} affichée${list.length>1?'s':''} · ${state.called.length} convoquée${state.called.length>1?'s':''}`;document.getElementById('playerPicker').innerHTML=list.map(p=>`<div class="playerChip ${state.called.includes(p.name)?'active':''}" onclick="toggleCalled('${esc(p.name)}')">${avatarHTML(p.name)}<div class="pInfo"><span class="pName">${p.name}</span><span class="pMeta">${metaLine(p.name)||'Infos non renseignées'}</span></div><b>${state.called.includes(p.name)?'✓':'+'}</b></div>`).join('');document.getElementById('prepSummary').innerHTML=[['Équipe',state.team||'Non sélectionnée'],['teamId',state.teamId||'—'],['Adversaire',state.opponent],['Format','Foot à '+state.format],['Système',state.system],['Convoquées',state.called.length]].map(x=>`<div class="summaryItem"><small>${x[0]}</small><b>${x[1]}</b></div>`).join('')}
 function renderLive(){const teamName=state.team||'ASSE';document.getElementById('liveMatchName').textContent=`${teamName} vs ${state.opponent} · Foot à ${state.format} · ${state.system} · chrono live`;document.getElementById('teamLabel').textContent=teamName;const timer=document.getElementById('timer');timer.textContent=fmt(state.elapsed||0);timer.className='timer '+(state.running?'running':state.matchEnded?'ended':state.phase==='mi-temps'?'halftime':'');document.getElementById('scoreUs').value=state.scoreUs;document.getElementById('scoreThem').value=state.scoreThem;const phaseText=state.matchEnded?'Match terminé':state.phase==='mi-temps'?'Mi-temps':state.running?(state.phase==='2e période'?'2e période en cours':'1ère période en cours'):'Match non démarré';const badge=document.getElementById('phaseBadge');if(badge)badge.textContent=phaseText;let sel=state.selected;document.getElementById('selectedName').textContent=sel||'Aucune joueuse';document.getElementById('selectedInfo').textContent=sel?`${findPos(sel)||'Banc'} · ${fmt(state.players[sel]?.seconds||0)}`:'Sélectionne une joueuse sur le terrain · changement uniquement par glisser-déposer';renderDomination();const mini=document.getElementById('liveMiniKpis');if(mini)mini.innerHTML=[['Score',`${state.scoreUs}-${state.scoreThem}`],['Tirs',sum('tirCadre')+sum('tirNonCadre')],['Progress.',sum('progression')],['Récup.',sum('recup')]].map(x=>`<div class="liveMiniKpi"><b>${x[1]}</b>${x[0]}</div>`).join('');document.getElementById('liveLog').innerHTML=logHTML(state.log.slice().reverse().slice(0,14));buildSystem();const qb=document.getElementById('systemQuickButtons');if(qb)qb.innerHTML='';renderPlayerPanel()}
+function clampTactical(value,min,max){return Math.min(max,Math.max(min,Number(value)||0))}
+function tacticalPlacement(pos,defaultX,defaultY){
+ const saved=state.tacticalPositions?.[pos];
+ return saved&&Number.isFinite(saved.x)&&Number.isFinite(saved.y)?{x:clampTactical(saved.x,0,1)*100,y:clampTactical(saved.y,0,1)*100}:{x:defaultX,y:defaultY};
+}
+function saveTacticalPlacement(pos,x,y){
+ state.tacticalPositions=state.tacticalPositions||{};
+ state.tacticalPositions[pos]={x:clampTactical(x,0,1),y:clampTactical(y,0,1)};
+ save();
+}
+function resetTacticalPlacement(){state.tacticalPositions={};save();renderPitch();}
 function renderPitch(){const pitch=document.getElementById('pitch');if(!pitch)return;document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());const pos=POSITIONS[state.system]||[];pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,p[1],p[2],false)});state.bench.forEach((name,i)=>addSlot('Banc',name,91,16+i*10,true));const panel=document.getElementById('playerActionPanel');if(panel?.classList.contains('show'))requestAnimationFrame(()=>positionContextActionMenu())}
 function addSlot(pos,name,x,y,bench){
- const pitch=document.getElementById(bench?'matchBench':'pitch')||document.getElementById('pitch');
+ const container=document.getElementById(bench?'matchBench':'pitch')||document.getElementById('pitch');
  const d=document.createElement('div');
  d.className='slot '+(bench?'bench':'player')+(state.selected===name?' selected':'');
- d.style.left=bench?'0px':`calc(${x}% - var(--match-slot-width, var(--match-slot-size, 88px)) / 2)`;
- d.style.top=bench?'0px':`calc(${y}% - var(--match-slot-height, var(--match-slot-size, 88px)) / 2)`;
- d.draggable=false;
- d.dataset.name=name||'';
- d.dataset.pos=pos;
+ const setPosition=(left,top)=>{d.style.left=bench?'0px':`calc(${left}% - var(--match-slot-width, 56px) / 2)`;d.style.top=bench?'0px':`calc(${top}% - var(--match-slot-height, 64px) / 2)`};
+ setPosition(x,y);
+ d.draggable=false;d.dataset.name=name||'';d.dataset.pos=pos;
  d.innerHTML=`${name?avatarHTML(name,'slotPhoto'):''}<span class="slotName">${name?shortPlayerName(name):'—'}</span><span class="pos">${pos}</span><span class="min">${name?fmt(state.players[name]?.seconds||0).split(':')[0]+'′':''}</span>`;
  d.title=name?short(name):'';
-
- let pointerDown=false,longReady=false,isDragging=false,startX=0,startY=0,originLeft=0,originTop=0,longTimer=null;
- function clearLong(){ if(longTimer){clearTimeout(longTimer); longTimer=null;} }
- function getDropSlot(clientX,clientY){
-   // Pendant le glisser, la pastille déplacée est sous le doigt/souris.
-   // On la rend temporairement invisible aux événements pour détecter la vraie cible dessous.
-   const oldPointer=d.style.pointerEvents;
-   d.style.pointerEvents='none';
-   const el=document.elementFromPoint(clientX,clientY);
-   d.style.pointerEvents=oldPointer;
-   return el ? el.closest('.slot') : null;
+ let pointerDown=false,isDragging=false,startX=0,startY=0,originLeft=0,originTop=0,lastX=x,lastY=y;
+ function elementBelow(clientX,clientY){const old=d.style.pointerEvents;d.style.pointerEvents='none';const el=document.elementFromPoint(clientX,clientY);d.style.pointerEvents=old;return el}
+ function cleanDrag(restore=true){d.classList.remove('dragging');document.querySelectorAll('.slot.dropReady').forEach(s=>s.classList.remove('dropReady'));document.body.classList.remove('dragging-player','lineup-touching');d.style.zIndex='';d.style.transform='';if(restore)setPosition(x,y)}
+ function moveFieldMarker(clientX,clientY){
+   const field=document.getElementById('pitch'),r=field.getBoundingClientRect();
+   const halfW=d.offsetWidth/2,halfH=d.offsetHeight/2;
+   const centerX=clampTactical(clientX-r.left,halfW,Math.max(halfW,r.width-halfW));
+   const centerY=clampTactical(clientY-r.top,halfH,Math.max(halfH,r.height-halfH));
+   d.style.left=(centerX-halfW)+'px';d.style.top=(centerY-halfH)+'px';
+   lastX=clampTactical(centerX/r.width,0,1);lastY=clampTactical(centerY/r.height,0,1);
  }
- function resetDrag(){
-   d.classList.remove('dragging');
-   document.querySelectorAll('.slot.dropReady').forEach(s=>s.classList.remove('dropReady'));
-   document.body.classList.remove('dragging-player','lineup-touching');
-   d.style.zIndex='';
-   d.style.transform='';
-   d.style.left=bench?'0px':`calc(${x}% - var(--match-slot-size, 88px) / 2)`;
-   d.style.top=bench?'0px':`calc(${y}% - var(--match-slot-size, 88px) / 2)`;
- }
- d.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();return false;});
- d.addEventListener('selectstart',e=>{e.preventDefault();return false;});
- d.addEventListener('dragstart',e=>{e.preventDefault();return false;});
+ d.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation()});
+ d.addEventListener('selectstart',e=>e.preventDefault());d.addEventListener('dragstart',e=>e.preventDefault());
  d.addEventListener('pointerdown',e=>{
-   if(!name) return;
-   if(e.pointerType==='mouse' && e.button!==0) return;
-   e.preventDefault(); e.stopPropagation();
-   pointerDown=true; longReady=false; isDragging=false; startX=e.clientX; startY=e.clientY;
-   document.body.classList.add('lineup-touching');
-   originLeft=d.offsetLeft; originTop=d.offsetTop;
-   clearLong();
-   // V3.0.3 : capture immédiate du doigt/souris pour éviter les pertes de drag quand le chrono tourne.
-   try{d.setPointerCapture(e.pointerId)}catch(_){}
+   if(!name||(e.pointerType==='mouse'&&e.button!==0))return;
+   e.preventDefault();e.stopPropagation();pointerDown=true;isDragging=false;startX=e.clientX;startY=e.clientY;originLeft=d.offsetLeft;originTop=d.offsetTop;lastX=x/100;lastY=y/100;
+   document.body.classList.add('lineup-touching');try{d.setPointerCapture(e.pointerId)}catch(_){}
  },{passive:false});
  d.addEventListener('pointermove',e=>{
-   if(!pointerDown||!name) return;
-   const dx=e.clientX-startX, dy=e.clientY-startY;
-   const dist=Math.hypot(dx,dy);
-   // Correction V2.4.1 : le glisser démarre aussi avec un mouvement franc,
-   // sans attendre obligatoirement l'appui long. Le simple tap reste réservé aux stats.
-   if(dist>3 && !longReady){
-     longReady=true;
-     clearLong();
-     d.classList.add('dragging');
-     document.body.classList.add('dragging-player');
-     try{d.setPointerCapture(e.pointerId)}catch(_){}
-   }
-   if(dist>=3 && longReady){
-     e.preventDefault(); e.stopPropagation();
-     isDragging=true; state.justDragged=true;
-     d.style.zIndex='500';
-     d.style.left=(originLeft+dx)+'px';
-     d.style.top=(originTop+dy)+'px';
-     document.querySelectorAll('.slot.dropReady').forEach(s=>s.classList.remove('dropReady'));
-     const target=getDropSlot(e.clientX,e.clientY);
-     if(target && target!==d) target.classList.add('dropReady');
-   }
+   if(!pointerDown||!name)return;
+   const dx=e.clientX-startX,dy=e.clientY-startY;
+   if(!isDragging&&Math.hypot(dx,dy)>6){isDragging=true;state.justDragged=true;d.classList.add('dragging');document.body.classList.add('dragging-player')}
+   if(!isDragging)return;
+   e.preventDefault();e.stopPropagation();d.style.zIndex='500';
+   document.querySelectorAll('.slot.dropReady').forEach(s=>s.classList.remove('dropReady'));
+   if(bench){d.style.left=(originLeft+dx)+'px';d.style.top=(originTop+dy)+'px';const target=elementBelow(e.clientX,e.clientY)?.closest('.slot');if(target&&target!==d)target.classList.add('dropReady')}
+   else {moveFieldMarker(e.clientX,e.clientY);const below=elementBelow(e.clientX,e.clientY);const benchTarget=below?.closest('#matchBench .slot');if(benchTarget)benchTarget.classList.add('dropReady')}
  },{passive:false});
  d.addEventListener('pointerup',e=>{
-   if(!pointerDown) return;
-   clearLong();
-   const wasDragging=isDragging;
-   pointerDown=false; longReady=false; isDragging=false;
-   if(wasDragging){
-     e.preventDefault(); e.stopPropagation();
-     const target=getDropSlot(e.clientX,e.clientY);
-     const targetPos=target?.dataset?.pos;
-     const targetName=target?.dataset?.name || '';
-     resetDrag();
-     if(targetPos && target!==d) movePlayer(name,pos,targetPos,targetName);
-     setTimeout(()=>state.justDragged=false,260);
-     return;
+   if(!pointerDown)return;pointerDown=false;
+   if(isDragging){
+     e.preventDefault();e.stopPropagation();const below=elementBelow(e.clientX,e.clientY);const target=below?.closest('.slot');
+     if(bench){cleanDrag();if(target&&target!==d&&target.dataset.pos!=='Banc')movePlayer(name,pos,target.dataset.pos,target.dataset.name||'')}
+     else if(target?.dataset.pos==='Banc'||below?.closest('#matchBench')){cleanDrag();movePlayer(name,pos,'Banc',target?.dataset.name||'')}
+     else {cleanDrag(false);saveTacticalPlacement(pos,lastX,lastY);renderPitch()}
+     setTimeout(()=>state.justDragged=false,260);return;
    }
-   resetDrag();
-   if(name && !state.justDragged){
-     // V3.0.3 : on garde uniquement le changement par glisser.
-     // Un simple toucher sert seulement à sélectionner la joueuse pour les stats.
-     document.getElementById('playerActionPanel')?.classList.remove('advOnly'); state.selected=name; save(); renderAll(); setTimeout(()=>openPlayerPanel(name),0);
-   }
+   cleanDrag();if(name&&!state.justDragged){document.getElementById('playerActionPanel')?.classList.remove('advOnly');state.selected=name;save();renderAll();setTimeout(()=>openPlayerPanel(name),0)}
  },{passive:false});
- d.addEventListener('pointercancel',()=>{clearLong(); pointerDown=false; longReady=false; isDragging=false; resetDrag(); document.body.classList.remove('lineup-touching'); setTimeout(()=>state.justDragged=false,200);});
- pitch.appendChild(d);
+ d.addEventListener('pointercancel',()=>{pointerDown=false;isDragging=false;cleanDrag();setTimeout(()=>state.justDragged=false,200)});
+ container.appendChild(d);
 }
 function movePlayer(name,from,to,targetName=''){
  if(!name) return;
@@ -914,7 +881,7 @@ renderPitch=function(){
   if(!pitch)return;
   document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());
   const pos=POSITIONS[state.system]||[];
-  pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,100-p[2],p[1],false)});
+  pos.forEach(p=>{const name=state.lineup[p[0]]||'';const point=tacticalPlacement(p[0],100-p[2],p[1]);addSlot(p[0],name,point.x,point.y,false)});
   const bench=state.bench||[];
   const n=Math.max(bench.length,1);
   bench.forEach((name,i)=>{
@@ -955,7 +922,7 @@ renderPitch=function(){
   if(!pitch)return;
   document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());
   const pos=POSITIONS[state.system]||[];
-  pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,100-p[2],p[1],false)});
+  pos.forEach(p=>{const name=state.lineup[p[0]]||'';const point=tacticalPlacement(p[0],100-p[2],p[1]);addSlot(p[0],name,point.x,point.y,false)});
   const bench=state.bench||[];
   const n=Math.max(bench.length,1);
   bench.forEach((name,i)=>{

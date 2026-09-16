@@ -170,8 +170,29 @@
       add('A — all eleven starters stay inside the pitch',pitch && pitch.querySelectorAll('.slot').length===11 && [...pitch.querySelectorAll('.slot')].every(slot => {const s=rect(slot);return s.left>=initialPitchRect.left-1 && s.right<=initialPitchRect.right+1 && s.top>=initialPitchRect.top-1 && s.bottom<=initialPitchRect.bottom+1;}));
       const starterSlots = [...pitch.querySelectorAll('.slot')];
       add('A — starter touch targets do not overlap',starterSlots.every((slot,index)=>starterSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other)))));
-      add('A — foot 11 player cards stay compact and predictable',starterSlots.length===11&&starterSlots.every(slot=>{const r=rect(slot);return r.width>=61&&r.width<=69&&r.height>=71&&r.height<=79}),starterSlots[0]?`${Math.round(rect(starterSlots[0]).width)} × ${Math.round(rect(starterSlots[0]).height)}px`:'missing');
+      add('A — foot 11 markers keep a 48px hitbox without card backgrounds',starterSlots.length===11&&starterSlots.every(slot=>{const r=rect(slot),style=win.getComputedStyle(slot);return r.width>=49&&r.width<=57&&r.height>=59&&r.height<=65&&style.backgroundColor==='rgba(0, 0, 0, 0)'}),starterSlots[0]?`${Math.round(rect(starterSlots[0]).width)} × ${Math.round(rect(starterSlots[0]).height)}px`:'missing');
       add('A — avatar, short name, position and clock remain individually readable',starterSlots.every(slot=>['.slotPhoto','.slotName','.pos','.min'].every(selector=>visible(win,slot.querySelector(selector)))));
+      const tapName=names[1],tapSlot=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===tapName),tapRect=rect(tapSlot);
+      tapSlot.dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true,pointerId:31,pointerType:'touch',clientX:tapRect.left+tapRect.width/2,clientY:tapRect.top+tapRect.height/2}));
+      tapSlot.dispatchEvent(new win.PointerEvent('pointerup',{bubbles:true,pointerId:31,pointerType:'touch',clientX:tapRect.left+tapRect.width/2,clientY:tapRect.top+tapRect.height/2}));
+      await nextPaint();await nextPaint();
+      add('A — a short tap opens the existing player menu',visible(win,panel)&&panel.dataset.anchor===tapName);
+      win.closePlayerPanel();await nextPaint();
+      const dragName=names[1],dragSlot=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===dragName),dragRect=rect(dragSlot),pitchBefore=rect(pitch);
+      const dragStart={x:dragRect.left+dragRect.width/2,y:dragRect.top+dragRect.height/2},dragEnd={x:dragStart.x+70,y:dragStart.y+45};
+      dragSlot.dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true,pointerId:32,pointerType:'touch',clientX:dragStart.x,clientY:dragStart.y}));
+      dragSlot.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true,pointerId:32,pointerType:'touch',clientX:dragEnd.x,clientY:dragEnd.y}));
+      dragSlot.dispatchEvent(new win.PointerEvent('pointerup',{bubbles:true,pointerId:32,pointerType:'touch',clientX:dragEnd.x,clientY:dragEnd.y}));
+      await nextPaint();
+      const movedState=win.__tabletFixtureStateSummary(),moved=movedState.tacticalPositions.DG,movedSlot=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===dragName),movedRect=rect(movedSlot);
+      add('A — drag stores relative coordinates without opening the menu',!!moved&&moved.x>=0&&moved.x<=1&&moved.y>=0&&moved.y<=1&&!visible(win,panel),moved?`${moved.x.toFixed(3)}, ${moved.y.toFixed(3)}`:'missing');
+      const beforeRenderRatio={x:(movedRect.left+movedRect.width/2-pitchBefore.left)/pitchBefore.width,y:(movedRect.top+movedRect.height/2-pitchBefore.top)/pitchBefore.height};
+      win.renderPitch();await nextPaint();
+      const rerendered=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===dragName),rerenderedRect=rect(rerendered),pitchAfter=rect(pitch);
+      add('A — relative placement survives a responsive re-render',Math.abs((rerenderedRect.left+rerenderedRect.width/2-pitchAfter.left)/pitchAfter.width-beforeRenderRatio.x)<.01&&Math.abs((rerenderedRect.top+rerenderedRect.height/2-pitchAfter.top)/pitchAfter.height-beforeRenderRatio.y)<.01);
+      win.resetTacticalPlacement();await nextPaint();
+      add('A — reset placement clears only tactical coordinates',Object.keys(win.__tabletFixtureStateSummary().tacticalPositions||{}).length===0&&pitch.querySelectorAll('.slot').length===11);
+
       add('A — player labels never expose raw br markup',[...doc.querySelectorAll('#pitch .slotName,#matchBench .slotName')].every(label=>!/<br|&lt;br/i.test(label.textContent||'')&&!/&lt;br/i.test(label.innerHTML)));
       add('A — player names stay on one contained line',[...doc.querySelectorAll('#pitch .slotName')].every(label=>{const style=win.getComputedStyle(label);return rect(label).width<=rect(label.closest('.slot')).width&&rect(label).height<=14&&style.whiteSpace==='nowrap'&&style.overflow==='hidden'&&style.textOverflow==='ellipsis'}));
       add('A — clock badges never cover avatars or names',starterSlots.every(slot=>{const clock=rect(slot.querySelector('.min')),photo=rect(slot.querySelector('.slotPhoto')),name=rect(slot.querySelector('.slotName'));return !overlaps(clock,photo)&&!overlaps(clock,name)}));
@@ -203,25 +224,26 @@
       const contextDetails=[];
       let allContextsValid=true;
       for(const testCase of contextCases){
-        const slot=[...doc.querySelectorAll('#pitch .slot,#matchBench .slot')].find(node=>node.dataset.name===testCase.name);
+        let slot=[...doc.querySelectorAll('#pitch .slot,#matchBench .slot')].find(node=>node.dataset.name===testCase.name);
         slot?.scrollIntoView({block:'center',inline:'nearest'});
         await nextPaint();
         let slotRect=rect(slot);
         win.openPlayerPanel(testCase.name);
         await nextPaint();
+        slot=[...doc.querySelectorAll('#pitch .slot,#matchBench .slot')].find(node=>node.dataset.name===testCase.name);
         slotRect=rect(slot);
         const menuRect=rect(panel),fieldRect=rect(pitch),boundsRect=rect(slot.closest('#pitch')||slot.closest('.playerAnalysisCard')||doc.querySelector('.pitchCard')),stickyRect=doc.querySelector('.tt-header.v364-header')?.getBoundingClientRect();
         const safeTop=stickyRect&&stickyRect.top<=8&&stickyRect.bottom>8?stickyRect.bottom+8:8;
         const horizontalGap=Math.max(slotRect.left-menuRect.right,menuRect.left-slotRect.right,0);
         const verticalGap=Math.max(slotRect.top-menuRect.bottom,menuRect.top-slotRect.bottom,0);
-        const near=Math.min(horizontalGap||Infinity,verticalGap||Infinity)<=14;
+        const near=panel.dataset.placement==='right'||panel.dataset.placement==='left'?horizontalGap<=28:verticalGap<=28;
         const insideBounds=slot.closest('#matchBench')||menuRect.left>=boundsRect.left+6&&menuRect.right<=boundsRect.right-6&&menuRect.top>=boundsRect.top+6&&menuRect.bottom<=boundsRect.bottom-6;
         const insideViewport=menuRect.left>=6&&menuRect.right<=viewport.width-6&&menuRect.top>=safeTop-1&&menuRect.bottom<=viewport.height-6;
         const expectedEdgePlacement=testCase.expected==='edge'?(slotRect.right+12+menuRect.width<=Math.min(boundsRect.right-8,viewport.width-8)?'right':'left'):(testCase.expected||null);
         const placementOk=!expectedEdgePlacement||panel.dataset.placement===expectedEdgePlacement;
         const valid=visible(win,panel)&&panel.dataset.anchor===testCase.name&&!overlaps(menuRect,slotRect)&&near&&insideBounds&&insideViewport&&placementOk;
         if(!valid)allContextsValid=false;
-        const flags=[visible(win,panel)?'visible':'hidden',panel.dataset.anchor===testCase.name?'anchor':'bad-anchor',!overlaps(menuRect,slotRect)?'clear':'overlap',near?'near':'far',insideBounds?'bounds':'out-bounds',insideViewport?'viewport':'out-viewport',placementOk?'placement':'bad-placement'];
+        const flags=[visible(win,panel)?'visible':'hidden',panel.dataset.anchor===testCase.name?'anchor':'bad-anchor',!overlaps(menuRect,slotRect)?'clear':'overlap',near?'near':'far',insideBounds?'bounds':'out-bounds',insideViewport?'viewport':'out-viewport',`hgap=${Math.round(horizontalGap)}`,`vgap=${Math.round(verticalGap)}`,placementOk?'placement':'bad-placement'];
         contextDetails.push(`${testCase.label}:${panel.dataset.placement}/${Math.round(menuRect.left)},${Math.round(menuRect.top)} ${Math.round(menuRect.width)}×${Math.round(menuRect.height)} [${flags.join(',')}]`);
       }
       add('B — contextual menu follows starters, edges, goal areas and substitutes',allContextsValid,contextDetails.join('; '));
@@ -291,7 +313,7 @@
         const inside=systemSlots.every(slot=>{const r=rect(slot);return r.left>=systemPitch.left-1&&r.right<=systemPitch.right+1&&r.top>=systemPitch.top-1&&r.bottom<=systemPitch.bottom+1;});
         const clear=systemSlots.every((slot,index)=>systemSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other))));
         const labelsClear=labels.every((label,index)=>labels.slice(index+1).every(other=>!overlaps(rect(label),rect(other))));
-        const expectedSize=spec.format===11?{minW:61,maxW:69,minH:71,maxH:79}:{minW:69,maxW:81,minH:81,maxH:93};
+        const expectedSize=spec.format===11?{minW:49,maxW:57,minH:59,maxH:65}:{minW:49,maxW:63,minH:59,maxH:71};
         const sizesOk=systemSlots.every(slot=>{const r=rect(slot);return r.width>=expectedSize.minW&&r.width<=expectedSize.maxW&&r.height>=expectedSize.minH&&r.height<=expectedSize.maxH});
         const valid=systemSlots.length===spec.count&&inside&&clear&&labelsClear&&sizesOk;
         if(!valid)systemsValid=false;
@@ -320,7 +342,7 @@
     document.getElementById('browserSize').onclick=()=>resize();
     document.querySelectorAll('[data-size]').forEach(button=>button.onclick=()=>resize(...button.dataset.size.split(',').map(Number)));
     window.addEventListener('keydown',event=>{if(event.altKey && event.key.toLowerCase()==='t'){event.preventDefault();api.showTools();}});
-    window.addEventListener('message',event=>{if(event.source===frame.contentWindow && event.data?.type==='tablet-fixture-ready'){ready=true;status.textContent=`Ready: synthetic 11 + 3 squad, actual module, ${frame.contentWindow.innerWidth} × ${frame.contentWindow.innerHeight}.`;}});
+    window.addEventListener('message',event=>{if(event.source===frame.contentWindow && event.data?.type==='tablet-fixture-ready'){ready=true;status.textContent=`Ready: synthetic 11 + 3 squad, actual module, ${frame.contentWindow.innerWidth} × ${frame.contentWindow.innerHeight}.`;if(new URLSearchParams(location.search).has('autorun'))setTimeout(()=>verify().catch(error=>{status.textContent='FAIL — '+error.message;console.error(error)}),80);}});
     loadModule().catch(error=>{status.textContent=error.message;console.error(error);});
   </script>
 </body>

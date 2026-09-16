@@ -127,6 +127,19 @@ async function test(name, callback) {
 }
 
 async function main() {
+  await test('tactical placement uses clamped relative coordinates and resets explicitly', () => {
+    const h = matchHarness();
+    h.run("saveTacticalPlacement('BU',1.4,-0.2);");
+    let state = h.state();
+    assert.deepEqual(state.tacticalPositions.BU, {x: 1, y: 0});
+    assert.deepEqual(JSON.parse(h.storage.get('coachStatsV170')).tacticalPositions.BU, {x: 1, y: 0});
+    assert.equal(h.run("JSON.stringify(tacticalPlacement('BU',50,50))"), JSON.stringify({x:100,y:0}));
+    h.run('resetTacticalPlacement();');
+    assert.deepEqual(h.state().tacticalPositions, {});
+    h.run("state.tacticalPositions={GB:{x:.3,y:.4}};quickSystemChange('3-3-1');");
+    assert.deepEqual(h.state().tacticalPositions, {});
+  });
+
   await test('timer, match phases and starter/bench playing time', () => {
     const h = matchHarness();
     h.run('startMatch();startMatch();tick();tick();');
