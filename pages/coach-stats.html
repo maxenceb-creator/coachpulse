@@ -387,13 +387,14 @@ function addSlot(pos,name,x,y,bench){
    e.preventDefault();e.stopPropagation();d.style.zIndex='500';
    document.querySelectorAll('.slot.dropReady').forEach(s=>s.classList.remove('dropReady'));
    if(bench){d.style.left=(originLeft+dx)+'px';d.style.top=(originTop+dy)+'px';const target=elementBelow(e.clientX,e.clientY)?.closest('.slot');if(target&&target!==d)target.classList.add('dropReady')}
-   else {moveFieldMarker(e.clientX,e.clientY);const below=elementBelow(e.clientX,e.clientY);const benchTarget=below?.closest('#matchBench .slot');if(benchTarget)benchTarget.classList.add('dropReady')}
+   else {moveFieldMarker(e.clientX,e.clientY);const below=elementBelow(e.clientX,e.clientY);const target=below?.closest('#pitch .slot.player,#matchBench .slot');if(target&&target!==d)target.classList.add('dropReady')}
  },{passive:false});
  d.addEventListener('pointerup',e=>{
    if(!pointerDown)return;pointerDown=false;
    if(isDragging){
      e.preventDefault();e.stopPropagation();const below=elementBelow(e.clientX,e.clientY);const target=below?.closest('.slot');
      if(bench){cleanDrag();if(target&&target!==d&&target.dataset.pos!=='Banc')movePlayer(name,pos,target.dataset.pos,target.dataset.name||'')}
+     else if(target?.classList.contains('player')&&target!==d){cleanDrag();movePlayer(name,pos,target.dataset.pos,target.dataset.name||'')}
      else if(target?.dataset.pos==='Banc'||below?.closest('#matchBench')){cleanDrag();movePlayer(name,pos,'Banc',target?.dataset.name||'')}
      else {cleanDrag(false);saveTacticalPlacement(pos,lastX,lastY);renderPitch()}
      setTimeout(()=>state.justDragged=false,260);return;

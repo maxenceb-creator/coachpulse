@@ -203,6 +203,24 @@ async function main() {
     assert.equal(new Set(state.log.map(event => event.eventId)).size, 4);
   });
 
+  await test('field slot swaps keep tactical coordinates, time, stats and bench unchanged', () => {
+    const h = matchHarness();
+    h.run(`
+      state.lineup={MC:ROSTER[0],MDC:ROSTER[1]};state.bench=[ROSTER[2]];
+      state.tacticalPositions={MC:{x:.52,y:.30},MDC:{x:.42,y:.50}};
+      state.players[ROSTER[0]].seconds=84;state.players[ROSTER[0]].recup=3;state.log=[];
+      movePlayer(ROSTER[0],'MC','MDC',ROSTER[1]);
+    `);
+    const state = h.state();
+    assert.equal(state.lineup.MC, 'TEST BEA');
+    assert.equal(state.lineup.MDC, 'TEST ALICE');
+    assert.deepEqual(state.tacticalPositions, {MC:{x:.52,y:.30},MDC:{x:.42,y:.50}});
+    assert.equal(state.players['TEST ALICE'].seconds, 84);
+    assert.equal(state.players['TEST ALICE'].recup, 3);
+    assert.deepEqual(state.bench, ['TEST CLEO']);
+    assert.equal(state.log.length, 0);
+  });
+
   await test('player selection and starter/substitute swaps preserve the roster', () => {
     const h = matchHarness();
     h.run("openPlayerPanel('TEST CLEO');movePlayer('TEST CLEO','Banc','BU');startMatch();tick();");

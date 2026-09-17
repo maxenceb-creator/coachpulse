@@ -133,6 +133,7 @@ body.match-mode:has(#format option[value="11"]:checked) #live #pitch { --match-s
 #live #pitch .slot.selected { outline:0!important; transform:none!important; box-shadow:none!important; }
 #live #pitch .slot.selected .slotPhoto { border-color:#facc15!important; box-shadow:0 0 0 4px rgba(250,204,21,.42),0 4px 10px rgba(3,21,12,.3)!important; }
 #live #pitch .slot.dragging { cursor:grabbing; filter:drop-shadow(0 9px 7px rgba(3,21,12,.42)); transform:scale(1.08)!important; }
+#live #pitch .slot.dropReady .slotPhoto { border-color:#86efac!important; box-shadow:0 0 0 4px rgba(34,197,94,.4),0 4px 10px rgba(3,21,12,.3)!important; }
 #live #pitch .slot .slotPhoto { position:relative!important; inset:auto!important; grid-row:1; width:36px!important; height:36px!important; border:2px solid rgba(255,255,255,.94)!important; border-radius:50%!important; object-fit:cover; opacity:1!important; box-shadow:0 3px 7px rgba(3,21,12,.28); }
 body.match-mode:has(#format option[value="8"]:checked) #live #pitch .slot .slotPhoto { width:42px!important; height:42px!important; }
 #live #pitch .slot .slotPhoto.blank { display:grid; place-items:center; color:#fff; background:linear-gradient(135deg,#0f3f2a,#00843d); font-size:11px; }
