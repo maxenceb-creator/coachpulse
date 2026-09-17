@@ -843,6 +843,10 @@ function testPlayerProfileAttendanceUsesExistingSessionsAsSource(){
   assert.equal(stats.nonConvokedSessions, 1);
   assert.equal(stats.missingSessions, 1, 'Une séance sans statut doit être signalée sans devenir une absence.');
   assert.equal(stats.presenceRate, 100);
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  assert(appSource.includes("parseStoredJson('coachpulse:presenceEvents:deletedIds:v1', [])"), 'La fiche doit relire les suppressions locales du calendrier.');
+  assert(appSource.includes('presenceLoadSettings().catch(() => ({}))'), 'La fiche doit relire le registre cloud des suppressions.');
+  assert(appSource.includes('.filter(event => !isDeletedProfilePresenceEvent(event, deletionMarkers))'), 'Les séances supprimées doivent être exclues avant les compteurs et l’historique.');
 }
 
 function testHomeDashboardStaysScopedToAuthorizedTeams(){
