@@ -4603,7 +4603,10 @@ async function matchListFromFirestore(filters={}){
   if(!db || !currentUser || !canViewModule('stats')) return [];
   const teamIds = [...new Set((filters.teamIds || (filters.teamId ? [filters.teamId] : getAuthorizedTeamIds())).filter(Boolean))];
   const queries = teamIds.length
-    ? teamIds.map(teamId => firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamId', '==', teamId))))
+    ? teamIds.flatMap(teamId => [
+        firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamId', '==', teamId))),
+        firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamIds', 'array-contains', teamId)))
+      ])
     : [firebaseFns.getDocs(firebaseFns.collection(db, 'matches'))];
   const snapshots = await Promise.all(queries);
   const byId = new Map();
@@ -4612,7 +4615,21 @@ async function matchListFromFirestore(filters={}){
     if(filters.season && row.season && row.season !== filters.season) return;
     byId.set(docSnap.id, row);
   }));
-  return [...byId.values()].sort((a,b) => String(b.createdAt || b.date || '').localeCompare(String(a.createdAt || a.date || '')));
+  const matches = [...byId.values()];
+  await Promise.all(matches.map(async match => {
+    const matchId = match.matchId || match.id;
+    const eventSnapshot = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('matchId', '==', matchId)));
+    const events = [];
+    eventSnapshot.forEach(docSnap => events.push({id:docSnap.id, eventId:docSnap.id, ...docSnap.data(), matchId}));
+    if(events.length){
+      events.sort((a,b) => (Number(a.ts || a.t || a.minute) || 0) - (Number(b.ts || b.t || b.minute) || 0));
+      match.log = events;
+      match.events = events;
+    }else{
+      match.log = Array.isArray(match.log) ? match.log : (Array.isArray(match.events) ? match.events : []);
+    }
+  }));
+  return matches.sort((a,b) => String(b.createdAt || b.date || '').localeCompare(String(a.createdAt || a.date || '')));
 }
 function playerForSeason(player={}, season=currentSeason()){
   const service = playersService();
