@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="/"><title>Global loading indicator test</title></head>
+<body>
+  <button id="fast">Opération rapide</button>
+  <button id="loading">Chargement</button>
+  <button id="concurrent">Deux synchronisations</button>
+  <button id="error">Erreur</button>
+  <script src="shared/ui/global-loading-indicator.js?v=20260911-final"></script>
+  <script>
+    document.querySelector('#fast').onclick = () => { const op=CoachPulseLoading.start('fast',{kind:'loading'}); setTimeout(()=>op.end(),50); };
+    document.querySelector('#loading').onclick = () => { const op=CoachPulseLoading.start('players',{kind:'loading'}); setTimeout(()=>op.end(),700); };
+    document.querySelector('#concurrent').onclick = () => { const a=CoachPulseLoading.start('players'); const b=CoachPulseLoading.start('attendance'); setTimeout(()=>a.end(),500); setTimeout(()=>b.end(),900); };
+    document.querySelector('#error').onclick = () => { const op=CoachPulseLoading.start('matches'); setTimeout(()=>op.fail(new Error('Données locales disponibles — synchronisation impossible')),300); };
+  </script>
+</body>
+</html>

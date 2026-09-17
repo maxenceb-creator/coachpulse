@@ -19,6 +19,7 @@ const entries = [
   'modules',
   'shared/services',
   'shared/utils',
+  'shared/ui',
   'data'
 ];
 
