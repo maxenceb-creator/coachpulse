@@ -109,7 +109,9 @@ function firestoreHarness() {
         const collection = typeof query === 'string' ? query : query.collection;
         const filter = typeof query === 'string' ? null : query.filter;
         const rows = [...documents.entries()].filter(([ref, value]) =>
-          ref.startsWith(`${collection}/`) && (!filter || value[filter.field] === filter.value));
+          ref.startsWith(`${collection}/`) && (!filter || (filter.operator === 'array-contains'
+            ? Array.isArray(value[filter.field]) && value[filter.field].includes(filter.value)
+            : value[filter.field] === filter.value)));
         return {forEach: callback => rows.forEach(([ref, value]) => callback({id: ref.split('/')[1], data: () => value}))};
       }
     }
@@ -370,10 +372,35 @@ async function main() {
     assert.equal(firstRefs.filter(ref => ref.startsWith('matches/')).length, 1);
     assert.equal(firstRefs.filter(ref => ref.startsWith('matchEvents/')).length, 1);
     assert(cloud.writes.every(write => write.options.merge === true));
+    const matchRef = firstRefs.find(ref => ref.startsWith('matches/'));
+    delete cloud.documents.get(matchRef).log;
+    delete cloud.documents.get(matchRef).events;
     const remote = await cloud.sandbox.matchListFromFirestore({teamId: 'team-u13-a'});
     assert.equal(remote.length, 1);
     assert.equal(remote[0].log[0].eventId, h.state().log[0].eventId);
     assert.equal((await cloud.sandbox.matchListFromFirestore({teamId: 'team-u16-a'})).length, 0);
+
+    const otherDevice = matchHarness();
+    otherDevice.sandbox.parent.CoachPulseCentralData = {
+      matchSaveToFirestore: cloud.sandbox.matchSaveToFirestore,
+      matchListFromFirestore: cloud.sandbox.matchListFromFirestore
+    };
+    await otherDevice.run('reconcileMatchesWithCloud()');
+    assert.equal(otherDevice.state().savedMatches.length, 1);
+    assert.equal(String(otherDevice.state().savedMatches[0].matchId), String(h.state().savedMatches[0].matchId));
+    assert.equal(otherDevice.state().savedMatches[0].log[0].eventId, h.state().log[0].eventId);
+
+    const legacyLocal = matchHarness();
+    legacyLocal.sandbox.parent.CoachPulseCentralData = {
+      matchSaveToFirestore: cloud.sandbox.matchSaveToFirestore,
+      matchListFromFirestore: cloud.sandbox.matchListFromFirestore
+    };
+    legacyLocal.run(`state.savedMatches=[{...${JSON.stringify(h.state().savedMatches[0])},id:'legacy-local-only',matchId:'legacy-local-only',syncStatus:'synced'}];save()`);
+    await legacyLocal.run('reconcileMatchesWithCloud()');
+    assert.equal(legacyLocal.state().savedMatches.find(match => match.matchId === 'legacy-local-only').syncStatus, 'synced');
+    assert(cloud.documents.has('matches/legacy-local-only'));
+    assert([...cloud.documents.keys()].some(ref => ref.startsWith('matchEvents/') && cloud.documents.get(ref).matchId === 'legacy-local-only'));
+    const refsAfterLegacyRecovery = [...cloud.documents.keys()];
 
     h.sandbox.navigator.onLine = false;
     cloud.sandbox.navigator.onLine = false;
@@ -389,7 +416,7 @@ async function main() {
     await h.listeners.get('online')();
     assert.equal(h.state().savedMatches[0].syncStatus, 'synced');
     assert.equal(h.state().savedMatches[0].syncError, '');
-    assert.deepEqual([...cloud.documents.keys()], firstRefs);
+    assert.deepEqual([...cloud.documents.keys()], refsAfterLegacyRecovery);
   });
 
   console.log(`Match entry guards OK (${checks} behavior groups; DOM/rendering and Firebase I/O mocked).`);

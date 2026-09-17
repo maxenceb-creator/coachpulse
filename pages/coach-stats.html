@@ -130,6 +130,7 @@
         if(typeof ensure==='function') ensure();
         if(typeof buildSystem==='function') buildSystem();
         if(typeof renderAll==='function') renderAll();
+        if(typeof reconcileMatchesWithCloud==='function') reconcileMatchesWithCloud();
       }catch(err){ console.warn('Rafraîchissement cloud Coach Stats impossible', err); }
     }
   });
@@ -226,10 +227,11 @@ async function syncSavedMatch(match,{silent=false}={}){
 }
 async function syncPendingMatches({silent=true}={}){for(const match of state.savedMatches||[]){if(match.syncStatus!=='synced')await syncSavedMatch(match,{silent})}}
 async function reconcileMatchesWithCloud(){
-  const api=matchCloudApi();if(!api?.matchListFromFirestore)return;
+  const api=matchCloudApi();if(!api?.matchListFromFirestore)return;const capabilities=api.matchSyncCapabilities?.();if(capabilities&&(!capabilities.available||!capabilities.canRead))return;
   try{
-    const cloud=await api.matchListFromFirestore({});const byId=new Map((state.savedMatches||[]).map(m=>[String(m.matchId||m.id),m]));let changed=false;
+    const cloud=await api.matchListFromFirestore({});const byId=new Map((state.savedMatches||[]).map(m=>[String(m.matchId||m.id),m]));const cloudIds=new Set(cloud.map(m=>String(m.matchId||m.id)));let changed=false;
     cloud.forEach(raw=>{const id=String(raw.matchId||raw.id);const local=byId.get(id);if(!local){raw.syncStatus='synced';ensureSavedMatchIdentity(raw);state.savedMatches.push(raw);changed=true;return}const cloudTime=Date.parse(raw.updatedAtIso||raw.createdAt||raw.date||0)||0;const localTime=Date.parse(local.updatedAtIso||local.syncedAt||local.createdAt||local.date||0)||0;if(cloudTime>localTime){Object.assign(local,raw,{syncStatus:'synced'});ensureSavedMatchIdentity(local);changed=true}});
+    (state.savedMatches||[]).forEach(match=>{ensureSavedMatchIdentity(match);if(match.syncStatus==='synced'&&!cloudIds.has(String(match.matchId||match.id))){match.syncStatus='pendingSync';match.syncNote='';changed=true}});
     if(changed){save();renderAll()}await syncPendingMatches({silent:true});
   }catch(error){console.warn('Récupération des matchs Firestore indisponible',error);await syncPendingMatches({silent:true})}
 }
