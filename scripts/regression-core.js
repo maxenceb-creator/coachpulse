@@ -782,6 +782,14 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   assert.equal(byTeam.attendance[1].status, 'AJ');
   assert.equal(byPlayer.sessions[0].teamId, 'team-u13-a');
   assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
+  const statusRows = window.CoachPulsePresenceEventsService.attendanceRowsFromEvent({
+    id:'presence-status-roundtrip',
+    date:'2026-09-17',
+    duration:90,
+    teamId:'team-u13-a',
+    attendance:Object.fromEntries(['P','R','ANJ','AJ','M','B','PO','D'].map((status, index) => [`status-${index}`, {status}]))
+  });
+  assert.deepEqual(Array.from(statusRows, row => row.status), ['P','R','ANJ','AJ','M','B','PO','D'], 'Les statuts Présences doivent survivre à la normalisation avant écriture Firestore.');
   assert(presencePageSource.includes('function normalizePresenceEventForStorage'), 'La page Présences doit normaliser les événements avant stockage.');
   assert(presencePageSource.includes('return api.presenceSaveEvent(normalized);'), 'La synchronisation cloud doit envoyer un événement normalisé.');
   assert(presencePageSource.includes('athletic:procedureMinutes'), 'La procédure Présences doit enregistrer le contenu Athlétique.');
@@ -1109,11 +1117,28 @@ function testFirestorePayloadBoundary(){
   assert.equal(oversized.issues[0].path, '$.items.largest', 'Le diagnostic de taille doit identifier la valeur qui contribue le plus.');
 
   const appSource = fs.readFileSync('app.js', 'utf8');
+  const managedKeysSource = appSource.match(/const FIRESTORE_MANAGED_LOCAL_KEYS = new Set\([\s\S]*?\n\]\);/)?.[0] || '';
+  const localOnlyKeysSource = appSource.match(/const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set\([\s\S]*?\n\]\);/)?.[0] || '';
+  const collectLocalStorageSource = appSource.match(/function collectLocalStorage\(\)[\s\S]*?\n}/)?.[0] || '';
+  const commonBaseContext = vm.createContext({
+    storage:{
+      entries({exclude}){
+        return [
+          ['presenceSeanceV3_6_Excel', 'x'.repeat(1024 * 1024)],
+          ['coachpulse:presenceEvents:v1', JSON.stringify([{id:'session-1'}])],
+          ['coachpulse:ordinary-setting', 'kept']
+        ].filter(([key]) => !exclude(key));
+      }
+    }
+  });
+  vm.runInContext(`${managedKeysSource}\n${localOnlyKeysSource}\n${collectLocalStorageSource}\nthis.result = collectLocalStorage();`, commonBaseContext);
+  assert.deepEqual(Object.keys(commonBaseContext.result), ['coachpulse:ordinary-setting'], 'Un historique Présences supérieur à 1 Mio ne doit plus entrer dans le document common_base.');
   assert(appSource.includes("const safePayload = firestorePayloadService.prepare(payload, {rootPath:'$', maxBytes:950 * 1024});"), 'La synchronisation globale doit nettoyer et borner le document juste avant setDoc.');
   assert(appSource.includes('...safePayload,'), 'setDoc doit recevoir le payload reconstruit, jamais le payload brut.');
   assert(appSource.includes("key.startsWith('firestore_')"), 'Les clés internes IndexedDB/Firestore ne doivent jamais être sauvegardées comme données métier.');
-  assert(appSource.includes('FIRESTORE_MANAGED_LOCAL_KEYS.has(key)'), 'Les caches déjà persistés dans les collections centrales doivent être exclus de l’agrégat legacy.');
-  assert(appSource.includes('PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS.has(key)'), 'Les données Présences historiques doivent rester dans common_base avant migration complète.');
+  assert(appSource.includes("'presenceSeanceV3_6_Excel',\n  'coachpulse:presenceEvents:v1'"), 'Le fichier Présences historique et le cache moderne doivent être gérés hors du document agrégé.');
+  assert(appSource.includes('|| FIRESTORE_MANAGED_LOCAL_KEYS.has(key)'), 'Les données déjà fractionnées dans les collections centrales doivent être exclues de common_base.');
+  assert(!appSource.includes('PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS'), 'Aucune exception ne doit réinjecter les données Présences dans le document Firestore unique.');
   assert(appSource.includes('firebaseFns.setDoc(ref, cloudDocument, {merge:true})'), 'La synchronisation legacy ne doit supprimer aucune clé common_base existante.');
   assert(appSource.includes("e?.name === 'FirestorePayloadError' && debugPerfEnabled()"), 'Le diagnostic détaillé doit rester réservé au mode debug.');
   assert(appSource.includes("collection:'coachpulse_common_base'"), 'Le diagnostic doit identifier la collection exacte.');
