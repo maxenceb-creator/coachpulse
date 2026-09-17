@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-86-match-context-actions';
+const CACHE_NAME = 'coachpulse-v6-4-87-release';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
@@ -24,7 +24,7 @@ const CORE_ASSETS = [
   './connectors/fichesJoueusesConnector.js', './connectors/presencesConnector.js',
   './connectors/testsConnectorCore.js', './connectors/testsTechniquesConnector.js', './connectors/testsPhysiquesConnector.js'
 ];
-const NETWORK_FIRST_ASSETS = new Set(['./', './index.html', './app.js', './css/responsive.css', './manifest.json']);
+const NETWORK_FIRST_ASSETS = new Set(['./', './index.html', './app.js', './css/responsive.css', './manifest.json', './pages/tests-techniques.html']);
 const NETWORK_FIRST_EXTENSIONS = /\.(html|js|css|json)$/i;
 
 function assetKey(url) {

@@ -664,6 +664,15 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes("finalized:true") || appSource.includes('finalized,'), 'La finalisation des Tests athlétiques doit être persistée dans les documents physicalTests.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('rowFinalized'), 'L’historique des Tests athlétiques doit filtrer les lignes finalisées depuis la donnée partagée.');
   assert(fs.readFileSync('pages/tests-athletiques.html', 'utf8').includes('function historyRows(){return rows.filter(r=>!rowFinalized(r))}'), 'L’historique des Tests athlétiques doit rester global et ne pas dépendre de la joueuse/catégorie sélectionnée.');
+  const technicalSource = fs.readFileSync('pages/tests-techniques.html', 'utf8');
+  assert(technicalSource.includes('function technicalRowMatches'), 'Les Tests techniques doivent comparer toutes les clés possibles d’une saisie provisoire.');
+  assert(technicalSource.includes('const pending=pendingRowForId(testId)||renderedPendingRowsById.get(testId);'), 'La validation définitive Tests techniques doit conserver un recours vers la ligne réellement affichée.');
+  assert(technicalSource.includes('function recoverPendingRows()'), 'Les brouillons Tests techniques doivent être restaurés depuis les sauvegardes locales disponibles.');
+  assert(technicalSource.includes('pendingRowsFromAutoBackup(),...pendingRowsFromBackup(),...localRows().filter(row=>!rowFinalized(row)),...pendingRows()'), 'La restauration doit fusionner sauvegarde automatique, copie locale, ancien stockage et brouillons courants.');
+  assert(technicalSource.includes('storageSetJson(TECHNICAL_PENDING_BACKUP_KEY,rows)'), 'Chaque modification des brouillons doit conserver une copie locale de secours.');
+  assert(technicalSource.includes('setLocalRows(localRows().filter(r=>!technicalRowMatches(r,testId)));removePendingRow(testId);'), 'La validation définitive doit retirer aussi les anciens brouillons du stockage historique.');
+  assert(appSource.includes("'coachpulse:technicalTestsPendingBackup'"), 'La copie locale des brouillons doit être isolée de la synchronisation générique.');
+  assert(appSource.includes('!CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k)'), 'Les anciennes copies cloud des brouillons ne doivent plus écraser les saisies de l’appareil.');
   assert(rulesSource.includes("allow delete: if canWritePhysicalData() && (canAccessModule('tests-athletiques') || canAccessModule('tests'))"), 'Les suppressions physicalTests doivent rester contrôlées par droits module et teamId/playerId.');
 
   [

@@ -68,7 +68,8 @@ function assertShellStrategy(source, networkFirstAssets) {
     './',
     './index.html',
     './app.js',
-    './css/responsive.css'
+    './css/responsive.css',
+    './pages/tests-techniques.html'
   ].forEach(asset => {
     if(!networkFirstAssets.includes(asset)) fail(`Asset shell non network-first: ${asset}`);
   });

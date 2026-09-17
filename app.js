@@ -63,12 +63,13 @@ const PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS = new Set([
 const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
   'coachpulse:pendingSync', 'coachpulse:lastCloudSync', 'coachpulse:lastAutoSave',
   'coachpulse:lastPlayersCloudRefresh', 'coachpulse:appShellVersion', 'coachpulse:appShellRefreshVersion',
-  'coachpulse:debugPerf', 'coachpulse:technicalTestsPending'
+  'coachpulse:debugPerf', 'coachpulse:technicalTestsPending',
+  'coachpulse:technicalTestsPendingBackup'
 ]);
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260912-presence-loading-v82';
+const APP_SHELL_VERSION = '20260917-release-v87';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -1384,7 +1385,7 @@ function startRealtimeSync(){
     applyingCloud = true;
     try{
       Object.entries(items).forEach(([k,v]) => {
-        if(k !== 'coachpulse:clientId') storage.set(k, v, {recover:true});
+        if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k)) storage.set(k, v, {recover:true});
       });
       lastCloudItemsHash = incomingHash;
       storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
@@ -6016,7 +6017,7 @@ async function pullCloud(){
   if(snap.exists()){
     applyingCloud = true;
     try{
-      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId') storage.set(k, v, {recover:true}); });
+      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k)) storage.set(k, v, {recover:true}); });
       lastCloudItemsHash = hashItems(snap.data().items || {});
       storage.clearPendingSync();
       storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
