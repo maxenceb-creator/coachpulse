@@ -66,7 +66,7 @@ const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260917-release-v88';
+const APP_SHELL_VERSION = '20260917-release-v89';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -493,6 +493,39 @@ function profilePresenceEventMatchesPlayer(event={}, player={}){
   const seasonal = service?.playerForSeason ? service.playerForSeason(player, seasonFromDate(eventDate)) : playerForSeason(player, seasonFromDate(eventDate));
   const playerTeamIds = new Set(presenceTeamIdRefs(seasonal, player));
   return eventTeamIds.some(teamId => playerTeamIds.has(teamId));
+}
+function profilePresenceDeleteKey(event={}){
+  const date = profilePresenceParseDate(event.iso || event.date || event.startDate || event.day || event.start);
+  if(!date) return '';
+  const dateKey = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+  const teamIds = presenceTeamIdRefs(event, event.teamSnapshot, event.sessionSnapshot).sort().join(',');
+  if(!teamIds) return '';
+  const title = String(event.type || event.title || event.theme || event.label || event.text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  return [dateKey, teamIds, title].join('|');
+}
+function profilePresenceDeletionMarkers(settings={}){
+  const localSettings = parseStoredJson('coachpulse:presenceSettings:v1', {});
+  const ids = new Set([
+    ...(Array.isArray(settings.deletedEventIds) ? settings.deletedEventIds : []),
+    ...(Array.isArray(localSettings.deletedEventIds) ? localSettings.deletedEventIds : []),
+    ...parseStoredJson('coachpulse:presenceEvents:deletedIds:v1', [])
+  ].map(value => String(value || '').trim()).filter(Boolean));
+  const keys = new Set([
+    ...(Array.isArray(settings.deletedEventKeys) ? settings.deletedEventKeys : []),
+    ...(Array.isArray(localSettings.deletedEventKeys) ? localSettings.deletedEventKeys : []),
+    ...parseStoredJson('coachpulse:presenceEvents:deletedKeys:v1', [])
+  ].map(value => String(value || '').trim()).filter(Boolean));
+  return {ids, keys};
+}
+function isDeletedProfilePresenceEvent(event={}, markers={ids:new Set(), keys:new Set()}){
+  const id = String(event.id || event.sessionId || event.eventId || '').trim();
+  const key = profilePresenceDeleteKey(event);
+  return Boolean((id && markers.ids.has(id)) || (key && markers.keys.has(key)));
 }
 function permissionsService(){
   return window.CoachPulsePermissionsService || null;
@@ -2111,8 +2144,14 @@ async function playerProfileLoadData(options={}){
   if(playerId && !payload.collections.players.some(player => (player.playerId || player.id) === playerId)) throw new Error('Accès non autorisé à cette joueuse.');
   await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
   const selectedPlayer = payload.collections.players.find(player => aliases.includes(String(player.playerId || player.id || '').trim())) || payload.collections.players[0] || {};
-  const presenceEvents = await presenceListEvents({forceRefresh:options.forceRefresh === true});
-  const playerPresenceEvents = presenceEvents.filter(event => profilePresenceEventMatchesPlayer(event, selectedPlayer));
+  const [presenceEvents, presenceSettings] = await Promise.all([
+    presenceListEvents({forceRefresh:options.forceRefresh === true}),
+    presenceLoadSettings().catch(() => ({}))
+  ]);
+  const deletionMarkers = profilePresenceDeletionMarkers(presenceSettings);
+  const playerPresenceEvents = presenceEvents
+    .filter(event => !isDeletedProfilePresenceEvent(event, deletionMarkers))
+    .filter(event => profilePresenceEventMatchesPlayer(event, selectedPlayer));
   const sourcePresence = presenceEventsService()?.collectionsFromEvents(playerPresenceEvents) || {sessions:[], attendance:[]};
   const sourceSessionIds = new Set((sourcePresence.sessions || []).map(profilePresenceSessionId).filter(Boolean));
   const sourceAttendance = (sourcePresence.attendance || []).filter(row => aliases.includes(String(row.playerId || row.playerSnapshot?.playerId || '').trim()));
