@@ -813,6 +813,30 @@ function testPresenceD2CodeStaysScopedToU19(){
   assert(appSource.includes("'D2'"), 'Les imports Présences doivent reconnaître le code D2.');
 }
 
+function testPlayerProfileAttendanceUsesExistingSessionsAsSource(){
+  const window = loadBrowserScript('pages/player-profile/playerProfileStats.js', {
+    PlayerProfileFilters:{dateOf(){ return ''; }, filterRows(rows){ return rows; }}
+  });
+  const sessions = [
+    {sessionId:'session-u11-1'},
+    {sessionId:'session-u11-2'},
+    {sessionId:'session-u16-1'}
+  ];
+  const attendance = [
+    {sessionId:'session-u11-1', status:'R'},
+    {sessionId:'session-u11-2', status:'NC'},
+    {sessionId:'deleted-session', status:'P'}
+  ];
+  const stats = window.PlayerProfileStats.attendanceBreakdown(attendance, sessions);
+  assert.equal(stats.totalCategorySessions, 3, 'Le compteur doit provenir des séances existantes, pas des lignes de présence.');
+  assert.equal(stats.presentSessions, 1, 'Un retard doit compter comme une présence.');
+  assert.equal(stats.lateSessions, 1, 'Le retard doit conserver son compteur dédié.');
+  assert.equal(stats.countedSessions, 1, 'Une non-convocation ne doit pas entrer dans le dénominateur.');
+  assert.equal(stats.nonConvokedSessions, 1);
+  assert.equal(stats.missingSessions, 1, 'Une séance sans statut doit être signalée sans devenir une absence.');
+  assert.equal(stats.presenceRate, 100);
+}
+
 function testHomeDashboardStaysScopedToAuthorizedTeams(){
   const appSource = fs.readFileSync('app.js', 'utf8');
 
@@ -1119,6 +1143,7 @@ testAccessRegressionSurfaceStaysComplete();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPresenceD2CodeStaysScopedToU19();
+testPlayerProfileAttendanceUsesExistingSessionsAsSource();
 testHomeDashboardStaysScopedToAuthorizedTeams();
 testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();

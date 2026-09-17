@@ -69,7 +69,7 @@ const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260917-release-v87';
+const APP_SHELL_VERSION = '20260917-release-v88';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -484,6 +484,18 @@ function isElapsedProfilePresenceRow(row={}, sessionsById=new Map(), now=new Dat
   const session = sessionsById.get(profilePresenceSessionId(row)) || {};
   const end = profilePresenceEndDate({...session, ...row, sessionSnapshot:row.sessionSnapshot || session.sessionSnapshot || session});
   return !end || end <= now;
+}
+function profilePresenceEventMatchesPlayer(event={}, player={}){
+  const service = playersService();
+  const eventDate = event.date || event.startDate || event.day || event.start || '';
+  const eventTeamIds = presenceTeamIdRefs(event, event.teamSnapshot, event.sessionSnapshot);
+  if(!eventDate || !eventTeamIds.length) return false;
+  if(service?.playerAssignedToTeamAtDate){
+    return eventTeamIds.some(teamId => service.playerAssignedToTeamAtDate(player, teamId, eventDate));
+  }
+  const seasonal = service?.playerForSeason ? service.playerForSeason(player, seasonFromDate(eventDate)) : playerForSeason(player, seasonFromDate(eventDate));
+  const playerTeamIds = new Set(presenceTeamIdRefs(seasonal, player));
+  return eventTeamIds.some(teamId => playerTeamIds.has(teamId));
 }
 function permissionsService(){
   return window.CoachPulsePermissionsService || null;
@@ -2101,10 +2113,15 @@ async function playerProfileLoadData(options={}){
   payload.collections.players = enrichPlayersWithTechnicalFootHints(payload.collections.players, technicalHints);
   if(playerId && !payload.collections.players.some(player => (player.playerId || player.id) === playerId)) throw new Error('Accès non autorisé à cette joueuse.');
   await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
-  const localPresence = presenceEventsService()?.collectionsForPlayer(aliases) || {sessions:[], attendance:[]};
+  const selectedPlayer = payload.collections.players.find(player => aliases.includes(String(player.playerId || player.id || '').trim())) || payload.collections.players[0] || {};
+  const presenceEvents = await presenceListEvents({forceRefresh:options.forceRefresh === true});
+  const playerPresenceEvents = presenceEvents.filter(event => profilePresenceEventMatchesPlayer(event, selectedPlayer));
+  const sourcePresence = presenceEventsService()?.collectionsFromEvents(playerPresenceEvents) || {sessions:[], attendance:[]};
+  const sourceSessionIds = new Set((sourcePresence.sessions || []).map(profilePresenceSessionId).filter(Boolean));
+  const sourceAttendance = (sourcePresence.attendance || []).filter(row => aliases.includes(String(row.playerId || row.playerSnapshot?.playerId || '').trim()));
   payload.collections.attendance = mergeRows([
-    ...(payload.collections.attendance || []),
-    ...(localPresence.attendance || [])
+    ...(payload.collections.attendance || []).filter(row => sourceSessionIds.has(profilePresenceSessionId(row))),
+    ...sourceAttendance
   ], row => row.id || row.attendanceId || `${row.sessionId}:${row.playerId}`);
   const seedTechnicalTests = await seedTechnicalTestsForProfile(aliases);
   const needsAthleticFallback = canUseAthletic('read') && !(payload.collections.physicalTests || []).length;
@@ -2127,26 +2144,16 @@ async function playerProfileLoadData(options={}){
       || accessiblePlayerIds.has(row.player?.playerId)
     );
   });
-  const sessionIds = new Set((payload.collections.attendance || []).map(row => row.sessionId).filter(Boolean));
   const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
-  const [sessions, matches] = await Promise.all([
-    readDocsByIdsOrField('sessions', sessionIds, 'sessionId'),
-    readDocsByIdsOrField('matches', matchIds, 'matchId')
-  ]);
-  payload.collections.sessions = mergeRows([
-    ...sessions,
-    ...(localPresence.sessions || [])
-  ], row => row.id || row.sessionId);
+  const matches = await readDocsByIdsOrField('matches', matchIds, 'matchId');
+  payload.collections.sessions = mergeRows(sourcePresence.sessions || [], row => row.id || row.sessionId);
   const sessionsById = new Map((payload.collections.sessions || [])
     .map(row => [profilePresenceSessionId(row), row])
     .filter(([id]) => id));
   payload.collections.attendance = (payload.collections.attendance || [])
     .filter(row => isElapsedProfilePresenceRow(row, sessionsById));
-  const elapsedSessionIds = new Set((payload.collections.attendance || [])
-    .map(row => profilePresenceSessionId(row))
-    .filter(Boolean));
   payload.collections.sessions = (payload.collections.sessions || [])
-    .filter(row => elapsedSessionIds.has(profilePresenceSessionId(row)) && isElapsedProfilePresenceRow(row, sessionsById));
+    .filter(row => isElapsedProfilePresenceRow(row, sessionsById));
   payload.collections.matches = matches;
   if(cacheKey) appDataCache.playerProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
   return payload;
@@ -5890,6 +5897,7 @@ async function presenceSaveEvent(event={}){
     })
   ]);
   invalidateAppDataCaches('presences');
+  invalidateAppDataCaches('playerProfiles');
   invalidateAppDataCaches('teamProfiles');
   return {sessionId, attendance:attendanceRows.length};
 }
@@ -5899,14 +5907,25 @@ async function presenceDeleteEvent(event={}){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const sessionId = String(event.sessionId || event.id || '').trim();
   if(!sessionId) throw new Error('Événement introuvable.');
-  const attendanceSnap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)));
-  const deletes = [];
-  attendanceSnap.forEach(docSnap => deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'attendance', docSnap.id))));
-  deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'sessions', sessionId)));
-  await Promise.all(deletes);
+  const [attendanceSnap, sessionSnap] = await Promise.all([
+    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId))),
+    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('sessionId', '==', sessionId)))
+  ]);
+  const refs = new Map();
+  attendanceSnap.forEach(docSnap => refs.set(`attendance/${docSnap.id}`, firebaseFns.doc(db, 'attendance', docSnap.id)));
+  sessionSnap.forEach(docSnap => refs.set(`sessions/${docSnap.id}`, firebaseFns.doc(db, 'sessions', docSnap.id)));
+  refs.set(`sessions/${sessionId}`, firebaseFns.doc(db, 'sessions', sessionId));
+  if(firebaseFns.writeBatch){
+    const batch = firebaseFns.writeBatch(db);
+    refs.forEach(ref => batch.delete(ref));
+    await batch.commit();
+  }else{
+    await Promise.all([...refs.values()].map(ref => firebaseFns.deleteDoc(ref)));
+  }
   invalidateAppDataCaches('presences');
+  invalidateAppDataCaches('playerProfiles');
   invalidateAppDataCaches('teamProfiles');
-  return {sessionId, deleted:deletes.length};
+  return {sessionId, deleted:refs.size};
 }
 function getModuleCatalog(){
   return moduleRegistry().map(module => ({id:module.id,name:module.name,icon:module.icon,section:module.section,active:module.active !== false,collection:module.collection,relatedCollections:module.relatedCollections || [],screen:module.screen,permissions:module.permissions,settings:module.settings,visible:hasModulePermission(module,'read') && module.active !== false}));

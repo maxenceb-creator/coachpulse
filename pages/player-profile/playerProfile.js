@@ -218,8 +218,7 @@
       convocations:(base.convocations || []).filter(row => Data.rowMatchesPlayer(row, aliases)),
       individualReports:(base.individualReports || []).filter(row => Data.rowMatchesPlayer(row, aliases))
     };
-    const sessionIds = new Set(out.attendance.map(row => row.sessionId).filter(Boolean));
-    out.sessions = (base.sessions || []).filter(row => sessionIds.has(row.sessionId || row.id));
+    out.sessions = (base.sessions || []).slice();
     const matchIds = new Set(out.matchEvents.map(row => row.matchId).filter(Boolean));
     out.matches = (base.matches || []).filter(row => matchIds.has(row.matchId || row.id));
     if(hasLoadedCollections) state.filteredCollectionCache[playerId] = out;
