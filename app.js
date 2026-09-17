@@ -47,10 +47,14 @@ const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
   'coachpulse:presenceEvents:v1',
   'coachpulse:presenceSettings:v1'
 ]);
+const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
+  'coachpulse:technicalTestsPending',
+  'coachpulse:technicalTestsPendingBackup'
+]);
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260915-technical-test-finalize-v79';
+const APP_SHELL_VERSION = '20260917-technical-test-drafts-v80';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -1188,7 +1192,9 @@ function cleanError(e){
 
 function collectLocalStorage(){
   return Object.fromEntries(storage.entries({
-    exclude:key => key.startsWith('coachpulse:autoBackup') || key === 'coachpulse:firebaseConfig'
+    exclude:key => key.startsWith('coachpulse:autoBackup')
+      || key === 'coachpulse:firebaseConfig'
+      || CLOUD_SYNC_LOCAL_ONLY_KEYS.has(key)
   }));
 }
 function purgeUnauthorizedLocalData(){
@@ -1332,7 +1338,7 @@ function startRealtimeSync(){
     applyingCloud = true;
     try{
       Object.entries(items).forEach(([k,v]) => {
-        if(k !== 'coachpulse:clientId') storage.set(k, v, {recover:true});
+        if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k)) storage.set(k, v, {recover:true});
       });
       lastCloudItemsHash = incomingHash;
       storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
@@ -5859,7 +5865,7 @@ async function pullCloud(){
   if(snap.exists()){
     applyingCloud = true;
     try{
-      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId') storage.set(k, v, {recover:true}); });
+      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k)) storage.set(k, v, {recover:true}); });
       lastCloudItemsHash = hashItems(snap.data().items || {});
       storage.clearPendingSync();
       storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
