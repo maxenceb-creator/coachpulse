@@ -49,16 +49,13 @@ let appRefreshInProgress = false;
 let localChangeSnapshotTimer = null;
 let presenceCacheGeneration = 0;
 const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
+  'presenceSeanceV3_6_Excel',
   'coachpulse:presenceEvents:v1',
   'coachpulse:presenceSettings:v1',
   'coachpulse:centralPlayers',
   'coachpulse:athleticTests',
   'coachpulse:medicalData',
   'coachpulse:technicalPlayerFootHints'
-]);
-const PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS = new Set([
-  'coachpulse:presenceEvents:v1',
-  'coachpulse:presenceSettings:v1'
 ]);
 const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
   'coachpulse:pendingSync', 'coachpulse:lastCloudSync', 'coachpulse:lastAutoSave',
@@ -69,7 +66,7 @@ const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260917-release-v87';
+const APP_SHELL_VERSION = '20260917-release-v88';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -1233,7 +1230,7 @@ function collectLocalStorage(){
     exclude:key => key.startsWith('coachpulse:autoBackup')
       || key.startsWith('firestore_')
       || key === 'coachpulse:firebaseConfig'
-      || (FIRESTORE_MANAGED_LOCAL_KEYS.has(key) && !PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS.has(key))
+      || FIRESTORE_MANAGED_LOCAL_KEYS.has(key)
       || CLOUD_SYNC_LOCAL_ONLY_KEYS.has(key)
   }));
 }
@@ -5988,8 +5985,8 @@ async function syncCloud(manual=false){
       updatedByClient:CLIENT_ID,
       itemsHash
     };
-    // La map legacy reste fusionnée sans suppression : certaines previews
-    // dépendent encore de ses données Présences avant migration complète.
+    // La fusion conserve les champs legacy déjà présents dans le document.
+    // Les données Présences actives sont désormais fractionnées dans sessions/attendance.
     await firebaseFns.setDoc(ref, cloudDocument, {merge:true});
     lastCloudItemsHash = itemsHash;
     storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
