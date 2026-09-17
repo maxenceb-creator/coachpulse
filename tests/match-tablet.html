@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CoachPulse Match tablet fixture</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;font:14px system-ui,sans-serif;background:#dce5df;color:#15251c}
+    #matchFrame{display:block;width:100vw;height:100vh;border:0;background:#fff}
+    #tools{position:fixed;right:8px;bottom:8px;z-index:1000;max-width:min(620px,calc(100vw - 16px));max-height:85vh;overflow:auto;background:#fff;border:2px solid #176239;border-radius:12px;box-shadow:0 8px 32px #0003}
+    #tools summary{padding:10px 14px;cursor:pointer;font-weight:800;background:#e7f3eb}#tools[open] summary{border-bottom:1px solid #c5dbcc}
+    .controls{padding:10px;display:flex;gap:6px;flex-wrap:wrap}button{min-height:40px;border:1px solid #b5cabc;border-radius:6px;background:#f5faf6;color:#16452b;padding:8px 10px;cursor:pointer;font:inherit;font-weight:700}
+    button.primary{background:#176239;color:#fff}.hint,#status{margin:0;padding:8px 12px;font-size:12px}#results{padding:0 12px 10px;max-height:42vh;overflow:auto}#results p{margin:5px 0}.pass{color:#176239}.fail{color:#b31d26}#metrics{white-space:pre-wrap;font:12px ui-monospace,monospace;margin:8px 0}.hidden{display:none!important}
+  </style>
+</head>
+<body>
+  <iframe id="matchFrame" title="Actual Match module with synthetic data"></iframe>
+  <details id="tools" open>
+    <summary>Match tablet test tools</summary>
+    <p class="hint">Actual module and CSS. Fourteen synthetic players. Storage remains in memory; no Firebase connection. Close or hide this drawer for screenshots. Press Alt+T to show it again.</p>
+    <div class="controls" id="presets">
+      <button data-size="1024,768">1024 × 768</button><button data-size="1180,820">1180 × 820</button><button data-size="1366,1024">1366 × 1024</button><button data-size="768,1024">768 × 1024</button><button data-size="390,844">390 × 844</button><button data-size="1440,900">1440 × 900</button><button id="browserSize">Use browser size</button>
+    </div>
+    <div class="controls">
+      <button id="prepare">Prepare match</button><button id="pickZones">Pick zones</button><button id="verify" class="primary">Verify layout</button><button id="reload">Reload module</button><button id="hideTools">Hide test tools</button>
+    </div>
+    <p id="status" role="status">Loading fixture…</p>
+    <div id="results" aria-live="polite"></div>
+  </details>
+  <script>
+    'use strict';
+    const frame = document.getElementById('matchFrame');
+    const tools = document.getElementById('tools');
+    const status = document.getElementById('status');
+    const fixturePlayers = Array.from({length:14}, (_, index) => ({
+      name: index===13?'AKTEPE<br>NUR':`TEST JOUEUSE ${String(index + 1).padStart(2,'0')}`,
+      firstName: `JOUEUSE ${String(index + 1).padStart(2,'0')}`, lastName:'TEST',
+      playerId:`tablet-player-${index + 1}`, id:`tablet-player-${index + 1}`,
+      team:'U13 A',teamId:'team-u13-a',teamIds:['team-u13-a'],
+      category:'U13',subCategory:'U13',season:'2026-2027',foot:'DROIT',photo:''
+    }));
+    const names = fixturePlayers.map(player => player.name);
+    const positions = ['GB','DG','DCG','DCD','DD','MCG','MDC','MCD','AIG','BU','AID'];
+    const fixtureState = {
+      matchId:1900012345000,team:'U13 A',teamId:'team-u13-a',opponent:'ÉQUIPE TEST',
+      format:'11',system:'4-3-3',duration:90,elapsed:0,running:false,
+      phase:'not_started',matchEnded:false,called:names,
+      lineup:Object.fromEntries(positions.map((position,index) => [position,names[index]])),
+      bench:names.slice(11),players:{},selected:null,zoneMode:null,zonePending:null,
+      scoreUs:0,scoreThem:0,opp:{},log:[],savedMatches:[],
+      possessionTeam:'none',kickoffTeam:'none',possessionUs:0,possessionAdv:0
+    };
+    let ready = false;
+    const nextPaint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const api = window.matchTabletHarness = {frame,fixturePlayers,fixtureState,lastResult:null};
+
+    function memoryBootstrap(seed) {
+      const memory = new Map([['coachStatsV170',JSON.stringify(seed)]]);
+      const makeStorage = () => ({
+        __tabletFixtureMemory:true,
+        get length(){return memory.size;},
+        key(index){return [...memory.keys()][index] ?? null;},
+        getItem(key){return memory.has(String(key)) ? memory.get(String(key)) : null;},
+        setItem(key,value){memory.set(String(key),String(value));},
+        removeItem(key){memory.delete(String(key));},clear(){memory.clear();}
+      });
+      Object.defineProperty(window,'localStorage',{value:makeStorage(),configurable:false});
+      Object.defineProperty(window,'sessionStorage',{value:makeStorage(),configurable:false});
+      window.__tabletFixtureMemory = memory;
+      window.__tabletFixtureState = seed;
+    }
+
+    async function loadModule() {
+      ready = false;
+      status.textContent = 'Loading actual Match module with synthetic players…';
+      const sourceUrl = new URL('../pages/coach-stats.html?tablet-fixture-source=landscape-v6',location.href);
+      const response = await fetch(sourceUrl,{cache:'no-store'});
+      if(!response.ok) throw new Error(`Module HTTP ${response.status}`);
+      let source = await response.text();
+      const dataStart = source.indexOf('const PLAYER_DB=');
+      const dataEnd = source.indexOf('\nconst ROSTER=',dataStart);
+      if(dataStart < 0 || dataEnd < dataStart) throw new Error('Embedded player fixture boundary not found.');
+      // Replace only the embedded data; all production handlers, markup and CSS remain intact.
+      source = source.slice(0,dataStart) + `const PLAYER_DB=${JSON.stringify(fixturePlayers)};` + source.slice(dataEnd);
+      const boot = `<base href="${new URL('.',sourceUrl).href}"><script>(${memoryBootstrap.toString()})(${JSON.stringify(fixtureState)});<\/script>`;
+      source = source.replace(/<head>/i,`<head>${boot}`);
+      const setup = `<script>
+        window.__prepareTabletFixture=function(){
+          state=JSON.parse(JSON.stringify(window.__tabletFixtureState));
+          ensure();buildSystem();closeZones();hideActionMenu();save();renderAll();
+          var liveTab=Array.from(document.querySelectorAll('.tabs button')).find(b=>(b.getAttribute('onclick')||'').includes("'live'"));
+          showTab('live',liveTab);window.scrollTo(0,0);
+          return {matchId:state.matchId,starters:Object.values(state.lineup).filter(Boolean).length,bench:state.bench.length};
+        };
+        window.__tabletFixtureStateSummary=function(){return JSON.parse(JSON.stringify(state))};
+        window.__setTabletSystem=function(format,system){
+          state.format=String(format);state.system=system;const slots=POSITIONS[system]||[];
+          state.lineup=Object.fromEntries(slots.map((entry,index)=>[entry[0],state.called[index]||'']));
+          state.bench=state.called.slice(slots.length);buildSystem();renderAll();window.scrollTo(0,0);
+        };
+        window.addEventListener('load',function(){
+          window.__prepareTabletFixture();
+          parent.postMessage({type:'tablet-fixture-ready'},'*');
+        },{once:true});
+      <\/script>`;
+      source = source.replace(/<\/body>/i,`${setup}</body>`);
+      frame.srcdoc = source;
+    }
+
+    function requireReady() {
+      if(!ready) throw new Error('The Match module is still loading.');
+      return frame.contentWindow;
+    }
+    function prepare() {
+      const result = requireReady().__prepareTabletFixture();
+      status.textContent = `Prepared ${result.starters} starters + ${result.bench} substitutes; fixture matchId ${result.matchId}.`;
+      return result;
+    }
+    function pickZones() {
+      const win = requireReady();
+      win.openPlayerPanel(names[9]);
+      win.actionZone('tirCadre');
+      status.textContent = 'Shot zone picker open. Touch any of the nine production zones.';
+    }
+    function resize(width,height) {
+      frame.style.width = width ? `${width}px` : '100vw';
+      frame.style.height = height ? `${height}px` : '100vh';
+      status.textContent = width ? `Iframe viewport: ${width} × ${height}.` : 'Iframe follows the browser viewport.';
+    }
+    const rect = node => node.getBoundingClientRect();
+    const visible = (win,node) => !!node && rect(node).width > 0 && rect(node).height > 0 && win.getComputedStyle(node).visibility !== 'hidden' && win.getComputedStyle(node).display !== 'none';
+    const overlaps = (a,b) => Math.min(a.right,b.right)-Math.max(a.left,b.left)>1 && Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1;
+
+    async function verify() {
+      const win = requireReady();
+      const doc = win.document;
+      const checks = [];
+      const add = (name,pass,detail='') => checks.push({name,pass:!!pass,detail});
+      win.__prepareTabletFixture();
+      await nextPaint();
+      const strip = doc.querySelector('.playerPanelActions');
+      const pitch = doc.getElementById('pitch');
+      const bench = doc.getElementById('matchBench');
+      const analysis = doc.querySelector('.playerAnalysisCard');
+      const matchLogCard = doc.querySelector('#liveLog')?.closest('.card');
+      const panel = doc.getElementById('playerActionPanel');
+      pitch.style.display='none';
+      void pitch.offsetHeight;
+      pitch.style.removeProperty('display');
+      await nextPaint();
+      const viewport = {width:doc.documentElement.clientWidth,height:doc.documentElement.clientHeight};
+      const initialPitchRect = pitch ? rect(pitch) : {width:0,height:0};
+      const upperBandRect = rect(doc.querySelector('.matchTop'));
+      const workspaceRect = rect(doc.querySelector('.matchWorkspace'));
+      const fieldAvailableHeight = viewport.height-initialPitchRect.top;
+      const fieldAvailableWidth = viewport.width-8;
+      add('A — fixture storage isolated',win.localStorage.__tabletFixtureMemory && !window.CoachPulseCentralData);
+      add('A — no horizontal page overflow',Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)<=viewport.width+1,`${Math.max(doc.documentElement.scrollWidth,doc.body.scrollWidth)} / ${viewport.width}px`);
+      add('A — no action strip or reserved space before selection',panel && !visible(win,panel) && rect(panel).height===0,`panel ${Math.round(rect(panel).width)}×${Math.round(rect(panel).height)}px`);
+      add('A — pitch is horizontal and uses nearly all tablet width',initialPitchRect.width>initialPitchRect.height && initialPitchRect.width>=viewport.width*.95,`${Math.round(initialPitchRect.width)} × ${Math.round(initialPitchRect.height)}px; ${Math.round(initialPitchRect.width/viewport.width*100)}% viewport width`);
+      add('A — complete pitch fits below the unchanged upper band',initialPitchRect.top>=upperBandRect.bottom-1&&initialPitchRect.bottom<=viewport.height-4,`band ${Math.round(upperBandRect.height)}px; pitch ${Math.round(initialPitchRect.top)}–${Math.round(initialPitchRect.bottom)} / viewport ${viewport.height}px`);
+      const benchRect = bench ? rect(bench) : {left:0,right:0,top:0,bottom:0};
+      const analysisRect = analysis ? rect(analysis) : {left:0,right:0,top:0,bottom:0};
+      const benchSlots = bench ? [...bench.querySelectorAll('.slot')] : [];
+      const benchSlotsInside = benchSlots.every(slot => {const slotRect=rect(slot);return slotRect.top>=benchRect.top-1 && slotRect.bottom<=benchRect.bottom+1 && !overlaps(slotRect,initialPitchRect);});
+      add('A — substitutes stay outside the pitch',bench && !overlaps(benchRect,initialPitchRect) && benchSlots.length===3 && benchSlotsInside,`${benchSlots.length} substitutes`);
+      add('A — bench and selected-player analysis have separate non-overlapping layout zones',bench&&analysis&&analysis.contains(bench)&&!overlaps(benchRect,rect(analysis.querySelector('.selectedBanner'))),`bench ${Math.round(benchRect.top)}–${Math.round(benchRect.bottom)}px; analysis ${Math.round(analysisRect.top)}–${Math.round(analysisRect.bottom)}px`);
+      add('A — compact upper band stays within two tactile control rows',upperBandRect.height<=116,`${Math.round(upperBandRect.height)}px`);
+      add('A — enlarged pitch exceeds the previous viewport baseline',initialPitchRect.height>({768:528,820:556,1024:760}[viewport.height]||0),`${Math.round(initialPitchRect.height)}px`);
+      add('A — all eleven starters stay inside the pitch',pitch && pitch.querySelectorAll('.slot').length===11 && [...pitch.querySelectorAll('.slot')].every(slot => {const s=rect(slot);return s.left>=initialPitchRect.left-1 && s.right<=initialPitchRect.right+1 && s.top>=initialPitchRect.top-1 && s.bottom<=initialPitchRect.bottom+1;}));
+      const starterSlots = [...pitch.querySelectorAll('.slot')];
+      add('A — starter touch targets do not overlap',starterSlots.every((slot,index)=>starterSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other)))));
+      add('A — foot 11 markers keep a 48px hitbox without card backgrounds',starterSlots.length===11&&starterSlots.every(slot=>{const r=rect(slot),style=win.getComputedStyle(slot);return r.width>=49&&r.width<=57&&r.height>=59&&r.height<=65&&style.backgroundColor==='rgba(0, 0, 0, 0)'}),starterSlots[0]?`${Math.round(rect(starterSlots[0]).width)} × ${Math.round(rect(starterSlots[0]).height)}px`:'missing');
+      add('A — avatar, short name, position and clock remain individually readable',starterSlots.every(slot=>['.slotPhoto','.slotName','.pos','.min'].every(selector=>visible(win,slot.querySelector(selector)))));
+      const tapName=names[1],tapSlot=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===tapName),tapRect=rect(tapSlot);
+      tapSlot.dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true,pointerId:31,pointerType:'touch',clientX:tapRect.left+tapRect.width/2,clientY:tapRect.top+tapRect.height/2}));
+      tapSlot.dispatchEvent(new win.PointerEvent('pointerup',{bubbles:true,pointerId:31,pointerType:'touch',clientX:tapRect.left+tapRect.width/2,clientY:tapRect.top+tapRect.height/2}));
+      await nextPaint();await nextPaint();
+      add('A — a short tap opens the existing player menu',visible(win,panel)&&panel.dataset.anchor===tapName);
+      win.closePlayerPanel();await nextPaint();
+      const dragName=names[1],dragSlot=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===dragName),dragRect=rect(dragSlot),pitchBefore=rect(pitch);
+      const dragStart={x:dragRect.left+dragRect.width/2,y:dragRect.top+dragRect.height/2},dragEnd={x:dragStart.x+70,y:dragStart.y+45};
+      dragSlot.dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true,pointerId:32,pointerType:'touch',clientX:dragStart.x,clientY:dragStart.y}));
+      dragSlot.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true,pointerId:32,pointerType:'touch',clientX:dragEnd.x,clientY:dragEnd.y}));
+      dragSlot.dispatchEvent(new win.PointerEvent('pointerup',{bubbles:true,pointerId:32,pointerType:'touch',clientX:dragEnd.x,clientY:dragEnd.y}));
+      await nextPaint();
+      const movedState=win.__tabletFixtureStateSummary(),moved=movedState.tacticalPositions.DG,movedSlot=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===dragName),movedRect=rect(movedSlot);
+      add('A — drag stores relative coordinates without opening the menu',!!moved&&moved.x>=0&&moved.x<=1&&moved.y>=0&&moved.y<=1&&!visible(win,panel),moved?`${moved.x.toFixed(3)}, ${moved.y.toFixed(3)}`:'missing');
+      const beforeRenderRatio={x:(movedRect.left+movedRect.width/2-pitchBefore.left)/pitchBefore.width,y:(movedRect.top+movedRect.height/2-pitchBefore.top)/pitchBefore.height};
+      win.renderPitch();await nextPaint();
+      const rerendered=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===dragName),rerenderedRect=rect(rerendered),pitchAfter=rect(pitch);
+      add('A — relative placement survives a responsive re-render',Math.abs((rerenderedRect.left+rerenderedRect.width/2-pitchAfter.left)/pitchAfter.width-beforeRenderRatio.x)<.01&&Math.abs((rerenderedRect.top+rerenderedRect.height/2-pitchAfter.top)/pitchAfter.height-beforeRenderRatio.y)<.01);
+      win.openPlayerPanel(dragName);win.showPositionMenu();await nextPaint();
+      const positionMenu=doc.getElementById('actionMenu'),positionButtons=[...positionMenu.querySelectorAll('.positionChoiceGroup button')],menuBox=rect(positionMenu);
+      add('A — compact canonical position selector stays tactile and inside viewport',visible(win,positionMenu)&&positionButtons.length===win.canonicalMatchPositions().length&&positionButtons.every(button=>rect(button).width>=43.5&&rect(button).height>=43.5)&&menuBox.left>=6&&menuBox.right<=viewport.width-6&&menuBox.top>=6&&menuBox.bottom<=viewport.height-6,`${positionButtons.length} positions`);
+      const beforeRole=win.__tabletFixtureStateSummary(),beforeRolePoint={...beforeRole.tacticalPositions.DG},beforeRolePlayerId=beforeRole.players[dragName].playerId,beforeRoleSeconds=beforeRole.players[dragName].seconds;
+      positionButtons.find(button=>button.textContent.trim()==='MOC')?.click();await nextPaint();await nextPaint();
+      let roleState=win.__tabletFixtureStateSummary();
+      add('A — changing DG to MOC preserves identity, clock, roster and tactical coordinates',roleState.lineup.MOC===dragName&&!roleState.lineup.DG&&roleState.players[dragName].playerId===beforeRolePlayerId&&roleState.players[dragName].seconds===beforeRoleSeconds&&roleState.bench.length===beforeRole.bench.length&&Math.abs(roleState.tacticalPositions.MOC.x-beforeRolePoint.x)<.0001&&Math.abs(roleState.tacticalPositions.MOC.y-beforeRolePoint.y)<.0001);
+      const roleSlot=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===dragName);
+      add('A — position badge updates immediately without removing the player',roleSlot?.dataset.pos==='MOC'&&roleSlot.querySelector('.pos')?.textContent==='MOC'&&pitch.querySelectorAll('.slot').length===11);
+      const roleRect=rect(roleSlot),roleStart={x:roleRect.left+roleRect.width/2,y:roleRect.top+roleRect.height/2},roleEnd={x:roleStart.x+32,y:roleStart.y-28};
+      roleSlot.dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true,pointerId:33,pointerType:'touch',clientX:roleStart.x,clientY:roleStart.y}));
+      roleSlot.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true,pointerId:33,pointerType:'touch',clientX:roleEnd.x,clientY:roleEnd.y}));
+      roleSlot.dispatchEvent(new win.PointerEvent('pointerup',{bubbles:true,pointerId:33,pointerType:'touch',clientX:roleEnd.x,clientY:roleEnd.y}));
+      await nextPaint();roleState=win.__tabletFixtureStateSummary();
+      add('A — dragging after a role change updates coordinates without changing the role',roleState.lineup.MOC===dragName&&!!roleState.tacticalPositions.MOC&&Math.abs(roleState.tacticalPositions.MOC.x-beforeRolePoint.x)>.001);
+      win.resetTacticalPlacement();await nextPaint();
+      roleState=win.__tabletFixtureStateSummary();
+      add('A — reset placement clears only tactical coordinates and preserves the changed role',Object.keys(roleState.tacticalPositions||{}).length===0&&roleState.lineup.MOC===dragName&&pitch.querySelectorAll('.slot').length===11);
+      win.saveTacticalPlacement('MCG',.46,.28);win.saveTacticalPlacement('MDC',.43,.50);win.renderPitch();await nextPaint();
+      const swapName=names[5],swapTargetName=names[6],swapSource=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===swapName),swapTarget=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===swapTargetName),swapSourceRect=rect(swapSource),swapTargetRect=rect(swapTarget);
+      const swapStart={x:swapSourceRect.left+swapSourceRect.width/2,y:swapSourceRect.top+swapSourceRect.height/2},swapEnd={x:swapTargetRect.left+swapTargetRect.width/2,y:swapTargetRect.top+swapTargetRect.height/2};
+      swapSource.dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true,pointerId:34,pointerType:'touch',clientX:swapStart.x,clientY:swapStart.y}));
+      swapSource.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true,pointerId:34,pointerType:'touch',clientX:swapEnd.x,clientY:swapEnd.y}));
+      const targetFeedback=swapTarget.classList.contains('dropReady');
+      swapSource.dispatchEvent(new win.PointerEvent('pointerup',{bubbles:true,pointerId:34,pointerType:'touch',clientX:swapEnd.x,clientY:swapEnd.y}));await nextPaint();
+      const swapped=win.__tabletFixtureStateSummary();
+      add('A — dropping on a real player hitbox swaps occupants and keeps slot coordinates',targetFeedback&&swapped.lineup.MCG===swapTargetName&&swapped.lineup.MDC===swapName&&Math.abs(swapped.tacticalPositions.MCG.x-.46)<.001&&Math.abs(swapped.tacticalPositions.MDC.x-.43)<.001&&swapped.bench.length===3);
+      const missSource=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===swapName),missTarget=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===swapTargetName),missSourceRect=rect(missSource),missTargetRect=rect(missTarget),missStart={x:missSourceRect.left+missSourceRect.width/2,y:missSourceRect.top+missSourceRect.height/2},missEnd={x:missTargetRect.right+8,y:missTargetRect.top+missTargetRect.height/2};
+      missSource.dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true,pointerId:35,pointerType:'touch',clientX:missStart.x,clientY:missStart.y}));missSource.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true,pointerId:35,pointerType:'touch',clientX:missEnd.x,clientY:missEnd.y}));missSource.dispatchEvent(new win.PointerEvent('pointerup',{bubbles:true,pointerId:35,pointerType:'touch',clientX:missEnd.x,clientY:missEnd.y}));await nextPaint();
+      const missed=win.__tabletFixtureStateSummary();
+      add('A — dropping just outside the target hitbox remains a free move',missed.lineup.MCG===swapTargetName&&missed.lineup.MDC===swapName&&!!missed.tacticalPositions.MDC);
+      const leaveSource=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===swapName),leaveTarget=[...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===swapTargetName),leaveSourceRect=rect(leaveSource),leaveTargetRect=rect(leaveTarget),leavePitchRect=rect(pitch),leaveStart={x:leaveSourceRect.left+leaveSourceRect.width/2,y:leaveSourceRect.top+leaveSourceRect.height/2},leaveOver={x:leaveTargetRect.left+leaveTargetRect.width/2,y:leaveTargetRect.top+leaveTargetRect.height/2},leaveEnd={x:leavePitchRect.left+leavePitchRect.width*.82,y:leavePitchRect.top+leavePitchRect.height*.9};
+      leaveSource.dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true,pointerId:36,pointerType:'touch',clientX:leaveStart.x,clientY:leaveStart.y}));leaveSource.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true,pointerId:36,pointerType:'touch',clientX:leaveOver.x,clientY:leaveOver.y}));const enteredTarget=leaveTarget.classList.contains('dropReady');leaveSource.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true,pointerId:36,pointerType:'touch',clientX:leaveEnd.x,clientY:leaveEnd.y}));const leftTarget=!leaveTarget.classList.contains('dropReady');leaveSource.dispatchEvent(new win.PointerEvent('pointerup',{bubbles:true,pointerId:36,pointerType:'touch',clientX:leaveEnd.x,clientY:leaveEnd.y}));await nextPaint();
+      const leftBeforeDrop=win.__tabletFixtureStateSummary();
+      add('A — leaving a highlighted hitbox before release cancels the swap',enteredTarget&&leftTarget&&leftBeforeDrop.lineup.MCG===swapTargetName&&leftBeforeDrop.lineup.MDC===swapName);
+
+
+
+      add('A — player labels never expose raw br markup',[...doc.querySelectorAll('#pitch .slotName,#matchBench .slotName')].every(label=>!/<br|&lt;br/i.test(label.textContent||'')&&!/&lt;br/i.test(label.innerHTML)));
+      add('A — player names stay on one contained line',[...doc.querySelectorAll('#pitch .slotName')].every(label=>{const style=win.getComputedStyle(label);return rect(label).width<=rect(label.closest('.slot')).width&&rect(label).height<=14&&style.whiteSpace==='nowrap'&&style.overflow==='hidden'&&style.textOverflow==='ellipsis'}));
+      add('A — clock badges never cover avatars or names',starterSlots.every(slot=>{const clock=rect(slot.querySelector('.min')),photo=rect(slot.querySelector('.slotPhoto')),name=rect(slot.querySelector('.slotName'));return !overlaps(clock,photo)&&!overlaps(clock,name)}));
+      add('A — compact bench and match feed use separate layout columns',bench&&matchLogCard&&!overlaps(benchRect,rect(matchLogCard))&&benchSlots.every(slot=>rect(slot).height<=47&&rect(slot).width<=133));
+      const goalkeeper = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[0]);
+      const striker = [...pitch.querySelectorAll('.slot')].find(slot=>slot.dataset.name===names[9]);
+      add('A — ASSE goalkeeper is left of the striker',goalkeeper&&striker&&rect(goalkeeper).left<rect(striker).left);
+      add('A — goalkeeper and striker are simultaneously accessible without horizontal scrolling',goalkeeper&&striker&&rect(goalkeeper).left>=0&&rect(striker).right<=viewport.width,`goalkeeper ${Math.round(rect(goalkeeper).left)}px; striker ${Math.round(rect(striker).right)}px`);
+
+      const scrollRoot=doc.scrollingElement;
+      scrollRoot.style.setProperty('scroll-behavior','auto','important');
+      doc.body.style.setProperty('scroll-behavior','auto','important');
+      const originalScrollY=win.scrollY;
+      win.openPlayerPanel(names[0]);
+      await nextPaint();
+      win.openPlayerPanel(names[9]);
+      await nextPaint();
+      const goalkeeperAction=[...strip.querySelectorAll('button')].find(button=>(button.getAttribute('onclick')||'').includes("duelPlayer('won')"));
+      goalkeeperAction?.click();
+      await nextPaint();
+      add('B — goalkeeper, attacker and an action work in sequence without horizontal scrolling',!!goalkeeperAction&&win.scrollX===0,`scrollX ${Math.round(win.scrollX)}px`);
+      const contextCases=[
+        {label:'gardienne',name:names[0],expected:'right'},
+        {label:'défenseure',name:names[1],expected:'right'},
+        {label:'milieu',name:names[6]},
+        {label:'attaquante',name:names[10],expected:'edge'},
+        {label:'remplaçante',name:names[11]}
+      ];
+      const contextDetails=[];
+      let allContextsValid=true;
+      for(const testCase of contextCases){
+        let slot=[...doc.querySelectorAll('#pitch .slot,#matchBench .slot')].find(node=>node.dataset.name===testCase.name);
+        slot?.scrollIntoView({block:'center',inline:'nearest'});
+        await nextPaint();
+        let slotRect=rect(slot);
+        win.openPlayerPanel(testCase.name);
+        await nextPaint();
+        slot=[...doc.querySelectorAll('#pitch .slot,#matchBench .slot')].find(node=>node.dataset.name===testCase.name);
+        slotRect=rect(slot);
+        const menuRect=rect(panel),fieldRect=rect(pitch),boundsRect=rect(slot.closest('#pitch')||slot.closest('.playerAnalysisCard')||doc.querySelector('.pitchCard')),stickyRect=doc.querySelector('.tt-header.v364-header')?.getBoundingClientRect();
+        const safeTop=stickyRect&&stickyRect.top<=8&&stickyRect.bottom>8?stickyRect.bottom+8:8;
+        const horizontalGap=Math.max(slotRect.left-menuRect.right,menuRect.left-slotRect.right,0);
+        const verticalGap=Math.max(slotRect.top-menuRect.bottom,menuRect.top-slotRect.bottom,0);
+        const near=panel.dataset.placement==='right'||panel.dataset.placement==='left'?horizontalGap<=28:verticalGap<=28;
+        const insideBounds=slot.closest('#matchBench')||menuRect.left>=boundsRect.left+6&&menuRect.right<=boundsRect.right-6&&menuRect.top>=boundsRect.top+6&&menuRect.bottom<=boundsRect.bottom-6;
+        const insideViewport=menuRect.left>=6&&menuRect.right<=viewport.width-6&&menuRect.top>=safeTop-1&&menuRect.bottom<=viewport.height-6;
+        const expectedEdgePlacement=testCase.expected==='edge'?(slotRect.right+12+menuRect.width<=Math.min(boundsRect.right-8,viewport.width-8)?'right':'left'):(testCase.expected||null);
+        const placementOk=!expectedEdgePlacement||panel.dataset.placement===expectedEdgePlacement;
+        const valid=visible(win,panel)&&panel.dataset.anchor===testCase.name&&!overlaps(menuRect,slotRect)&&near&&insideBounds&&insideViewport&&placementOk;
+        if(!valid)allContextsValid=false;
+        const flags=[visible(win,panel)?'visible':'hidden',panel.dataset.anchor===testCase.name?'anchor':'bad-anchor',!overlaps(menuRect,slotRect)?'clear':'overlap',near?'near':'far',insideBounds?'bounds':'out-bounds',insideViewport?'viewport':'out-viewport',`hgap=${Math.round(horizontalGap)}`,`vgap=${Math.round(verticalGap)}`,placementOk?'placement':'bad-placement'];
+        contextDetails.push(`${testCase.label}:${panel.dataset.placement}/${Math.round(menuRect.left)},${Math.round(menuRect.top)} ${Math.round(menuRect.width)}×${Math.round(menuRect.height)} [${flags.join(',')}]`);
+      }
+      add('B — contextual menu follows starters, edges, goal areas and substitutes',allContextsValid,contextDetails.join('; '));
+      add('B — field actions create no horizontal page scroll',win.scrollX===0,`scrollX ${Math.round(win.scrollX)}px`);
+      const buttons=strip?[...strip.querySelectorAll('button')]:[];
+      const columns=new Set(buttons.map(button=>Math.round(rect(button).left)));
+      const rows=new Set(buttons.map(button=>Math.round(rect(button).top)));
+      const expectedColumns=viewport.height<=850?4:3;
+      add('B — player selection highlights the active player',doc.querySelector('.slot.selected')?.dataset.name===names[11]);
+      add('B — ten ASSE actions use a compact multi-row grid',buttons.length===10&&columns.size===expectedColumns&&rows.size===Math.ceil(10/expectedColumns)&&win.getComputedStyle(strip).display==='grid',`${columns.size} columns × ${rows.size} rows`);
+      add('B — every contextual action keeps a 48px touch target',buttons.length===10&&buttons.every(button=>visible(win,button)&&rect(button).width>=47.5&&rect(button).height>=47.5));
+      add('B — no horizontal action strip remains',strip.scrollWidth<=strip.clientWidth+1&&win.getComputedStyle(panel).position==='absolute');
+      add('B — opening the overlay never resizes the pitch',Math.abs(rect(pitch).width-initialPitchRect.width)<=1&&Math.abs(rect(pitch).height-initialPitchRect.height)<=1);
+      doc.querySelector('.matchDirection').dispatchEvent(new win.PointerEvent('pointerdown',{bubbles:true}));
+      await nextPaint();
+      add('B — an outside touch closes the menu without changing the selected player',!visible(win,panel)&&win.__tabletFixtureStateSummary().selected===names[11]);
+      win.scrollTo(0,originalScrollY);
+      scrollRoot.style.removeProperty('scroll-behavior');
+      doc.body.style.removeProperty('scroll-behavior');
+      win.openPlayerPanel(names[5]);
+      await nextPaint();
+
+      win.actionZone('tirCadre');
+      await nextPaint();
+      const zones = [...doc.querySelectorAll('#zoneOverlay .zoneCell')];
+      const overlayRect = rect(doc.getElementById('zoneOverlay'));
+      const zoneById = id => zones.find(zone=>zone.dataset.zone===String(id));
+      add('C — nine unchanged zone IDs have 44px touch areas',zones.length===9 && new Set(zones.map(zone=>zone.dataset.zone)).size===9 && zones.every(zone=>visible(win,zone)&&rect(zone).width>=44&&rect(zone).height>=44));
+      const currentPitchRect=rect(pitch);
+      add('C — the 3×3 overlay covers the complete enlarged pitch',Math.abs(overlayRect.left-currentPitchRect.left)<=3 && Math.abs(overlayRect.right-currentPitchRect.right)<=3 && Math.abs(overlayRect.top-currentPitchRect.top)<=3 && Math.abs(overlayRect.bottom-currentPitchRect.bottom)<=3);
+      add('C — unchanged zone IDs rotate from defensive left to offensive right',rect(zoneById(7)).left<rect(zoneById(4)).left && rect(zoneById(4)).left<rect(zoneById(1)).left);
+      let everyZoneReachable = true;
+      const zoneHitDetails = [];
+      for(const zone of zones) {
+        const z=rect(zone);
+        const samplePoints=[[.5,.5],[.25,.5],[.75,.5],[.5,.25],[.5,.75]];
+        const hits=samplePoints.map(([x,y])=>doc.elementFromPoint(z.left+z.width*x,z.top+z.height*y));
+        const hit=hits.find(node=>node&&(node===zone||zone.contains(node)));
+        const reached=!!hit;
+        if(!reached)everyZoneReachable=false;
+        zoneHitDetails.push(`${zone.dataset.zone}:${reached?'ok':hits[0]?.id||hits[0]?.className||'none'}@${Math.round(z.top)}-${Math.round(z.bottom)}`);
+      }
+      add('C — every zone is visible and receives pointer hits without horizontal scrolling',everyZoneReachable&&win.scrollX===0,zoneHitDetails.join(', '));
+      win.closeZones();
+
+      win.showActionMenu('adv');
+      await nextPaint();
+      const opponentButtons = [...doc.querySelectorAll('#actionMenu .subActionGrid button')];
+      const opponentColumns=new Set(opponentButtons.map(button=>Math.round(rect(button).left)));
+      const opponentRows=new Set(opponentButtons.map(button=>Math.round(rect(button).top)));
+      const opponentRect=rect(panel),triggerRect=rect(doc.getElementById('opponentActionTrigger'));
+      const opponentGap=Math.max(triggerRect.left-opponentRect.right,opponentRect.left-triggerRect.right,triggerRect.top-opponentRect.bottom,opponentRect.top-triggerRect.bottom,0);
+      add('D — opponent selector opens only existing opponent actions',panel.classList.contains('advOnly')&&visible(win,panel)&&!visible(win,strip)&&opponentButtons.length===9&&panel.dataset.anchor==='Adversaire',`${opponentButtons.length} controls`);
+      add('D — opponent actions use the same compact touch grid',opponentButtons.length===9&&opponentColumns.size===expectedColumns&&opponentRows.size===Math.ceil(9/expectedColumns)&&opponentButtons.every(button=>rect(button).width>=47.5&&rect(button).height>=47.5));
+      add('D — opponent menu stays attached to its button and inside the viewport',opponentGap<=14&&opponentRect.left>=6&&opponentRect.right<=viewport.width-6&&opponentRect.top>=6&&opponentRect.bottom<=viewport.height-6,`${panel.dataset.placement}; gap ${Math.round(opponentGap)}px`);
+      win.hideActionMenu();
+      win.__prepareTabletFixture();
+      await nextPaint();
+      add('E — closing/resetting removes the contextual overlay',!visible(win,panel) && rect(panel).height===0);
+      add('E — pitch recovers its initial height',Math.abs(rect(pitch).height-initialPitchRect.height)<=1,`${Math.round(rect(pitch).height)} / ${Math.round(initialPitchRect.height)}px`);
+      const systemDetails=[];
+      let systemsValid=true;
+      for(const spec of [{format:8,system:'3-2-2',count:8},{format:8,system:'3-3-1',count:8},{format:11,system:'4-3-3',count:11},{format:11,system:'4-4-2',count:11},{format:11,system:'3-5-2',count:11},{format:11,system:'4-2-3-1',count:11}]){
+        win.__setTabletSystem(spec.format,spec.system);
+        await nextPaint();
+        const systemPitch=rect(pitch),systemSlots=[...pitch.querySelectorAll('.slot')],labels=systemSlots.map(slot=>slot.querySelector('.slotName')).filter(Boolean);
+        const inside=systemSlots.every(slot=>{const r=rect(slot);return r.left>=systemPitch.left-1&&r.right<=systemPitch.right+1&&r.top>=systemPitch.top-1&&r.bottom<=systemPitch.bottom+1;});
+        const clear=systemSlots.every((slot,index)=>systemSlots.slice(index+1).every(other=>!overlaps(rect(slot),rect(other))));
+        const labelsClear=labels.every((label,index)=>labels.slice(index+1).every(other=>!overlaps(rect(label),rect(other))));
+        const expectedSize=spec.format===11?{minW:49,maxW:57,minH:59,maxH:65}:{minW:49,maxW:63,minH:59,maxH:71};
+        const sizesOk=systemSlots.every(slot=>{const r=rect(slot);return r.width>=expectedSize.minW&&r.width<=expectedSize.maxW&&r.height>=expectedSize.minH&&r.height<=expectedSize.maxH});
+        const valid=systemSlots.length===spec.count&&inside&&clear&&labelsClear&&sizesOk;
+        if(!valid)systemsValid=false;
+        systemDetails.push(`${spec.system}:${valid?'ok':`count=${systemSlots.length},inside=${inside},slots=${clear},labels=${labelsClear},sizes=${sizesOk}`}`);
+      }
+      add('E — foot 8 and foot 11 systems remain spaced, readable and tactile',systemsValid,systemDetails.join('; '));
+      win.__setTabletSystem(8,'3-2-2');await nextPaint();
+      const foot8Player=names[4],foot8Before=win.__tabletFixtureStateSummary(),foot8OldPos=Object.keys(foot8Before.lineup).find(pos=>foot8Before.lineup[pos]===foot8Player);
+      win.saveTacticalPlacement(foot8OldPos,.54,.24);win.changePlayerPosition(foot8Player,'MOC');await nextPaint();await nextPaint();
+      const foot8After=win.__tabletFixtureStateSummary();
+      add('E — foot 8 role changes preserve the eight-player lineup and tactical point',foot8After.lineup.MOC===foot8Player&&Object.values(foot8After.lineup).filter(Boolean).length===8&&Math.abs(foot8After.tacticalPositions.MOC.x-.54)<.001&&Math.abs(foot8After.tacticalPositions.MOC.y-.24)<.001&&pitch.querySelectorAll('.slot').length===8);
+      win.__prepareTabletFixture();
+      await nextPaint();
+      const result = {viewport,passed:checks.every(check=>check.pass),checks,metrics:{upperBand:{height:Math.round(upperBandRect.height)},workspace:{top:Math.round(workspaceRect.top),height:Math.round(workspaceRect.height)},availableHeight:Math.round(fieldAvailableHeight),availableWidth:Math.round(fieldAvailableWidth),pitch:{top:Math.round(initialPitchRect.top),bottom:Math.round(initialPitchRect.bottom),width:Math.round(initialPitchRect.width),height:Math.round(initialPitchRect.height)},bench:{top:Math.round(benchRect.top),bottom:Math.round(benchRect.bottom),height:Math.round(benchRect.height)},analysis:{top:Math.round(analysisRect.top),bottom:Math.round(analysisRect.bottom),height:Math.round(analysisRect.height),overlapsBench:overlaps(benchRect,rect(analysis.querySelector('.selectedBanner')))},page:{clientWidth:doc.documentElement.clientWidth,scrollWidth:doc.documentElement.scrollWidth,globalHorizontalScroll:doc.documentElement.scrollWidth>doc.documentElement.clientWidth+1},contextMenu:{width:Math.round(opponentRect.width),height:Math.round(opponentRect.height),columns:opponentColumns.size},starters:pitch?.querySelectorAll('.slot').length,benchPlayers:bench?.querySelectorAll('.slot').length}};
+      api.lastResult=result;
+      const results = document.getElementById('results');
+      results.replaceChildren();
+      for(const check of checks) {const row=document.createElement('p');row.className=check.pass?'pass':'fail';row.textContent=`${check.pass?'PASS':'FAIL'} ${check.name}${check.detail?' — '+check.detail:''}`;results.appendChild(row);}
+      const metrics=document.createElement('pre');metrics.id='metrics';metrics.textContent=JSON.stringify({viewport,...result.metrics},null,2);results.appendChild(metrics);
+      status.textContent=`${result.passed?'PASS':'FAIL'} — ${checks.filter(check=>check.pass).length}/${checks.length} checks at ${viewport.width} × ${viewport.height}.`;
+      tools.open=true;
+      return result;
+    }
+    Object.assign(api,{prepare,pickZones,verify,resize,reload:loadModule,showTools(){tools.classList.remove('hidden');tools.open=true;},hideTools(){tools.classList.add('hidden');}});
+    function action(callback){return () => Promise.resolve().then(callback).catch(error => {status.textContent=error.message;tools.open=true;console.error(error);});}
+    document.getElementById('prepare').onclick=action(prepare);
+    document.getElementById('pickZones').onclick=action(pickZones);
+    document.getElementById('verify').onclick=action(verify);
+    document.getElementById('reload').onclick=action(loadModule);
+    document.getElementById('hideTools').onclick=api.hideTools;
+    document.getElementById('browserSize').onclick=()=>resize();
+    document.querySelectorAll('[data-size]').forEach(button=>button.onclick=()=>resize(...button.dataset.size.split(',').map(Number)));
+    window.addEventListener('keydown',event=>{if(event.altKey && event.key.toLowerCase()==='t'){event.preventDefault();api.showTools();}});
+    window.addEventListener('message',event=>{if(event.source===frame.contentWindow && event.data?.type==='tablet-fixture-ready'){ready=true;status.textContent=`Ready: synthetic 11 + 3 squad, actual module, ${frame.contentWindow.innerWidth} × ${frame.contentWindow.innerHeight}.`;if(new URLSearchParams(location.search).has('autorun'))setTimeout(()=>verify().catch(error=>{status.textContent='FAIL — '+error.message;console.error(error)}),80);}});
+    loadModule().catch(error=>{status.textContent=error.message;console.error(error);});
+  </script>
+</body>
+</html>
