@@ -847,6 +847,9 @@ function testPlayerProfileAttendanceUsesExistingSessionsAsSource(){
   assert(appSource.includes("parseStoredJson('coachpulse:presenceEvents:deletedIds:v1', [])"), 'La fiche doit relire les suppressions locales du calendrier.');
   assert(appSource.includes('presenceLoadSettings().catch(() => ({}))'), 'La fiche doit relire le registre cloud des suppressions.');
   assert(appSource.includes('.filter(event => !isDeletedProfilePresenceEvent(event, deletionMarkers))'), 'Les séances supprimées doivent être exclues avant les compteurs et l’historique.');
+  const renderSource = fs.readFileSync('pages/player-profile/playerProfileRender.js', 'utf8');
+  assert(renderSource.includes("['Taux de présence', `${stats.presenceRate || 0}%`, 'attendance-summary-highlight']"), 'Le bilan doit afficher le taux de présence mis en avant.');
+  assert(renderSource.includes("['Charge totale', `${summary.kpis?.minutes || 0} min`, 'attendance-summary-highlight']"), 'Le bilan doit afficher la charge totale en minutes.');
 }
 
 function testHomeDashboardStaysScopedToAuthorizedTeams(){
