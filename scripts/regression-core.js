@@ -850,6 +850,10 @@ function testPlayerProfileAttendanceUsesExistingSessionsAsSource(){
   const renderSource = fs.readFileSync('pages/player-profile/playerProfileRender.js', 'utf8');
   assert(renderSource.includes("['Taux de présence', `${stats.presenceRate || 0}%`, 'attendance-summary-highlight']"), 'Le bilan doit afficher le taux de présence mis en avant.');
   assert(renderSource.includes("['Charge totale', `${summary.kpis?.minutes || 0} min`, 'attendance-summary-highlight']"), 'Le bilan doit afficher la charge totale en minutes.');
+  const profileCss = fs.readFileSync('pages/player-profile/playerProfile.css', 'utf8');
+  assert(profileCss.includes('.attendance-summary-main{display:grid;grid-template-columns:repeat(10,minmax(0,1fr))'), 'Le bilan desktop doit aligner cinq compteurs principaux sur une ligne.');
+  assert(profileCss.includes('.attendance-summary-main .attendance-summary-highlight{grid-column:span 5'), 'Les deux indicateurs verts doivent partager équitablement la deuxième ligne.');
+  assert(profileCss.includes('.attendance-summary-detail{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))'), 'Les dix motifs doivent occuper exactement deux lignes sur desktop.');
 }
 
 function testHomeDashboardStaysScopedToAuthorizedTeams(){
