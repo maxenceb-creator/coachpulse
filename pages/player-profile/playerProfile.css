@@ -100,6 +100,9 @@ button.danger{color:var(--red);border-color:#fecaca;background:#fff5f5}
 .attendance-summary-main article{border:1px solid var(--line);border-left:5px solid var(--green);border-radius:12px;background:linear-gradient(180deg,#fff,var(--mint));padding:10px;min-width:0}
 .attendance-summary-main span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:1000;line-height:1.15}
 .attendance-summary-main b{display:block;color:var(--deep);font-size:26px;line-height:1;margin-top:6px}
+.attendance-summary-main .attendance-summary-highlight{border-color:#087a3f;border-left-color:#d7bd7b;background:#087a3f}
+.attendance-summary-main .attendance-summary-highlight span{color:rgba(255,255,255,.82)}
+.attendance-summary-main .attendance-summary-highlight b{color:#fff}
 .attendance-summary-detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:6px}
 .attendance-summary-detail span{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1px solid rgba(29,153,91,.16);border-radius:999px;background:#fff;padding:7px 9px;color:var(--muted);font-size:11px;font-weight:900}
 .attendance-summary-detail b{color:var(--deep);font-size:14px}
