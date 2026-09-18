@@ -66,7 +66,7 @@ const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260918-release-v91';
+const APP_SHELL_VERSION = '20260918-release-v92';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -1498,7 +1498,7 @@ function downloadText(content, filename, type='text/plain;charset=utf-8'){
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
-const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','physicalTestDeletions','playerMeasurements','staff_members','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
+const FIRESTORE_COLLECTIONS = ['players','teams','matches','matchEvents','sessions','attendance','presenceDeletionLogs','technicalTests','physicalTests','physicalTestDeletions','playerMeasurements','staff_members','settings','syncLogs','changeLogs','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
 function parseStoredJson(key, fallback){
   return storage.getJson(key, fallback);
 }
@@ -5858,6 +5858,9 @@ async function presenceSaveEvent(event={}){
   const service = presenceEventsService();
   const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
   const sessionId = session.sessionId || event.id;
+  const deletionLogId = sessionId;
+  const deletionLogSnap = await firebaseFns.getDoc(firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId));
+  if(deletionLogSnap.exists()) throw new Error('Cette séance a été supprimée définitivement et ne peut pas être recréée depuis un ancien cache.');
   const now = new Date().toISOString();
   const sessionTeamIds = presenceTeamIdRefs(session, event, session.teamSnapshot, event.teamSnapshot);
   const primaryTeamId = presenceTeamIdRefs(session.teamId || event.teamId, session, event).find(teamId => canAccessTeamId(teamId)) || session.teamId || event.teamId || sessionTeamIds[0] || '';
@@ -5943,25 +5946,47 @@ async function presenceDeleteEvent(event={}){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const sessionId = String(event.sessionId || event.id || '').trim();
   if(!sessionId) throw new Error('Événement introuvable.');
-  const [attendanceSnap, sessionSnap] = await Promise.all([
+  const directSessionRef = firebaseFns.doc(db, 'sessions', sessionId);
+  const [attendanceSnap, sessionSnap, directSessionSnap] = await Promise.all([
     firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId))),
-    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('sessionId', '==', sessionId)))
+    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('sessionId', '==', sessionId))),
+    firebaseFns.getDoc(directSessionRef)
   ]);
   const refs = new Map();
   attendanceSnap.forEach(docSnap => refs.set(`attendance/${docSnap.id}`, firebaseFns.doc(db, 'attendance', docSnap.id)));
   sessionSnap.forEach(docSnap => refs.set(`sessions/${docSnap.id}`, firebaseFns.doc(db, 'sessions', docSnap.id)));
-  refs.set(`sessions/${sessionId}`, firebaseFns.doc(db, 'sessions', sessionId));
-  if(firebaseFns.writeBatch){
-    const batch = firebaseFns.writeBatch(db);
-    refs.forEach(ref => batch.delete(ref));
-    await batch.commit();
-  }else{
-    await Promise.all([...refs.values()].map(ref => firebaseFns.deleteDoc(ref)));
-  }
+  if(directSessionSnap.exists()) refs.set(`sessions/${sessionId}`, directSessionRef);
+  const sessionRows = [];
+  sessionSnap.forEach(docSnap => sessionRows.push({id:docSnap.id, ...docSnap.data()}));
+  if(directSessionSnap.exists() && !sessionRows.some(row => row.id === directSessionSnap.id)) sessionRows.push({id:directSessionSnap.id, ...directSessionSnap.data()});
+  const sourceSession = sessionRows[0] || event;
+  const teamIds = presenceTeamIdRefs(sourceSession, event, sourceSession.teamSnapshot, event.teamSnapshot);
+  const primaryTeamId = sourceSession.teamId || event.teamId || teamIds[0] || '';
+  if(!primaryTeamId && !canAccessAnyPresenceTeam(sourceSession, event)) throw new Error('Équipe de la séance introuvable.');
+  if(!firebaseFns.writeBatch) throw new Error('Suppression atomique Firebase indisponible.');
+  const deletedAtIso = new Date().toISOString();
+  const deletionLogId = sessionId;
+  const batch = firebaseFns.writeBatch(db);
+  refs.forEach(ref => batch.delete(ref));
+  batch.set(firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId), firestoreSafeData({
+    deletionId:deletionLogId,
+    sessionId,
+    date:sourceSession.date || event.date || '',
+    type:sourceSession.type || event.type || '',
+    title:sourceSession.theme || sourceSession.title || event.title || '',
+    teamId:primaryTeamId,
+    teamIds,
+    deletedAtIso,
+    deletedAt:firebaseFns.serverTimestamp(),
+    deletedBy:currentUser.uid,
+    deletedByEmail:currentUser.email || '',
+    source:'Présences'
+  }));
+  await batch.commit();
   invalidateAppDataCaches('presences');
   invalidateAppDataCaches('playerProfiles');
   invalidateAppDataCaches('teamProfiles');
-  return {sessionId, deleted:refs.size};
+  return {sessionId, deleted:refs.size, deletionLogId};
 }
 function getModuleCatalog(){
   return moduleRegistry().map(module => ({id:module.id,name:module.name,icon:module.icon,section:module.section,active:module.active !== false,collection:module.collection,relatedCollections:module.relatedCollections || [],screen:module.screen,permissions:module.permissions,settings:module.settings,visible:hasModulePermission(module,'read') && module.active !== false}));

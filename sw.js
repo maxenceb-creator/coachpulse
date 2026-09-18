@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-91-release';
+const CACHE_NAME = 'coachpulse-v6-4-92-release';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
