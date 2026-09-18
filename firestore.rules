@@ -257,6 +257,13 @@ service cloud.firestore {
         && canAccessScopedDataForModule(data, 'presences');
     }
 
+    function canDeletePresenceSession(data) {
+      return canWriteSportData()
+        && canAccessModule('presences')
+        && isPresenceSession(data)
+        && canAccessScopedDataForModule(data, 'presences');
+    }
+
     function canReadPlayerDoc(playerId, data) {
       return canReadData()
         && canAccessPlayerId(playerId)
@@ -362,6 +369,7 @@ service cloud.firestore {
           )
         ) || canReadPlayerProfileData(resource.data);
       allow create: if canWriteSportData()
+        && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(sessionId))
         && (
           (canAccessModule('methodologie') && canAccessScopedData(request.resource.data))
           || (canAccessModule('presences') && isPresenceSession(request.resource.data) && canAccessScopedDataForModule(request.resource.data, 'presences'))
@@ -371,14 +379,34 @@ service cloud.firestore {
           (canAccessModule('methodologie') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data))
           || (canAccessModule('presences') && isPresenceSession(resource.data) && isPresenceSession(request.resource.data) && canAccessScopedDataForModule(resource.data, 'presences') && canAccessScopedDataForModule(request.resource.data, 'presences'))
         );
-      allow delete: if canDeleteRetiredPresenceImportSession(sessionId, resource.data);
+      allow delete: if canDeletePresenceSession(resource.data)
+        || canDeleteRetiredPresenceImportSession(sessionId, resource.data);
     }
 
     match /attendance/{attendanceId} {
       allow read: if (canReadData() && canAccessModule('presences') && canAccessScopedDataForModule(resource.data, 'presences')) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteSportData() && canAccessModule('presences') && canAccessScopedDataForModule(request.resource.data, 'presences');
+      allow create: if canWriteSportData()
+        && canAccessModule('presences')
+        && canAccessScopedDataForModule(request.resource.data, 'presences')
+        && request.resource.data.keys().hasAny(['sessionId'])
+        && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(request.resource.data.sessionId));
       allow update: if canWriteSportData() && canAccessModule('presences') && canAccessScopedDataForModule(resource.data, 'presences') && canAccessScopedDataForModule(request.resource.data, 'presences');
-      allow delete: if canDeleteCoreData(resource.data);
+      allow delete: if (
+          canWriteSportData()
+          && canAccessModule('presences')
+          && canAccessScopedDataForModule(resource.data, 'presences')
+        ) || canDeleteCoreData(resource.data);
+    }
+
+    match /presenceDeletionLogs/{deletionId} {
+      allow get: if canReadData() && canAccessModule('presences');
+      allow list: if canReadData()
+        && canAccessModule('presences')
+        && canAccessScopedDataForModule(resource.data, 'presences');
+      allow create: if canWriteSportData()
+        && canAccessModule('presences')
+        && canAccessScopedDataForModule(request.resource.data, 'presences');
+      allow update, delete: if noDelete();
     }
 
     match /technicalTests/{testId} {

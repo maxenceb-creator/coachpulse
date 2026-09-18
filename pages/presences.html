@@ -2187,6 +2187,7 @@
         if(!api?.presenceListEvents) return [];
         const cloudEvents = await api.presenceListEvents({includeRetiredPresenceSeasons:true});
         const {active:activeCloudEvents, retired:retiredCloudEvents} = splitRetiredPresenceSeasonEvents(Array.isArray(cloudEvents) ? cloudEvents : []);
+        await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);
         const merged = mergePresenceEvents(loadPresenceEvents(), activeCloudEvents.filter(event => !isDeletedPresenceEvent(event)));
         queuePresenceEventsLocalSave(merged);
         deleteRetiredPresenceEventsFromCloud(retiredCloudEvents);
@@ -2264,6 +2265,17 @@
         const api = centralDataApi();
         if(!api?.presenceDeleteEvent) throw new Error("Suppression cloud indisponible.");
         return api.presenceDeleteEvent(event);
+      }
+      async function reconcileDeletedPresenceEventsFromCloud(events=[]){
+        const api = centralDataApi();
+        const marked = (Array.isArray(events) ? events : []).filter(event => event?.id && isDeletedPresenceEvent(event));
+        if(!marked.length || !api?.presenceDeleteEvent) return {deleted:0, failed:0};
+        const results = await Promise.allSettled(marked.map(event => api.presenceDeleteEvent(event)));
+        const deleted = results.filter(result => result.status === "fulfilled").length;
+        const failed = results.length - deleted;
+        if(deleted) console.info(`[Présences] ${deleted} ancienne(s) suppression(s) réconciliée(s) avec Firebase.`);
+        if(failed) console.warn("[Présences] Réconciliation partielle des suppressions", results.filter(result => result.status === "rejected").map(result => result.reason));
+        return {deleted, failed};
       }
       function deleteRetiredPresenceEventsFromCloud(events=[]){
         const api = centralDataApi();
@@ -3063,22 +3075,25 @@
         if(!event) return;
         const label = `${typeLabel(event.type)} du ${event.date}${event.team ? " · " + event.team : ""}`;
         if(!confirm(`Supprimer définitivement cet événement ?\n\n${label}`)) return;
-        await markPresenceEventDeleted(eventId, {event, syncCloud:true});
         clearTimeout(presenceCloudSaveTimers.get(eventId));
         presenceCloudSaveTimers.delete(eventId);
-        presenceCloudWriteChains.delete(eventId);
-        removeDeletedPresenceEventFromLocalStores(event);
-        if(selectedAttendanceEventId === eventId) selectedAttendanceEventId = "";
-        let cloudError = null;
+        const pendingWrite = presenceCloudWriteChains.get(eventId);
+        setSessionMessage("Suppression Firebase en cours…", "");
         try{
+          if(pendingWrite) await pendingWrite;
           await deletePresenceEventFromCloud(event);
         }catch(error){
-          cloudError = error;
-          console.warn("[Présences] Suppression cloud différée", error);
+          console.warn("[Présences] Suppression Firebase refusée", error);
+          setSessionMessage(`Suppression non effectuée : ${error?.message || error}. La séance est conservée.`, "error");
+          return;
         }
+        presenceCloudWriteChains.delete(eventId);
+        await markPresenceEventDeleted(eventId, {event, syncCloud:true});
+        removeDeletedPresenceEventFromLocalStores(event);
+        if(selectedAttendanceEventId === eventId) selectedAttendanceEventId = "";
         render();
         renderSessionList();
-        setSessionMessage(cloudError ? `Événement masqué localement. Suppression cloud à vérifier : ${cloudError?.message || cloudError}.` : "Événement supprimé.", cloudError ? "error" : "success");
+        setSessionMessage("Événement et présences associés supprimés définitivement de Firebase.", "success");
       }
       function emptyAttendanceForEvent(teamId, dateValue, duration){
         const teamIds = eventTeamIds({teamId});
