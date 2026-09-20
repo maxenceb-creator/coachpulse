@@ -640,12 +640,24 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(rulesSource.includes('function canAccessScopedDataForModule'), 'Les règles Firestore doivent appliquer les scopes complets au niveau module.');
   assert(rulesSource.includes("canAccessModule('presences') && isPresenceSession"), 'Les sessions créées par Présences doivent être lisibles via le module Présences.');
   assert(rulesSource.includes('function canDeleteRetiredPresenceImportSession'), 'Les anciennes sessions Présences importées doivent pouvoir être purgées par un administrateur.');
+  assert(rulesSource.includes('function canDeletePresenceSession'), 'Les séances Présences ordinaires doivent pouvoir être supprimées dans le scope autorisé.');
+  assert(rulesSource.includes("match /presenceDeletionLogs/{deletionId}"), 'Les suppressions Présences doivent conserver un journal Firestore immuable.');
+  assert(rulesSource.includes('!exists(/databases/$(database)/documents/presenceDeletionLogs/$(sessionId))'), 'Firestore doit refuser la recréation d’une séance supprimée, y compris depuis un ancien client.');
+  assert(rulesSource.includes('presenceDeletionLogs/$(request.resource.data.sessionId)'), 'Firestore doit également refuser la recréation des présences associées.');
+  assert(rulesSource.includes("canAccessModule('presences')") && rulesSource.includes("allow delete: if canDeletePresenceSession(resource.data)"), 'La suppression des séances doit rester limitée au module Présences et aux équipes autorisées.');
   assert(rulesSource.includes("sessionId.matches('xlsx-2025-.*')"), 'Les règles Firestore doivent cibler explicitement les anciens imports xlsx 2025-2026.');
   assert(appSource.includes("canAccessAllPlayersForModule('presences')"), 'La lecture cloud Présences doit gérer le scope complet du module.');
   assert(appSource.includes('readPresenceSessionsForTeams'), 'Le module Présences doit lire les sessions cloud via les teamIds autorisés.');
   assert(appSource.includes("field:'createdFromPresenceModule'"), 'Le module Présences doit cibler les sessions créées depuis Présences.');
   assert(appSource.includes('function isRetiredPresenceImportSession'), 'Le module Présences doit pouvoir purger les anciennes séances importées 2025-2026.');
   assert(appSource.includes("sessionId.startsWith('xlsx-')"), 'Les anciennes séances xlsx 2025-2026 doivent être reconnues pour la purge cloud.');
+  assert(appSource.includes("firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId)"), 'La suppression atomique doit écrire son journal dans Firebase.');
+  assert(appSource.includes("Cette séance a été supprimée définitivement"), 'Une séance supprimée ne doit pas pouvoir être recréée depuis un cache ancien.');
+  const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
+  assert(presencePageSource.includes('await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);'), 'Les suppressions historiques doivent être réconciliées au chargement du calendrier.');
+  assert(presencePageSource.indexOf('await deletePresenceEventFromCloud(event);') < presencePageSource.indexOf('await markPresenceEventDeleted(eventId, {event, syncCloud:true});'), 'Le calendrier ne doit masquer une séance qu’après confirmation de Firebase.');
+  const mergeWorkflowSource = fs.readFileSync('.github/workflows/firebase-hosting-merge.yml', 'utf8');
+  assert(mergeWorkflowSource.includes('deploy --only firestore:rules'), 'Le merge sur main doit publier les règles Firestore avant le site.');
   assert(appSource.includes("moduleId:'tests-athletiques'"), 'Les Tests athlétiques doivent demander les joueuses dans leur scope module.');
   assert(fs.readFileSync('pages/tests-techniques.html', 'utf8').includes('moduleId:"tests"'), 'Les Tests techniques doivent demander les joueuses dans leur scope module.');
   assert(appSource.includes('async function athleticDeleteTest'), 'Les Tests athlétiques doivent exposer une suppression centralisée.');
@@ -819,6 +831,41 @@ function testPresenceD2CodeStaysScopedToU19(){
   assert(presencePageSource.includes('allowedStatusIds.has(patch.status)'), 'La sauvegarde doit refuser un code non autorisé pour l’équipe.');
   assert(presenceServiceSource.includes("D2:{code:'D2'"), 'Le service partagé doit normaliser le code D2.');
   assert(appSource.includes("'D2'"), 'Les imports Présences doivent reconnaître le code D2.');
+}
+
+function testPlayerProfileAttendanceUsesExistingSessionsAsSource(){
+  const window = loadBrowserScript('pages/player-profile/playerProfileStats.js', {
+    PlayerProfileFilters:{dateOf(){ return ''; }, filterRows(rows){ return rows; }}
+  });
+  const sessions = [
+    {sessionId:'session-u11-1'},
+    {sessionId:'session-u11-2'},
+    {sessionId:'session-u16-1'}
+  ];
+  const attendance = [
+    {sessionId:'session-u11-1', status:'R'},
+    {sessionId:'session-u11-2', status:'NC'},
+    {sessionId:'deleted-session', status:'P'}
+  ];
+  const stats = window.PlayerProfileStats.attendanceBreakdown(attendance, sessions);
+  assert.equal(stats.totalCategorySessions, 3, 'Le compteur doit provenir des séances existantes, pas des lignes de présence.');
+  assert.equal(stats.presentSessions, 1, 'Un retard doit compter comme une présence.');
+  assert.equal(stats.lateSessions, 1, 'Le retard doit conserver son compteur dédié.');
+  assert.equal(stats.countedSessions, 1, 'Une non-convocation ne doit pas entrer dans le dénominateur.');
+  assert.equal(stats.nonConvokedSessions, 1);
+  assert.equal(stats.missingSessions, 1, 'Une séance sans statut doit être signalée sans devenir une absence.');
+  assert.equal(stats.presenceRate, 100);
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  assert(appSource.includes("parseStoredJson('coachpulse:presenceEvents:deletedIds:v1', [])"), 'La fiche doit relire les suppressions locales du calendrier.');
+  assert(appSource.includes('presenceLoadSettings().catch(() => ({}))'), 'La fiche doit relire le registre cloud des suppressions.');
+  assert(appSource.includes('.filter(event => !isDeletedProfilePresenceEvent(event, deletionMarkers))'), 'Les séances supprimées doivent être exclues avant les compteurs et l’historique.');
+  const renderSource = fs.readFileSync('pages/player-profile/playerProfileRender.js', 'utf8');
+  assert(renderSource.includes("['Taux de présence', `${stats.presenceRate || 0}%`, 'attendance-summary-highlight']"), 'Le bilan doit afficher le taux de présence mis en avant.');
+  assert(renderSource.includes("['Charge totale', `${summary.kpis?.minutes || 0} min`, 'attendance-summary-highlight']"), 'Le bilan doit afficher la charge totale en minutes.');
+  const profileCss = fs.readFileSync('pages/player-profile/playerProfile.css', 'utf8');
+  assert(profileCss.includes('.attendance-summary-main{display:grid;grid-template-columns:repeat(10,minmax(0,1fr))'), 'Le bilan desktop doit aligner cinq compteurs principaux sur une ligne.');
+  assert(profileCss.includes('.attendance-summary-main .attendance-summary-highlight{grid-column:span 5'), 'Les deux indicateurs verts doivent partager équitablement la deuxième ligne.');
+  assert(profileCss.includes('.attendance-summary-detail{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))'), 'Les dix motifs doivent occuper exactement deux lignes sur desktop.');
 }
 
 function testHomeDashboardStaysScopedToAuthorizedTeams(){
@@ -1150,6 +1197,7 @@ testAccessRegressionSurfaceStaysComplete();
 testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPresenceD2CodeStaysScopedToU19();
+testPlayerProfileAttendanceUsesExistingSessionsAsSource();
 testHomeDashboardStaysScopedToAuthorizedTeams();
 testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();

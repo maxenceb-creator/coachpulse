@@ -238,10 +238,13 @@
     const stats = summary.attendanceSummary || {};
     const counts = stats.statusCounts || {};
     const main = [
-      ['Séances catégorie', stats.totalCategorySessions || 0],
-      ['Présences', stats.presentSessions || 0],
-      ['Retards', stats.lateSessions || 0],
-      ['Absences', stats.absenceTotal || 0]
+      ['Séances catégorie', stats.totalCategorySessions || 0, ''],
+      ['Séances comptées', stats.countedSessions || 0, ''],
+      ['Présences', stats.presentSessions || 0, ''],
+      ['Retards', stats.lateSessions || 0, ''],
+      ['Absences', stats.absenceTotal || 0, ''],
+      ['Taux de présence', `${stats.presenceRate || 0}%`, 'attendance-summary-highlight'],
+      ['Charge totale', `${summary.kpis?.minutes || 0} min`, 'attendance-summary-highlight']
     ];
     const details = [
       ['Abs. non justifiées', counts.absenceNonJustifiee || 0],
@@ -251,11 +254,13 @@
       ['Pôle Espoir', counts.poleEspoir || 0],
       ['Sélection', counts.selection || 0],
       ['Groupe pro', counts.groupePro || 0],
-      ['Autres', counts.autresAbsences || 0]
+      ['Autres', counts.autresAbsences || 0],
+      ['Non convoquée', stats.nonConvokedSessions || 0],
+      ['Statut manquant', stats.missingSessions || 0]
     ];
     return `<div class="attendance-summary">
       <div class="attendance-summary-main">
-        ${main.map(([label,value]) => `<article><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}
+        ${main.map(([label,value,className]) => `<article class="${esc(className)}"><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join('')}
       </div>
       <div class="attendance-summary-detail" aria-label="Détail des motifs d'absence">
         ${details.map(([label,value]) => `<span><b>${esc(value)}</b>${esc(label)}</span>`).join('')}
