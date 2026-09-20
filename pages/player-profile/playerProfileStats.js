@@ -80,7 +80,14 @@
       groupePro:0,
       autresAbsences:0
     };
+    const sessionIds = new Set(sessions.map(row => String(row.sessionId || row.id || '')).filter(Boolean));
+    const attendanceBySession = new Map();
     attendance.forEach(row => {
+      const sessionId = String(row.sessionId || row.sessionSnapshot?.sessionId || '').trim();
+      if(sessionIds.size && (!sessionId || !sessionIds.has(sessionId))) return;
+      if(sessionId) attendanceBySession.set(sessionId, row);
+    });
+    attendanceBySession.forEach(row => {
       const status = attendanceStatus(row);
       if(!isCountedAttendance(row)) return;
       if(['P','PRESENT','PRÉSENT','PRESENTE','PRÉSENTE'].includes(status)) statusCounts.present += 1;
@@ -104,18 +111,25 @@
       + statusCounts.selection
       + statusCounts.groupePro
       + statusCounts.autresAbsences;
-    const totalCategorySessions = Math.max(sessions.length, attendance.length);
+    const totalCategorySessions = sessionIds.size || sessions.length;
+    const nonConvokedSessions = [...attendanceBySession.values()].filter(row => ['NC','NOT-CONVOKED','NON CONVOQUEE','NON CONVOQUÉE'].includes(attendanceStatus(row))).length;
+    const countedSessions = statusCounts.present + absenceTotal;
+    const missingSessions = Math.max(0, totalCategorySessions - attendanceBySession.size);
     return {
       totalCategorySessions,
+      countedSessions,
+      nonConvokedSessions,
+      missingSessions,
       presentSessions:statusCounts.present,
       lateSessions:statusCounts.late,
       absenceTotal,
       statusCounts,
-      presenceRate:totalCategorySessions ? Math.round((statusCounts.present / totalCategorySessions) * 100) : 0
+      presenceRate:countedSessions ? Math.round((statusCounts.present / countedSessions) * 100) : 0
     };
   }
   function summarize(player, collections, state){
-    const attendance = Filters.filterRows(collections.attendance, state).filter(isCountedAttendance);
+    const allAttendance = Filters.filterRows(collections.attendance, state);
+    const attendance = allAttendance.filter(isCountedAttendance);
     const sessions = Filters.filterRows(collections.sessions, state);
     const matchEvents = Filters.filterRows(collections.matchEvents, state);
     const technicalTests = Filters.filterRows(collections.technicalTests, state);
@@ -130,7 +144,7 @@
     const latestPhysical = latest(physicalTests);
     const latestTechnical = latest(technicalTests);
     const actions = countActions(matchEvents);
-    const attendanceSummary = attendanceBreakdown(attendance, sessions);
+    const attendanceSummary = attendanceBreakdown(allAttendance, sessions);
     const linkedCounts = {
       presences:attendance.length,
       seances:sessions.length,
