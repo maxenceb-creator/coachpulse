@@ -49,6 +49,7 @@ let appRefreshInProgress = false;
 let localChangeSnapshotTimer = null;
 let presenceCacheGeneration = 0;
 const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
+  'coachStatsV170',
   'presenceSeanceV3_6_Excel',
   'coachpulse:presenceEvents:v1',
   'coachpulse:presenceSettings:v1',
@@ -66,7 +67,7 @@ const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260917-release-v88';
+const APP_SHELL_VERSION = '20260920-release-v89';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -78,6 +79,7 @@ const appDataCache = {
   teamProfiles:new Map()
 };
 let technicalPlayerFootHintsCache = null;
+let legacyManagedCloudItemsCleaned = false;
 const HOME_TEAM_SELECTION_KEY = 'coachpulse:home:selectedTeamId';
 let homeDashboardRequestId = 0;
 let centralPlayersRefreshPending = null;
@@ -1382,7 +1384,7 @@ function startRealtimeSync(){
     applyingCloud = true;
     try{
       Object.entries(items).forEach(([k,v]) => {
-        if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k)) storage.set(k, v, {recover:true});
+        if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k) && !FIRESTORE_MANAGED_LOCAL_KEYS.has(k)) storage.set(k, v, {recover:true});
       });
       lastCloudItemsHash = incomingHash;
       storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
@@ -5973,6 +5975,20 @@ async function syncCloud(manual=false){
   try{
     updateSyncState('🔄 Synchronisation...');
     const ref = getCloudRef();
+    if(!legacyManagedCloudItemsCleaned){
+      try{
+        await firebaseFns.updateDoc(ref, {
+          'items.coachStatsV170':firebaseFns.deleteField(),
+          'items.presenceSeanceV3_6_Excel':firebaseFns.deleteField(),
+          'items.coachpulse:presenceEvents:v1':firebaseFns.deleteField()
+        });
+        legacyManagedCloudItemsCleaned = true;
+      }catch(cleanupError){
+        const cleanupCode = String(cleanupError?.code || cleanupError?.message || '');
+        if(cleanupCode.includes('not-found')) legacyManagedCloudItemsCleaned = true;
+        else console.warn('Nettoyage des anciennes données agrégées différé', cleanupError);
+      }
+    }
     const payload = buildPayload();
     const safePayload = firestorePayloadService.prepare(payload, {rootPath:'$', maxBytes:950 * 1024});
     const itemsHash = hashItems(safePayload.items);
@@ -6014,7 +6030,7 @@ async function pullCloud(){
   if(snap.exists()){
     applyingCloud = true;
     try{
-      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k)) storage.set(k, v, {recover:true}); });
+      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k) && !FIRESTORE_MANAGED_LOCAL_KEYS.has(k)) storage.set(k, v, {recover:true}); });
       lastCloudItemsHash = hashItems(snap.data().items || {});
       storage.clearPendingSync();
       storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});

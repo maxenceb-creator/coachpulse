@@ -348,6 +348,10 @@ async function main() {
     assert.equal(h.state().players['TEST BEA'].tirCadre, 1);
     assert.deepEqual(h.state().log, saved.log);
     assert.equal(h.state().running, false);
+    const restoredMatchId = h.state().matchId;
+    await h.run('resetFullMatch()');
+    assert.notEqual(h.state().matchId, restoredMatchId);
+    assert.equal(h.state().savedMatches.length, 1);
   });
 
   await test('pendingSync, synced, syncError, network retry and idempotent Firestore writes', async () => {

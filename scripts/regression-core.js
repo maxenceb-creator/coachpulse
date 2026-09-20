@@ -1000,7 +1000,8 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(matchSource.includes("syncStatus:'pendingSync'"), 'Un match doit être marqué en attente avant toute tentative cloud.');
   assert(matchSource.includes("window.CoachStatsStorage.setJson('coachStatsV170',state"), 'La sauvegarde locale doit rester la première protection hors ligne.');
   assert(matchSource.includes("window.addEventListener('online',()=>syncPendingMatches"), 'Les matchs locaux doivent être retentés au retour du réseau.');
-  assert(matchSource.includes('state.matchId=state.matchId||Date.now()'), 'Le matchId doit être créé une seule fois et conservé pendant le match.');
+  assert(matchSource.includes('state.matchId=state.matchId||createMatchId()'), 'Le matchId doit être créé une seule fois et conservé pendant le match.');
+  assert(matchSource.includes('function resetCurrentMatchData(keepOpponent=false){state.matchId=createMatchId()'), 'Un nouveau match doit recevoir une identité distincte.');
   assert(matchSource.includes('event.eventId=stableMatchEventId(state.matchId'), 'Chaque événement doit recevoir un identifiant stable dès sa création.');
   assert(matchSource.includes("String(m.matchId||m.id)===String(snap.matchId)"), 'Une sauvegarde répétée doit remplacer le même match local au lieu de le dupliquer.');
   assert(appSource.includes("firebaseFns.doc(db, 'matches', match.matchId)"), 'Firestore doit utiliser matchId comme identifiant de document idempotent.');
@@ -1009,6 +1010,7 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(appSource.includes("Array.isArray(stats?.savedMatches) ? stats.savedMatches"), 'Les matchs locaux historiques doivent être récupérables par la migration non destructive.');
   assert(appSource.includes("Array.isArray(m.log) ? m.log"), 'Le fil réel du match doit alimenter matchEvents.');
   assert(rulesSource.includes('match /matches/{matchId}') && rulesSource.includes('match /matchEvents/{eventId}'), 'Les règles doivent couvrir matches et matchEvents.');
+  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessScopedDataForModule(resource.data, 'stats');"), 'La suppression d’un événement Match doit utiliser les permissions du module Match.');
 }
 
 function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
@@ -1100,6 +1102,7 @@ function testFirestorePayloadBoundary(){
     storage:{
       entries({exclude}){
         return [
+          ['coachStatsV170', JSON.stringify({savedMatches:[{log:'x'.repeat(1024 * 1024)}]})],
           ['presenceSeanceV3_6_Excel', 'x'.repeat(1024 * 1024)],
           ['coachpulse:presenceEvents:v1', JSON.stringify([{id:'session-1'}])],
           ['coachpulse:ordinary-setting', 'kept']
@@ -1108,11 +1111,14 @@ function testFirestorePayloadBoundary(){
     }
   });
   vm.runInContext(`${managedKeysSource}\n${localOnlyKeysSource}\n${collectLocalStorageSource}\nthis.result = collectLocalStorage();`, commonBaseContext);
-  assert.deepEqual(Object.keys(commonBaseContext.result), ['coachpulse:ordinary-setting'], 'Un historique Présences supérieur à 1 Mio ne doit plus entrer dans le document common_base.');
+  assert.deepEqual(Object.keys(commonBaseContext.result), ['coachpulse:ordinary-setting'], 'Les historiques Match et Présences gérés par collections ne doivent plus entrer dans common_base.');
   assert(appSource.includes("const safePayload = firestorePayloadService.prepare(payload, {rootPath:'$', maxBytes:950 * 1024});"), 'La synchronisation globale doit nettoyer et borner le document juste avant setDoc.');
   assert(appSource.includes('...safePayload,'), 'setDoc doit recevoir le payload reconstruit, jamais le payload brut.');
   assert(appSource.includes("key.startsWith('firestore_')"), 'Les clés internes IndexedDB/Firestore ne doivent jamais être sauvegardées comme données métier.');
   assert(appSource.includes("'presenceSeanceV3_6_Excel',\n  'coachpulse:presenceEvents:v1'"), 'Le fichier Présences historique et le cache moderne doivent être gérés hors du document agrégé.');
+  assert(appSource.includes("'coachStatsV170',"), 'L’état Match doit être géré par matches/matchEvents et exclu du document agrégé.');
+  assert(appSource.includes("'items.coachStatsV170':firebaseFns.deleteField()"), 'L’ancienne copie Match doit être supprimée de common_base pour libérer sa taille.');
+  assert(appSource.includes('!FIRESTORE_MANAGED_LOCAL_KEYS.has(k)'), 'Une ancienne copie cloud ne doit pas réinjecter un état métier géré par collection.');
   assert(appSource.includes('|| FIRESTORE_MANAGED_LOCAL_KEYS.has(key)'), 'Les données déjà fractionnées dans les collections centrales doivent être exclues de common_base.');
   assert(!appSource.includes('PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS'), 'Aucune exception ne doit réinjecter les données Présences dans le document Firestore unique.');
   assert(appSource.includes('firebaseFns.setDoc(ref, cloudDocument, {merge:true})'), 'La synchronisation legacy ne doit supprimer aucune clé common_base existante.');
