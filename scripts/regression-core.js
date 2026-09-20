@@ -960,6 +960,27 @@ function testPlayerProfileRenderStartsEmptyAndUsesPlayerIds(){
   assert(emptyIdentity.includes('Sélectionne une joueuse pour charger sa fiche complète.'));
 }
 
+function testCompletedCoachStatsMatchesFeedTeamProfile(){
+  const window = loadBrowserScript('pages/team-profile/teamProfileFilters.js', {
+    TeamProfileData:{
+      dateOf(row){ return row.date || ''; },
+      seasonOf(row){ return row.season || ''; },
+      currentSeason(){ return '2026-2027'; }
+    }
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.TeamProfileFilters.resultOf({status:'COMPLETED', scoreUs:0, scoreThem:6}))),
+    {code:'loss', label:'Défaite'},
+    'Un match Coach Stats terminé doit alimenter les défaites et la série de la fiche équipe.'
+  );
+  assert.equal(window.TeamProfileFilters.resultOf({status:'scheduled', scoreUs:0, scoreThem:0}).code, 'planned');
+
+  const coachStatsSource = fs.readFileSync('pages/coach-stats.html', 'utf8');
+  assert(coachStatsSource.includes("v51IsAdv(r)?'adv':'team'"), 'Le fil de bilan doit distinguer visuellement les actions équipe et adversaire.');
+  assert(coachStatsSource.includes("button.id='quickNewMatchBtn'"), 'Le bandeau Match doit proposer le raccourci Nouveau match.');
+  assert(coachStatsSource.includes("if(saveCurrentMatch()){resetCurrentMatchData(false)"), 'Le raccourci doit sauvegarder le match courant avant de préparer le suivant.');
+}
+
 function testPlayerArchiveUsesDirectStatusPatch(){
   const appSource = fs.readFileSync('app.js', 'utf8');
   const match = appSource.match(/async function adminArchivePlayer[\s\S]*?\n}\nfunction isPlayerReference/);
@@ -1201,6 +1222,7 @@ testPlayerProfileAttendanceUsesExistingSessionsAsSource();
 testHomeDashboardStaysScopedToAuthorizedTeams();
 testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
+testCompletedCoachStatsMatchesFeedTeamProfile();
 testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
 testPerformanceCriticalPathStaysNonBlocking();

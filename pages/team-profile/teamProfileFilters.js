@@ -53,7 +53,8 @@
   function resultOf(match={}){
     const status = String(match.status || match.state || '').toLowerCase();
     if(status.includes('annul')) return {code:'cancelled', label:'Annulé'};
-    if(status && !status.includes('termin') && !status.includes('done') && !status.includes('final')) return {code:'planned', label:'À venir'};
+    const isFinished = match.matchEnded === true || ['termin', 'done', 'final', 'complete', 'finished', 'played', 'joue'].some(value => status.includes(value));
+    if(status && !isFinished) return {code:'planned', label:'À venir'};
     const score = scoreOf(match);
     if(score.forGoals > score.againstGoals) return {code:'win', label:'Victoire'};
     if(score.forGoals < score.againstGoals) return {code:'loss', label:'Défaite'};
