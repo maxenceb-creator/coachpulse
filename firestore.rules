@@ -320,6 +320,32 @@ service cloud.firestore {
         && (level == 'ADMIN' || (hasScopeFields(after) && scopedTeams(after).hasAny(teams)));
     }
 
+    function moduleAllowedFrom(modules, level, staffRole, moduleId) {
+      return level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0 || modules.hasAny([moduleId]);
+    }
+
+    function canReadSessionRecord(sessionId, data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      let scopes = profile.get('moduleScopes', {});
+      let direct = level == 'ADMIN' || (hasScopeFields(data) && scopedTeams(data).hasAny(teams));
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && (
+          (direct && (moduleAllowedFrom(modules, level, staffRole, 'methodologie')
+            || moduleAllowedFrom(modules, level, staffRole, 'playerProfile')))
+          || ((isPresenceSession(data) || isRetiredPresenceImportSessionId(sessionId))
+            && moduleAllowedFrom(modules, level, staffRole, 'presences')
+            && (direct || staffRole == 'ADMIN'
+              || (scopes is map && moduleScopeHasAllPlayers(scopes, 'presences'))))
+        );
+    }
+
     function legacyPermissionFromRoleValue(staffRole) {
       return staffRole == 'ADMIN' ? 'ADMIN'
         : (staffRole in ['RESPONSABLE', 'RESPONSABLE_CATEGORIE'] ? 'EDITEUR'
@@ -419,14 +445,7 @@ service cloud.firestore {
     }
 
     match /sessions/{sessionId} {
-      allow read: if (
-          canReadData()
-          && (
-            (canAccessModule('methodologie') && canAccessDirectData(resource.data))
-            || (canAccessModule('presences') && isPresenceSession(resource.data) && (canAccessDirectData(resource.data) || moduleScopeAllowsAllPlayers('presences')))
-            || (canAccessModule('presences') && isRetiredPresenceImportSessionId(sessionId) && (canAccessDirectData(resource.data) || moduleScopeAllowsAllPlayers('presences')))
-          )
-        ) || (canReadData() && canAccessModule('playerProfile') && canAccessDirectData(resource.data));
+      allow read: if canReadSessionRecord(sessionId, resource.data);
       allow create: if canWriteSportData()
         && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(sessionId))
         && (
