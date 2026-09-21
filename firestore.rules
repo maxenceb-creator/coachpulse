@@ -346,6 +346,31 @@ service cloud.firestore {
         && (level == 'ADMIN' || canAccessMatchEventScope(after, teams));
     }
 
+    function canAccessAttendanceScope(data, teams, allPlayers) {
+      return allPlayers
+        || (hasScopeFields(data) && scopedTeams(data).hasAny(teams))
+        || (data.keys().hasAny(['playerId']) && linkedTeamMatches('players', data.playerId, teams))
+        || (data.keys().hasAny(['sessionId']) && linkedTeamMatches('sessions', data.sessionId, teams));
+    }
+
+    function canWriteAttendanceData(before, after) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      let scopes = profile.get('moduleScopes', {});
+      let allPlayers = level == 'ADMIN' || staffRole == 'ADMIN'
+        || (scopes is map && moduleScopeHasAllPlayers(scopes, 'presences'));
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['SAISIE', 'EDITEUR', 'ADMIN']
+        && moduleAllowedFrom(modules, level, staffRole, 'presences')
+        && canAccessAttendanceScope(before, teams, allPlayers)
+        && canAccessAttendanceScope(after, teams, allPlayers);
+    }
+
     function moduleAllowedFrom(modules, level, staffRole, moduleId) {
       return level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0 || modules.hasAny([moduleId]);
     }
@@ -492,12 +517,10 @@ service cloud.firestore {
     match /attendance/{attendanceId} {
       allow read: if (canReadData() && canAccessModule('presences') && canAccessSessionScopedDataForModule(resource.data, 'presences'))
         || (canReadData() && canAccessModule('playerProfile') && canAccessSessionScopedData(resource.data));
-      allow create: if canWriteSportData()
-        && canAccessModule('presences')
-        && canAccessSessionScopedDataForModule(request.resource.data, 'presences')
+      allow create: if canWriteAttendanceData(request.resource.data, request.resource.data)
         && request.resource.data.keys().hasAny(['sessionId'])
         && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(request.resource.data.sessionId));
-      allow update: if canWriteSportData() && canAccessModule('presences') && canAccessSessionScopedDataForModule(resource.data, 'presences') && canAccessSessionScopedDataForModule(request.resource.data, 'presences');
+      allow update: if canWriteAttendanceData(resource.data, request.resource.data);
       allow delete: if (
           canWriteSportData()
           && canAccessModule('presences')
