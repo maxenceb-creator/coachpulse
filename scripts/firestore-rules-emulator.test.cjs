@@ -40,6 +40,13 @@ async function main() {
     }
     await assertFails(getDoc(doc(environment.unauthenticatedContext().firestore(), 'players', 'pU11')));
     await assertFails(getDoc(doc(db, 'unexpected', 'record')));
+    process.stdout.write('Checking authorized match update\n');
+    await assertSucceeds(setDoc(doc(db, 'matches', 'mU11'), {matchId: 'mU11', teamId: 'U11', score: '1-0'}));
+    process.stdout.write('Checking authorized attendance create\n');
+    await assertSucceeds(setDoc(doc(db, 'attendance', 'newU11'), {attendanceId: 'newU11', sessionId: 'sU11'}));
+    process.stdout.write('Checking authorized technical test create\n');
+    await assertSucceeds(setDoc(doc(db, 'technicalTests', 'newU11'), {testId: 'newU11', playerId: 'pU11'}));
+    process.stdout.write('Checking rejected cross-team match update\n');
     await assertFails(setDoc(doc(db, 'matches', 'mU11'), {matchId: 'mU11', teamId: 'U13'}));
     assert.equal((await getDoc(doc(db, 'matches', 'mU11'))).data().teamId, 'U11');
     process.stdout.write('Firestore rules emulator guards OK\n');
