@@ -183,9 +183,13 @@ service cloud.firestore {
         .concat(data.keys().hasAny(['rosterTeamIds']) && data.rosterTeamIds is list ? data.rosterTeamIds : []);
     }
 
-    function canAccessScopedData(data) {
+    function canAccessDirectData(data) {
       return permissionLevel() == 'ADMIN'
-        || (hasScopeFields(data) && canAccessTeamList(scopedTeams(data)))
+        || (hasScopeFields(data) && canAccessTeamList(scopedTeams(data)));
+    }
+
+    function canAccessScopedData(data) {
+      return canAccessDirectData(data)
         || (data.keys().hasAny(['playerId']) && canAccessLinkedDocument('players', data.playerId));
     }
 
@@ -244,7 +248,7 @@ service cloud.firestore {
     function canReadPlayerDoc(playerId, data) {
       return canReadData()
         && canAccessPlayerId(playerId)
-        && canAccessScopedData(data);
+        && canAccessDirectData(data);
     }
 
     function noDelete() {
@@ -283,15 +287,16 @@ service cloud.firestore {
         && canAccessModule('database')
         && request.resource.data.playerId == playerId
         && request.resource.data.status in ['ACTIVE', 'ARCHIVED', 'active', 'injured', 'left', 'archived']
-        && canAccessScopedData(request.resource.data);
+        && canAccessDirectData(request.resource.data);
       allow update: if canManageCoreData()
         && canAccessModule('database')
         && resource.data.playerId == playerId
         && request.resource.data.playerId == playerId
         && request.resource.data.status in ['ACTIVE', 'ARCHIVED', 'active', 'injured', 'left', 'archived']
-        && canAccessScopedData(resource.data)
-        && canAccessScopedData(request.resource.data);
-      allow delete: if canWriteSportData() && canAccessModule('tests') && canAccessScopedDataForModule(resource.data, 'tests');
+        && canAccessDirectData(resource.data)
+        && canAccessDirectData(request.resource.data);
+      allow delete: if canWriteSportData() && canAccessModule('tests')
+        && (canAccessDirectData(resource.data) || moduleScopeAllowsAllPlayers('tests'));
     }
 
     match /teams/{teamId} {
@@ -323,9 +328,11 @@ service cloud.firestore {
     }
 
     match /matches/{matchId} {
-      allow read: if (canReadData() && canAccessModule('stats') && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteSportData() && canAccessModule('stats') && canAccessScopedData(request.resource.data);
-      allow update: if canWriteSportData() && canAccessModule('stats') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
+      allow read: if canReadData()
+        && (canAccessModule('stats') || canAccessModule('playerProfile'))
+        && canAccessDirectData(resource.data);
+      allow create: if canWriteSportData() && canAccessModule('stats') && canAccessDirectData(request.resource.data);
+      allow update: if canWriteSportData() && canAccessModule('stats') && canAccessDirectData(resource.data) && canAccessDirectData(request.resource.data);
       allow delete: if noDelete();
     }
 
@@ -341,21 +348,23 @@ service cloud.firestore {
       allow read: if (
           canReadData()
           && (
-            (canAccessModule('methodologie') && canAccessScopedData(resource.data))
-            || (canAccessModule('presences') && isPresenceSession(resource.data) && canAccessScopedDataForModule(resource.data, 'presences'))
-            || (canAccessModule('presences') && isRetiredPresenceImportSessionId(sessionId) && canAccessScopedDataForModule(resource.data, 'presences'))
+            (canAccessModule('methodologie') && canAccessDirectData(resource.data))
+            || (canAccessModule('presences') && isPresenceSession(resource.data) && (canAccessDirectData(resource.data) || moduleScopeAllowsAllPlayers('presences')))
+            || (canAccessModule('presences') && isRetiredPresenceImportSessionId(sessionId) && (canAccessDirectData(resource.data) || moduleScopeAllowsAllPlayers('presences')))
           )
-        ) || canReadPlayerProfileData(resource.data);
+        ) || (canReadData() && canAccessModule('playerProfile') && canAccessDirectData(resource.data));
       allow create: if canWriteSportData()
         && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(sessionId))
         && (
-          (canAccessModule('methodologie') && canAccessScopedData(request.resource.data))
-          || (canAccessModule('presences') && isPresenceSession(request.resource.data) && canAccessScopedDataForModule(request.resource.data, 'presences'))
+          (canAccessModule('methodologie') && canAccessDirectData(request.resource.data))
+          || (canAccessModule('presences') && isPresenceSession(request.resource.data) && (canAccessDirectData(request.resource.data) || moduleScopeAllowsAllPlayers('presences')))
         );
       allow update: if canWriteSportData()
         && (
-          (canAccessModule('methodologie') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data))
-          || (canAccessModule('presences') && isPresenceSession(resource.data) && isPresenceSession(request.resource.data) && canAccessScopedDataForModule(resource.data, 'presences') && canAccessScopedDataForModule(request.resource.data, 'presences'))
+          (canAccessModule('methodologie') && canAccessDirectData(resource.data) && canAccessDirectData(request.resource.data))
+          || (canAccessModule('presences') && isPresenceSession(resource.data) && isPresenceSession(request.resource.data)
+            && (canAccessDirectData(resource.data) || moduleScopeAllowsAllPlayers('presences'))
+            && (canAccessDirectData(request.resource.data) || moduleScopeAllowsAllPlayers('presences')))
         );
       allow delete: if canDeletePresenceSession(resource.data)
         || canDeleteRetiredPresenceImportSession(sessionId, resource.data);
