@@ -305,6 +305,21 @@ service cloud.firestore {
         );
     }
 
+    function canWriteDirectModuleData(moduleId, before, after) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['SAISIE', 'EDITEUR', 'ADMIN']
+        && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0 || modules.hasAny([moduleId]))
+        && (level == 'ADMIN' || (hasScopeFields(before) && scopedTeams(before).hasAny(teams)))
+        && (level == 'ADMIN' || (hasScopeFields(after) && scopedTeams(after).hasAny(teams)));
+    }
+
     function legacyPermissionFromRoleValue(staffRole) {
       return staffRole == 'ADMIN' ? 'ADMIN'
         : (staffRole in ['RESPONSABLE', 'RESPONSABLE_CATEGORIE'] ? 'EDITEUR'
@@ -390,8 +405,8 @@ service cloud.firestore {
       allow read: if canReadData()
         && (canAccessModule('stats') || canAccessModule('playerProfile'))
         && canAccessDirectData(resource.data);
-      allow create: if canWriteSportData() && canAccessModule('stats') && canAccessDirectData(request.resource.data);
-      allow update: if canWriteSportData() && canAccessModule('stats') && canAccessDirectData(resource.data) && canAccessDirectData(request.resource.data);
+      allow create: if canWriteDirectModuleData('stats', request.resource.data, request.resource.data);
+      allow update: if canWriteDirectModuleData('stats', resource.data, request.resource.data);
       allow delete: if noDelete();
     }
 
