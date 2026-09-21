@@ -166,44 +166,11 @@ service cloud.firestore {
       return data.keys().hasAny([key]) ? data[key] : '';
     }
 
-    function canAccessLinkedPlayer(playerId) {
-      return playerId != ''
-        && exists(/databases/$(database)/documents/players/$(playerId))
-        && (
-          canAccessTeam(valueOrEmpty(get(/databases/$(database)/documents/players/$(playerId)).data, 'teamId'))
-          || (
-            get(/databases/$(database)/documents/players/$(playerId)).data.keys().hasAny(['teamIds'])
-            && canAccessTeamList(get(/databases/$(database)/documents/players/$(playerId)).data.teamIds)
-          )
-          || (
-            get(/databases/$(database)/documents/players/$(playerId)).data.keys().hasAny(['rosterTeamIds'])
-            && canAccessTeamList(get(/databases/$(database)/documents/players/$(playerId)).data.rosterTeamIds)
-          )
-        );
-    }
-
-    function canAccessLinkedMatch(matchId) {
-      return matchId != ''
-        && exists(/databases/$(database)/documents/matches/$(matchId))
-        && (
-          canAccessTeam(valueOrEmpty(get(/databases/$(database)/documents/matches/$(matchId)).data, 'teamId'))
-          || (
-            get(/databases/$(database)/documents/matches/$(matchId)).data.keys().hasAny(['teamIds'])
-            && canAccessTeamList(get(/databases/$(database)/documents/matches/$(matchId)).data.teamIds)
-          )
-        );
-    }
-
-    function canAccessLinkedSession(sessionId) {
-      return sessionId != ''
-        && exists(/databases/$(database)/documents/sessions/$(sessionId))
-        && (
-          canAccessTeam(valueOrEmpty(get(/databases/$(database)/documents/sessions/$(sessionId)).data, 'teamId'))
-          || (
-            get(/databases/$(database)/documents/sessions/$(sessionId)).data.keys().hasAny(['teamIds'])
-            && canAccessTeamList(get(/databases/$(database)/documents/sessions/$(sessionId)).data.teamIds)
-          )
-        );
+    function canAccessLinkedDocument(collection, documentId) {
+      let path = /databases/$(database)/documents/$(collection)/$(documentId);
+      return documentId != ''
+        && exists(path)
+        && canAccessTeamList(scopedTeams(get(path).data));
     }
 
     function hasScopeFields(data) {
@@ -219,9 +186,9 @@ service cloud.firestore {
     function canAccessScopedData(data) {
       return permissionLevel() == 'ADMIN'
         || (hasScopeFields(data) && canAccessTeamList(scopedTeams(data)))
-        || (data.keys().hasAny(['playerId']) && canAccessLinkedPlayer(data.playerId))
-        || (data.keys().hasAny(['matchId']) && canAccessLinkedMatch(data.matchId))
-        || (data.keys().hasAny(['sessionId']) && canAccessLinkedSession(data.sessionId));
+        || (data.keys().hasAny(['playerId']) && canAccessLinkedDocument('players', data.playerId))
+        || (data.keys().hasAny(['matchId']) && canAccessLinkedDocument('matches', data.matchId))
+        || (data.keys().hasAny(['sessionId']) && canAccessLinkedDocument('sessions', data.sessionId));
     }
 
     function canAccessScopedDataForModule(data, moduleId) {
