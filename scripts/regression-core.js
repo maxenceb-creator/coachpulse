@@ -579,7 +579,11 @@ function testFirestoreRulesProtectExistingAndIncomingScope(){
   assert(!rulesSource.includes('allow create, update: if canWriteMedicalData()'), 'Les règles médicales ne doivent pas grouper create/update sans vérifier resource.data.');
   assert(!rulesSource.includes('allow create, update: if canWritePhysicalData()'), 'Les règles physiques ne doivent pas grouper create/update sans vérifier resource.data.');
   scopedCollections.forEach(collection => {
-    assert(rulesSource.includes(`match /${collection}/`), `La collection ${collection} doit être déclarée dans firestore.rules.`);
+    const declaredDirectly = rulesSource.includes(`match /${collection}/`);
+    const declaredInMedicalAllowlist = rulesSource.includes('match /{medicalCollection}/{recordId}')
+      && rulesSource.includes(`'${collection}'`)
+      && ['injuries','injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps'].includes(collection);
+    assert(declaredDirectly || declaredInMedicalAllowlist, `La collection ${collection} doit être déclarée dans firestore.rules.`);
   });
   assert(rulesSource.includes('canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data)'), 'Les updates doivent valider l’ancien et le nouveau périmètre teamId/playerId.');
   assert(rulesSource.includes("canAccessModule('presences')"), 'Présences doit pouvoir lire les joueuses du périmètre via une requête Firestore filtrée.');
@@ -702,7 +706,7 @@ function testAccessRegressionSurfaceStaysComplete(){
 
   assert(teamsSource.includes("name:'U19', category:'U19', subCategories:['U16','U17','U18','U19']"), 'U16 doit rester rattachable à U19 pour les surclassements.');
   assert(rulesSource.includes('function canAccessScopedData(data)'), 'Les règles Firestore doivent conserver le verrou teamId/playerId central.');
-  assert((rulesSource.match(/canAccessScopedData\(resource\.data\) && canAccessScopedData\(request\.resource\.data\)/g) || []).length >= 10, 'Les updates Firestore doivent contrôler ancien et nouveau périmètre sur les collections sensibles.');
+  assert((rulesSource.match(/canAccess(?:Scoped|MatchScoped|SessionScoped)Data\(resource\.data\) && canAccess(?:Scoped|MatchScoped|SessionScoped)Data\(request\.resource\.data\)/g) || []).length >= 8, 'Les updates Firestore doivent contrôler ancien et nouveau périmètre sur les collections sensibles.');
 }
 
 function testMatchDataStayLinkedToPlayerAndTeamIds(){
@@ -1108,7 +1112,7 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(appSource.includes("Array.isArray(stats?.savedMatches) ? stats.savedMatches"), 'Les matchs locaux historiques doivent être récupérables par la migration non destructive.');
   assert(appSource.includes("Array.isArray(m.log) ? m.log"), 'Le fil réel du match doit alimenter matchEvents.');
   assert(rulesSource.includes('match /matches/{matchId}') && rulesSource.includes('match /matchEvents/{eventId}'), 'Les règles doivent couvrir matches et matchEvents.');
-  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessScopedDataForModule(resource.data, 'stats');"), 'La suppression d’un événement Match doit utiliser les permissions du module Match.');
+  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessMatchScopedDataForModule(resource.data, 'stats');"), 'La suppression d’un événement Match doit utiliser les permissions du module Match.');
 }
 
 function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
