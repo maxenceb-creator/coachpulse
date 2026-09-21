@@ -1,5 +1,6 @@
 (function(global){
   const Filters = global.PlayerProfileFilters;
+  const Data = global.PlayerProfileData;
   function n(value){ const out = Number(value); return Number.isFinite(out) ? out : 0; }
   function latest(rows=[]){ return rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a)))[0] || null; }
   function text(value){ return String(value ?? '').trim(); }
@@ -49,6 +50,53 @@
       out[key] = (out[key] || 0) + 1;
     });
     return out;
+  }
+  function normalizedName(value){
+    return text(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  }
+  function matchPlayer(match={}, player={}){
+    const aliases = new Set((Data?.playerAliases?.(player) || [player.playerId, player.id, player.displayName, player.name]).map(text).filter(Boolean));
+    const nameAliases = new Set([...aliases].map(normalizedName).filter(Boolean));
+    for(const [playerName, raw] of Object.entries(match.players || {})){
+      const row = raw || {};
+      const ids = [row.playerId, row.playerSnapshot?.playerId].map(text).filter(Boolean);
+      const names = [playerName, row.playerName, row.name, row.playerSnapshot?.playerName, row.playerSnapshot?.displayName].map(normalizedName).filter(Boolean);
+      if(ids.some(id => aliases.has(id)) || names.some(name => nameAliases.has(name))) return {playerName, ...row};
+    }
+    return null;
+  }
+  function normalizedPositionSeconds(positionSeconds={}, totalSeconds=0){
+    const rows = Object.entries(positionSeconds || {}).map(([position, seconds]) => [position, Math.max(0, n(seconds))]).filter(([,seconds]) => seconds > 0);
+    const positionTotal = rows.reduce((total,[,seconds]) => total + seconds, 0);
+    const target = Math.max(0, n(totalSeconds)) || positionTotal;
+    const ratio = positionTotal > target && target > 0 ? target / positionTotal : 1;
+    return Object.fromEntries(rows.map(([position,seconds]) => [position, Math.round(seconds * ratio)]));
+  }
+  function matchPerformance(player={}, matches=[]){
+    const totals = {matches:0, seconds:0, but:0, passe:0, tirCadre:0, tirNonCadre:0, centre:0, progression:0, entree20:0, recup:0, duelWon:0, duelLost:0, positionSeconds:{}, history:[]};
+    matches.forEach(match => {
+      const stats = matchPlayer(match, player);
+      if(!stats) return;
+      const seconds = Math.max(0, n(stats.seconds || stats.playingSeconds || stats.tempsSecondes));
+      const positions = normalizedPositionSeconds(stats.positionSeconds || stats.positions || {}, seconds);
+      totals.matches += 1;
+      totals.seconds += seconds;
+      ['but','passe','tirCadre','tirNonCadre','centre','progression','entree20','recup','duelWon','duelLost'].forEach(key => { totals[key] += n(stats[key]); });
+      Object.entries(positions).forEach(([position,value]) => { totals.positionSeconds[position] = (totals.positionSeconds[position] || 0) + value; });
+      totals.history.push({
+        matchId:match.matchId || match.id || '',
+        date:Filters.dateOf(match),
+        opponent:match.opponent || match.adversaire || 'Adversaire',
+        score:`${n(match.scoreUs ?? match.goalsFor)}-${n(match.scoreThem ?? match.goalsAgainst)}`,
+        seconds,
+        positions,
+        but:n(stats.but), passe:n(stats.passe), tirCadre:n(stats.tirCadre), recup:n(stats.recup)
+      });
+    });
+    totals.averageSeconds = totals.matches ? Math.round(totals.seconds / totals.matches) : 0;
+    totals.mainPosition = Object.entries(totals.positionSeconds).sort((a,b) => b[1] - a[1])[0]?.[0] || '-';
+    totals.history.sort((a,b) => String(b.date).localeCompare(String(a.date)));
+    return totals;
   }
   function testValue(row={}, keys=[]){
     for(const key of keys){
@@ -132,6 +180,7 @@
     const attendance = allAttendance.filter(isCountedAttendance);
     const sessions = Filters.filterRows(collections.sessions, state);
     const matchEvents = Filters.filterRows(collections.matchEvents, state);
+    const matches = Filters.filterRows(collections.matches || [], state);
     const technicalTests = Filters.filterRows(collections.technicalTests, state);
     const physicalTests = Filters.filterRows(collections.physicalTests, state);
     const injuries = Filters.filterRows(collections.injuries, state);
@@ -144,6 +193,7 @@
     const latestPhysical = latest(physicalTests);
     const latestTechnical = latest(technicalTests);
     const actions = countActions(matchEvents);
+    const matchSummary = matchPerformance(player, matches);
     const attendanceSummary = attendanceBreakdown(allAttendance, sessions);
     const linkedCounts = {
       presences:attendance.length,
@@ -158,13 +208,13 @@
     };
     return {
       player,
-      attendance, sessions, matchEvents, technicalTests, physicalTests, playerMeasurements, injuries, medical, convocations, individualReports,
+      attendance, sessions, matches, matchEvents, matchSummary, technicalTests, physicalTests, playerMeasurements, injuries, medical, convocations, individualReports,
       linkedCounts,
       kpis:{
         presenceRate:attendanceSummary.presenceRate,
         sessions:attendanceSummary.totalCategorySessions,
         minutes,
-        matches:new Set(matchEvents.map(row => row.matchId).filter(Boolean)).size,
+        matches:matchSummary.matches,
         injuries:injuries.length,
         medical:medical.length,
         bmi:bmi?.value || null
@@ -189,5 +239,5 @@
     const good = lowerIsBetter ? diff < 0 : diff > 0;
     return {diff, label:diff === 0 ? 'stable' : (good ? 'progression' : 'régression'), className:diff === 0 ? 'trend-flat' : (good ? 'trend-up' : 'trend-down')};
   }
-  global.PlayerProfileStats = {n, latest, countActions, testValue, attendanceStatus, attendanceBreakdown, isCountedAttendance, isPresentAttendance, summarize, trend};
+  global.PlayerProfileStats = {n, latest, countActions, matchPlayer, normalizedPositionSeconds, matchPerformance, testValue, attendanceStatus, attendanceBreakdown, isCountedAttendance, isPresentAttendance, summarize, trend};
 })(window);
