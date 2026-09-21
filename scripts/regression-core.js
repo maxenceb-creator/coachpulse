@@ -868,6 +868,36 @@ function testPlayerProfileAttendanceUsesExistingSessionsAsSource(){
   assert(profileCss.includes('.attendance-summary-detail{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))'), 'Les dix motifs doivent occuper exactement deux lignes sur desktop.');
 }
 
+function testPlayerProfileUsesCompleteMatchPlayerStats(){
+  const window = loadBrowserScript('pages/player-profile/playerProfileStats.js', {
+    PlayerProfileData:{playerAliases(player){ return [player.playerId, player.displayName]; }},
+    PlayerProfileFilters:{dateOf(row){ return row.date || ''; }, filterRows(rows){ return rows; }}
+  });
+  const player = {playerId:'player-lisa', displayName:'BOMBARD LISA'};
+  const matches = [
+    {matchId:'match-1', date:'2026-09-19', opponent:'GS Dervaux', scoreUs:0, scoreThem:6, players:{
+      'BOMBARD LISA':{playerId:'player-lisa', seconds:1200, positionSeconds:{DCG:1200, MG:500}, but:1, passe:2, tirCadre:3, recup:4}
+    }},
+    {matchId:'match-2', date:'2026-09-20', opponent:'ASSE B', scoreUs:2, scoreThem:1, players:{
+      'BOMBARD LISA':{playerId:'player-lisa', seconds:600, positionSeconds:{MG:600}}
+    }}
+  ];
+  const stats = window.PlayerProfileStats.matchPerformance(player, matches);
+  assert.equal(stats.matches, 2, 'Un match sans action doit compter dès lors que la joueuse possède du temps de jeu.');
+  assert.equal(stats.seconds, 1800);
+  assert.equal(stats.averageSeconds, 900);
+  assert.equal(stats.but, 1);
+  assert.equal(stats.passe, 2);
+  assert.equal(Object.values(stats.history[1].positions).reduce((total,value) => total + value, 0), 1200, 'Le cumul des postes doit être plafonné au temps joué du match.');
+
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  assert(appSource.includes('...Object.values(raw.players || {}).flatMap'), 'Les prochains matchs synchronisés doivent indexer leurs playerId.');
+  assert(appSource.includes("firebaseFns.where('teamIds', 'array-contains-any', chunk)"), 'La fiche individuelle doit retrouver les matchs des différentes équipes de la joueuse.');
+  assert(appSource.includes('const playerMatches = teamMatches.filter'), 'Les matchs historiques sans événement individuel doivent être relus depuis leur bloc players.');
+  const renderSource = fs.readFileSync('pages/player-profile/playerProfileRender.js', 'utf8');
+  assert(renderSource.includes('Temps par poste') && renderSource.includes('Détail par match'), 'La fiche doit afficher les temps par poste et le détail de chaque match.');
+}
+
 function testHomeDashboardStaysScopedToAuthorizedTeams(){
   const appSource = fs.readFileSync('app.js', 'utf8');
 
@@ -960,6 +990,27 @@ function testPlayerProfileRenderStartsEmptyAndUsesPlayerIds(){
   assert(emptyIdentity.includes('Sélectionne une joueuse pour charger sa fiche complète.'));
 }
 
+function testCompletedCoachStatsMatchesFeedTeamProfile(){
+  const window = loadBrowserScript('pages/team-profile/teamProfileFilters.js', {
+    TeamProfileData:{
+      dateOf(row){ return row.date || ''; },
+      seasonOf(row){ return row.season || ''; },
+      currentSeason(){ return '2026-2027'; }
+    }
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.TeamProfileFilters.resultOf({status:'COMPLETED', scoreUs:0, scoreThem:6}))),
+    {code:'loss', label:'Défaite'},
+    'Un match Coach Stats terminé doit alimenter les défaites et la série de la fiche équipe.'
+  );
+  assert.equal(window.TeamProfileFilters.resultOf({status:'scheduled', scoreUs:0, scoreThem:0}).code, 'planned');
+
+  const coachStatsSource = fs.readFileSync('pages/coach-stats.html', 'utf8');
+  assert(coachStatsSource.includes("v51IsAdv(r)?'adv':'team'"), 'Le fil de bilan doit distinguer visuellement les actions équipe et adversaire.');
+  assert(coachStatsSource.includes("button.id='quickNewMatchBtn'"), 'Le bandeau Match doit proposer le raccourci Nouveau match.');
+  assert(coachStatsSource.includes("if(saveCurrentMatch()){resetCurrentMatchData(false)"), 'Le raccourci doit sauvegarder le match courant avant de préparer le suivant.');
+}
+
 function testPlayerArchiveUsesDirectStatusPatch(){
   const appSource = fs.readFileSync('app.js', 'utf8');
   const match = appSource.match(/async function adminArchivePlayer[\s\S]*?\n}\nfunction isPlayerReference/);
@@ -1047,7 +1098,8 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(matchSource.includes("syncStatus:'pendingSync'"), 'Un match doit être marqué en attente avant toute tentative cloud.');
   assert(matchSource.includes("window.CoachStatsStorage.setJson('coachStatsV170',state"), 'La sauvegarde locale doit rester la première protection hors ligne.');
   assert(matchSource.includes("window.addEventListener('online',()=>syncPendingMatches"), 'Les matchs locaux doivent être retentés au retour du réseau.');
-  assert(matchSource.includes('state.matchId=state.matchId||Date.now()'), 'Le matchId doit être créé une seule fois et conservé pendant le match.');
+  assert(matchSource.includes('state.matchId=state.matchId||createMatchId()'), 'Le matchId doit être créé une seule fois et conservé pendant le match.');
+  assert(matchSource.includes('function resetCurrentMatchData(keepOpponent=false){state.matchId=createMatchId()'), 'Un nouveau match doit recevoir une identité distincte.');
   assert(matchSource.includes('event.eventId=stableMatchEventId(state.matchId'), 'Chaque événement doit recevoir un identifiant stable dès sa création.');
   assert(matchSource.includes("String(m.matchId||m.id)===String(snap.matchId)"), 'Une sauvegarde répétée doit remplacer le même match local au lieu de le dupliquer.');
   assert(appSource.includes("firebaseFns.doc(db, 'matches', match.matchId)"), 'Firestore doit utiliser matchId comme identifiant de document idempotent.');
@@ -1056,6 +1108,7 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(appSource.includes("Array.isArray(stats?.savedMatches) ? stats.savedMatches"), 'Les matchs locaux historiques doivent être récupérables par la migration non destructive.');
   assert(appSource.includes("Array.isArray(m.log) ? m.log"), 'Le fil réel du match doit alimenter matchEvents.');
   assert(rulesSource.includes('match /matches/{matchId}') && rulesSource.includes('match /matchEvents/{eventId}'), 'Les règles doivent couvrir matches et matchEvents.');
+  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessScopedDataForModule(resource.data, 'stats');"), 'La suppression d’un événement Match doit utiliser les permissions du module Match.');
 }
 
 function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
@@ -1147,6 +1200,7 @@ function testFirestorePayloadBoundary(){
     storage:{
       entries({exclude}){
         return [
+          ['coachStatsV170', JSON.stringify({savedMatches:[{log:'x'.repeat(1024 * 1024)}]})],
           ['presenceSeanceV3_6_Excel', 'x'.repeat(1024 * 1024)],
           ['coachpulse:presenceEvents:v1', JSON.stringify([{id:'session-1'}])],
           ['coachpulse:ordinary-setting', 'kept']
@@ -1155,11 +1209,14 @@ function testFirestorePayloadBoundary(){
     }
   });
   vm.runInContext(`${managedKeysSource}\n${localOnlyKeysSource}\n${collectLocalStorageSource}\nthis.result = collectLocalStorage();`, commonBaseContext);
-  assert.deepEqual(Object.keys(commonBaseContext.result), ['coachpulse:ordinary-setting'], 'Un historique Présences supérieur à 1 Mio ne doit plus entrer dans le document common_base.');
+  assert.deepEqual(Object.keys(commonBaseContext.result), ['coachpulse:ordinary-setting'], 'Les historiques Match et Présences gérés par collections ne doivent plus entrer dans common_base.');
   assert(appSource.includes("const safePayload = firestorePayloadService.prepare(payload, {rootPath:'$', maxBytes:950 * 1024});"), 'La synchronisation globale doit nettoyer et borner le document juste avant setDoc.');
   assert(appSource.includes('...safePayload,'), 'setDoc doit recevoir le payload reconstruit, jamais le payload brut.');
   assert(appSource.includes("key.startsWith('firestore_')"), 'Les clés internes IndexedDB/Firestore ne doivent jamais être sauvegardées comme données métier.');
   assert(appSource.includes("'presenceSeanceV3_6_Excel',\n  'coachpulse:presenceEvents:v1'"), 'Le fichier Présences historique et le cache moderne doivent être gérés hors du document agrégé.');
+  assert(appSource.includes("'coachStatsV170',"), 'L’état Match doit être géré par matches/matchEvents et exclu du document agrégé.');
+  assert(appSource.includes("'items.coachStatsV170':firebaseFns.deleteField()"), 'L’ancienne copie Match doit être supprimée de common_base pour libérer sa taille.');
+  assert(appSource.includes('!FIRESTORE_MANAGED_LOCAL_KEYS.has(k)'), 'Une ancienne copie cloud ne doit pas réinjecter un état métier géré par collection.');
   assert(appSource.includes('|| FIRESTORE_MANAGED_LOCAL_KEYS.has(key)'), 'Les données déjà fractionnées dans les collections centrales doivent être exclues de common_base.');
   assert(!appSource.includes('PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS'), 'Aucune exception ne doit réinjecter les données Présences dans le document Firestore unique.');
   assert(appSource.includes('firebaseFns.setDoc(ref, cloudDocument, {merge:true})'), 'La synchronisation legacy ne doit supprimer aucune clé common_base existante.');
@@ -1192,9 +1249,11 @@ testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPresenceD2CodeStaysScopedToU19();
 testPlayerProfileAttendanceUsesExistingSessionsAsSource();
+testPlayerProfileUsesCompleteMatchPlayerStats();
 testHomeDashboardStaysScopedToAuthorizedTeams();
 testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
+testCompletedCoachStatsMatchesFeedTeamProfile();
 testPlayerArchiveUsesDirectStatusPatch();
 testPresenceInteractionsStayNonBlocking();
 testPerformanceCriticalPathStaysNonBlocking();

@@ -48,6 +48,7 @@ function matchHarness() {
     setTimeout() {}, clearTimeout() {}, setInterval() {},
     document: {
       body: fakeNode(), getElementById: getNode,
+      head: {appendChild() {}}, createElement: fakeNode,
       querySelector() { return fakeNode(); }, querySelectorAll() { return []; }
     },
     CoachStatsNotify: {
@@ -205,6 +206,61 @@ async function main() {
     assert.equal(new Set(state.log.map(event => event.eventId)).size, 4);
   });
 
+  await test('legacy position totals are normalized to the recorded playing time', () => {
+    const h = matchHarness();
+    h.run(`
+      state.players['TEST ALICE'].seconds=1242;
+      state.players['TEST ALICE'].positionSeconds={BU:1242,MG:685,MD:180};
+      state.savedMatches=[{
+        id:'legacy-times',matchId:'legacy-times',createdAt:new Date().toISOString(),
+        players:{'TEST ALICE':{...blank(),seconds:600,positionSeconds:{BU:600,MG:300}}},log:[]
+      }];
+      ensure();
+    `);
+    const state = h.state();
+    const livePositions = Object.values(state.players['TEST ALICE'].positionSeconds).reduce((sum, value) => sum + value, 0);
+    const savedPositions = Object.values(state.savedMatches[0].players['TEST ALICE'].positionSeconds).reduce((sum, value) => sum + value, 0);
+    assert.equal(livePositions, 1242);
+    assert.equal(savedPositions, 600);
+    assert.equal(state.players['TEST ALICE'].positionSeconds.BU > state.players['TEST ALICE'].positionSeconds.MG, true);
+  });
+
+  await test('player view filters ignore DOM globals and return the selected saved match', () => {
+    const h = matchHarness();
+    vm.runInContext(
+      between(read('pages/coach-stats.html'), '(function(){\nconst playerViewFilters=', '\n})();') + '\n})();',
+      h.sandbox
+    );
+    h.run(`
+      window.v52MatchFilter={value:'dom-collision'};
+      window.v52SeasonFilter={value:'dom-collision'};
+      state.matchId='current-empty';state.players['TEST ALICE']=blank();state.called=['TEST ALICE'];
+      state.savedMatches=[{
+        id:'saved-filter-match',matchId:'saved-filter-match',createdAt:new Date().toISOString(),season:'2026-2027',
+        called:['TEST ALICE'],players:{'TEST ALICE':{...blank(),seconds:120,positionSeconds:{DCG:120}}},log:[]
+      }];
+      setPlayerViewFilter('matchId','saved-filter-match');
+      setPlayerViewFilter('season','2026-2027');
+      setPlayerViewFilter('player','TEST ALICE');
+    `);
+    const html = h.getNode('playersV52').innerHTML;
+    assert.match(html, /02:00/);
+    assert.match(html, /1 source/);
+    assert.doesNotMatch(html, /HTMLSelectElement/);
+  });
+
+  await test('match report reads the same event log as the live match view', () => {
+    const h = matchHarness();
+    vm.runInContext(
+      between(read('pages/coach-stats.html'), "window.v51BilanFilter =", '</script>'),
+      h.sandbox
+    );
+    h.run("state.log=[];recordAdvAction('butAdv',4);");
+    assert.equal(h.run('v51Actions().length'), 1);
+    assert.equal(h.run('v51Actions()[0].player'), 'Adversaire');
+    assert.match(h.run("v51Events(()=>true,'vide')"), /But adverse zone 4/);
+  });
+
   await test('field slot swaps keep tactical coordinates, time, stats and bench unchanged', () => {
     const h = matchHarness();
     h.run(`
@@ -342,19 +398,26 @@ async function main() {
     assert.deepEqual(h.state().log, before.log);
     assert.equal(h.state().elapsed, before.elapsed);
     assert.equal(JSON.parse(h.storage.get('coachStatsV170')).matchId, before.matchId);
-    h.run("state.lineup.BU='TEST CLEO';state.log=[];state.players['TEST BEA'].tirCadre=100;");
+    h.run("state.matchId='another-current-match';state.lineup.BU='TEST CLEO';state.log=[];state.players['TEST BEA'].tirCadre=100;");
     await h.run('restoreSavedMatch(state.savedMatches[0].id)');
+    assert.equal(h.state().matchId, saved.matchId);
     assert.equal(h.state().lineup.BU, 'TEST BEA');
     assert.equal(h.state().players['TEST BEA'].tirCadre, 1);
     assert.deepEqual(h.state().log, saved.log);
     assert.equal(h.state().running, false);
+    const restoredMatchId = h.state().matchId;
+    await h.run('resetFullMatch()');
+    assert.notEqual(h.state().matchId, restoredMatchId);
+    assert.equal(h.state().savedMatches.length, 1);
   });
 
   await test('pendingSync, synced, syncError, network retry and idempotent Firestore writes', async () => {
     const h = matchHarness();
     const cloud = firestoreHarness();
-    h.run("recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
+    h.run("state.matchType='tournament';recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
     assert.equal(h.state().savedMatches[0].syncStatus, 'pendingSync');
+    assert.equal(h.state().savedMatches[0].matchType, 'tournament');
+    assert.equal(h.state().savedMatches[0].matchTypeLabel, 'Tournoi');
     h.sandbox.parent.CoachPulseCentralData = {
       matchSaveToFirestore: async match => {
         const local = JSON.parse(h.storage.get('coachStatsV170'));
@@ -373,6 +436,8 @@ async function main() {
     assert.equal(firstRefs.filter(ref => ref.startsWith('matchEvents/')).length, 1);
     assert(cloud.writes.every(write => write.options.merge === true));
     const matchRef = firstRefs.find(ref => ref.startsWith('matches/'));
+    assert.equal(cloud.documents.get(matchRef).matchType, 'tournament');
+    assert.equal(cloud.documents.get(matchRef).matchTypeLabel, 'Tournoi');
     delete cloud.documents.get(matchRef).log;
     delete cloud.documents.get(matchRef).events;
     const remote = await cloud.sandbox.matchListFromFirestore({teamId: 'team-u13-a'});

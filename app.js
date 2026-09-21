@@ -49,6 +49,7 @@ let appRefreshInProgress = false;
 let localChangeSnapshotTimer = null;
 let presenceCacheGeneration = 0;
 const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
+  'coachStatsV170',
   'presenceSeanceV3_6_Excel',
   'coachpulse:presenceEvents:v1',
   'coachpulse:presenceSettings:v1',
@@ -66,7 +67,7 @@ const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260918-release-v92';
+const APP_SHELL_VERSION = '20260920-release-v93';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -78,6 +79,7 @@ const appDataCache = {
   teamProfiles:new Map()
 };
 let technicalPlayerFootHintsCache = null;
+let legacyManagedCloudItemsCleaned = false;
 const HOME_TEAM_SELECTION_KEY = 'coachpulse:home:selectedTeamId';
 let homeDashboardRequestId = 0;
 let centralPlayersRefreshPending = null;
@@ -1427,7 +1429,7 @@ function startRealtimeSync(){
     applyingCloud = true;
     try{
       Object.entries(items).forEach(([k,v]) => {
-        if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k)) storage.set(k, v, {recover:true});
+        if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k) && !FIRESTORE_MANAGED_LOCAL_KEYS.has(k)) storage.set(k, v, {recover:true});
       });
       lastCloudItemsHash = incomingHash;
       storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
@@ -2181,7 +2183,31 @@ async function playerProfileLoadData(options={}){
     );
   });
   const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
-  const matches = await readDocsByIdsOrField('matches', matchIds, 'matchId');
+  const selectedHistory = selectedPlayer.seasonHistory || selectedPlayer.seasons || {};
+  const selectedTeamIds = [...new Set([
+    ...rowTeamIds(selectedPlayer),
+    ...Object.values(selectedHistory).flatMap(row => rowTeamIds(row)),
+    ...(Array.isArray(selectedPlayer.teamAssignments) ? selectedPlayer.teamAssignments.flatMap(row => rowTeamIds(row)) : [])
+  ])].filter(canAccessTeamId);
+  const teamChunks = chunksForValues(selectedTeamIds);
+  const teamMatchResults = await Promise.allSettled(teamChunks.flatMap(chunk => [
+    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamId', 'in', chunk))),
+    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamIds', 'array-contains-any', chunk)))
+  ]));
+  const teamMatches = [];
+  teamMatchResults.forEach(result => {
+    if(result.status === 'fulfilled') result.value.forEach(docSnap => teamMatches.push({id:docSnap.id, ...docSnap.data()}));
+  });
+  const playerMatches = teamMatches.filter(match => {
+    if((match.playerIds || []).some(id => aliases.includes(String(id || '').trim()))) return true;
+    const rows = Object.entries(match.players || {}).map(([playerName, value]) => ({...(value || {}), playerName}));
+    return rowsMatchingProfileAliases(rows, aliases).length > 0;
+  });
+  playerMatches.forEach(match => matchIds.add(match.matchId || match.id));
+  const matches = mergeRows([
+    ...playerMatches,
+    ...await readDocsByIdsOrField('matches', matchIds, 'matchId')
+  ], row => row.matchId || row.id);
   payload.collections.sessions = mergeRows(sourcePresence.sessions || [], row => row.id || row.sessionId);
   const sessionsById = new Map((payload.collections.sessions || [])
     .map(row => [profilePresenceSessionId(row), row])
@@ -4585,6 +4611,16 @@ function normalizeMatchForFirestore(raw={}){
   const teamId = raw.teamId || raw.team_id || raw.teamSnapshot?.teamId || teamsService()?.canonicalTeamId?.(team) || '';
   const teamIds = [...new Set([teamId, ...(raw.teamIds || [])].filter(Boolean))];
   const season = raw.season || seasonFromDate(createdAt);
+  const matchTypeRaw = String(raw.matchType || raw.match_type || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const matchType = ['championship','championnat','league'].includes(matchTypeRaw) ? 'championship'
+    : ['tournament','tournoi'].includes(matchTypeRaw) ? 'tournament'
+    : matchTypeRaw === 'futsal' ? 'futsal'
+    : ['friendly','amical','match amical'].includes(matchTypeRaw) ? 'friendly' : '';
+  const matchTypeLabel = {championship:'Championnat', tournament:'Tournoi', futsal:'Futsal', friendly:'Match amical'}[matchType] || 'Non renseigné';
+  const playerIds = [...new Set([
+    ...(Array.isArray(raw.playerIds) ? raw.playerIds : []),
+    ...Object.values(raw.players || {}).flatMap(player => [player?.playerId, player?.playerSnapshot?.playerId])
+  ].map(value => String(value || '').trim()).filter(Boolean))];
   const events = (raw.log || raw.events || raw.actions || []).map((event, index) => ({
     ...event,
     id:matchEventDocumentId(matchId, event, index),
@@ -4602,9 +4638,12 @@ function normalizeMatchForFirestore(raw={}){
     createdAt,
     date:raw.date || createdAt,
     season,
+    matchType,
+    matchTypeLabel,
     team,
     teamId,
     teamIds,
+    playerIds,
     teamSnapshot:{...(raw.teamSnapshot || {}), team, name:team, teamId, teamIds},
     status:raw.status || 'COMPLETED',
     source:raw.source || 'Coach Stats',
@@ -6056,6 +6095,20 @@ async function syncCloud(manual=false){
   try{
     updateSyncState('🔄 Synchronisation...');
     const ref = getCloudRef();
+    if(!legacyManagedCloudItemsCleaned){
+      try{
+        await firebaseFns.updateDoc(ref, {
+          'items.coachStatsV170':firebaseFns.deleteField(),
+          'items.presenceSeanceV3_6_Excel':firebaseFns.deleteField(),
+          'items.coachpulse:presenceEvents:v1':firebaseFns.deleteField()
+        });
+        legacyManagedCloudItemsCleaned = true;
+      }catch(cleanupError){
+        const cleanupCode = String(cleanupError?.code || cleanupError?.message || '');
+        if(cleanupCode.includes('not-found')) legacyManagedCloudItemsCleaned = true;
+        else console.warn('Nettoyage des anciennes données agrégées différé', cleanupError);
+      }
+    }
     const payload = buildPayload();
     const safePayload = firestorePayloadService.prepare(payload, {rootPath:'$', maxBytes:950 * 1024});
     const itemsHash = hashItems(safePayload.items);
@@ -6097,7 +6150,7 @@ async function pullCloud(){
   if(snap.exists()){
     applyingCloud = true;
     try{
-      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k)) storage.set(k, v, {recover:true}); });
+      Object.entries(snap.data().items||{}).forEach(([k,v]) => { if(k !== 'coachpulse:clientId' && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(k) && !FIRESTORE_MANAGED_LOCAL_KEYS.has(k)) storage.set(k, v, {recover:true}); });
       lastCloudItemsHash = hashItems(snap.data().items || {});
       storage.clearPendingSync();
       storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
