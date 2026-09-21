@@ -33,7 +33,9 @@ async function main() {
       ['players', 'p'], ['matches', 'm'], ['matchEvents', 'e'],
       ['attendance', 'a'], ['technicalTests', 't'], ['injuries', 'i']
     ]) {
+      process.stdout.write(`Checking ${collection} authorized read\n`);
       await assertSucceeds(getDoc(doc(db, collection, `${prefix}U11`)));
+      process.stdout.write(`Checking ${collection} denied read\n`);
       await assertFails(getDoc(doc(db, collection, `${prefix}U13`)));
     }
     await assertFails(getDoc(doc(environment.unauthenticatedContext().firestore(), 'players', 'pU11')));
