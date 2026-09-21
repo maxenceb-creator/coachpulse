@@ -298,8 +298,9 @@ service cloud.firestore {
     }
 
     match /players/{playerId} {
-      allow read: if (canReadPlayerDoc(playerId, resource.data) && (canAccessModule('database') || canAccessModule('playerProfile') || canAccessModule('presences')))
-        || (canReadData() && canAccessPlayerId(playerId) && hasAnyAllPlayersModuleScope());
+      allow read: if canReadPlayerDoc(playerId, resource.data)
+        && (canAccessModule('database') || canAccessModule('playerProfile') || canAccessModule('presences'));
+      allow read: if canReadData() && canAccessPlayerId(playerId) && hasAnyAllPlayersModuleScope();
       allow create: if canManageCoreData()
         && canAccessModule('database')
         && request.resource.data.playerId == playerId
