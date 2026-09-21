@@ -122,37 +122,32 @@ service cloud.firestore {
     }
 
     function profileList(field) {
-      return staffDoc().data.keys().hasAny([field]) && staffDoc().data[field] is list ? staffDoc().data[field] : [];
+      let profile = staffDoc().data;
+      return profile.keys().hasAny([field]) && profile[field] is list ? profile[field] : [];
+    }
+
+    function authorizedTeams() {
+      return profileList('authorizedTeamIds')
+        .concat(profileList('teamIds'))
+        .concat(profileList('allowedTeamIds'))
+        .concat(profileList('authorizedTeams'))
+        .concat(profileList('equipesAutorisees'));
     }
 
     function hasTeamScope() {
-      return profileList('authorizedTeamIds').size() > 0
-        || profileList('teamIds').size() > 0
-        || profileList('allowedTeamIds').size() > 0
-        || profileList('authorizedTeams').size() > 0
-        || profileList('equipesAutorisees').size() > 0;
+      return authorizedTeams().size() > 0;
     }
 
     function canAccessTeam(teamId) {
       return permissionLevel() == 'ADMIN'
-        || profileList('authorizedTeamIds').hasAny([teamId])
-        || profileList('teamIds').hasAny([teamId])
-        || profileList('allowedTeamIds').hasAny([teamId])
-        || profileList('authorizedTeams').hasAny([teamId])
-        || profileList('equipesAutorisees').hasAny([teamId]);
+        || authorizedTeams().hasAny([teamId]);
     }
 
     function canAccessTeamList(teamIds) {
       return permissionLevel() == 'ADMIN'
         || (
           teamIds is list
-          && (
-            teamIds.hasAny(profileList('authorizedTeamIds'))
-            || teamIds.hasAny(profileList('teamIds'))
-            || teamIds.hasAny(profileList('allowedTeamIds'))
-            || teamIds.hasAny(profileList('authorizedTeams'))
-            || teamIds.hasAny(profileList('equipesAutorisees'))
-          )
+          && teamIds.hasAny(authorizedTeams())
         );
     }
 
