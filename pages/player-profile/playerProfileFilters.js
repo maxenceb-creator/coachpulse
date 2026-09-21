@@ -25,6 +25,22 @@
     return seasonOf(row) === period.season;
   }
   function filterRows(rows=[], state){ const p = periodFromState(state); return rows.filter(row => rowInPeriod(row, p)); }
+  function matchTypeOf(match={}){
+    const raw = Data.text(match.matchType || match.match_type).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if(['championship','championnat','league'].includes(raw)) return 'championship';
+    if(['tournament','tournoi'].includes(raw)) return 'tournament';
+    if(raw === 'futsal') return 'futsal';
+    if(['friendly','amical','match amical'].includes(raw)) return 'friendly';
+    return '';
+  }
+  function matchTypeLabel(match={}){
+    return {championship:'Championnat', tournament:'Tournoi', futsal:'Futsal', friendly:'Match amical'}[matchTypeOf(match)] || 'Non renseigné';
+  }
+  function filterMatches(matches=[], state){
+    const period = periodFromState(state);
+    const matchType = state.filters.matchType || '';
+    return matches.filter(match => rowInPeriod(match, period) && (!matchType || matchTypeOf(match) === matchType));
+  }
   function seasonsFromCollections(collections){
     const set = new Set([Data.currentSeason()]);
     Object.values(collections || {}).flat().forEach(row => {
@@ -33,5 +49,5 @@
     });
     return [...set].sort();
   }
-  global.PlayerProfileFilters = {dateOf, seasonOf, periodFromState, rowInPeriod, filterRows, seasonsFromCollections};
+  global.PlayerProfileFilters = {dateOf, seasonOf, periodFromState, rowInPeriod, filterRows, filterMatches, matchTypeOf, matchTypeLabel, seasonsFromCollections};
 })(window);

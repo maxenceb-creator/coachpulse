@@ -4611,6 +4611,12 @@ function normalizeMatchForFirestore(raw={}){
   const teamId = raw.teamId || raw.team_id || raw.teamSnapshot?.teamId || teamsService()?.canonicalTeamId?.(team) || '';
   const teamIds = [...new Set([teamId, ...(raw.teamIds || [])].filter(Boolean))];
   const season = raw.season || seasonFromDate(createdAt);
+  const matchTypeRaw = String(raw.matchType || raw.match_type || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const matchType = ['championship','championnat','league'].includes(matchTypeRaw) ? 'championship'
+    : ['tournament','tournoi'].includes(matchTypeRaw) ? 'tournament'
+    : matchTypeRaw === 'futsal' ? 'futsal'
+    : ['friendly','amical','match amical'].includes(matchTypeRaw) ? 'friendly' : '';
+  const matchTypeLabel = {championship:'Championnat', tournament:'Tournoi', futsal:'Futsal', friendly:'Match amical'}[matchType] || 'Non renseigné';
   const playerIds = [...new Set([
     ...(Array.isArray(raw.playerIds) ? raw.playerIds : []),
     ...Object.values(raw.players || {}).flatMap(player => [player?.playerId, player?.playerSnapshot?.playerId])
@@ -4632,6 +4638,8 @@ function normalizeMatchForFirestore(raw={}){
     createdAt,
     date:raw.date || createdAt,
     season,
+    matchType,
+    matchTypeLabel,
     team,
     teamId,
     teamIds,

@@ -14,7 +14,7 @@
     filteredCollectionCache:{},
     seasons:[Data.currentSeason()],
     view:'overview',
-    filters:{team:'', periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]},
+    filters:{team:'', matchType:'', periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]},
     renderToken:0,
     loadingPlayerId:''
   };
@@ -172,6 +172,7 @@
     document.getElementById('seasonSelect')?.addEventListener('change', async event => { state.filters.season = event.target.value; await render(); });
     document.getElementById('startDate')?.addEventListener('change', async event => { state.filters.startDate = event.target.value; await render(); });
     document.getElementById('endDate')?.addEventListener('change', async event => { state.filters.endDate = event.target.value; await render(); });
+    document.getElementById('matchTypeFilter')?.addEventListener('change', async event => { state.filters.matchType = event.target.value; await render(); });
     document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', async () => { state.view = btn.dataset.view; await render(); }));
     document.querySelectorAll('[data-sheet-target]').forEach(tab => tab.addEventListener('click', event => {
       event.preventDefault();

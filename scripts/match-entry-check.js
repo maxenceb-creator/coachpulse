@@ -414,8 +414,10 @@ async function main() {
   await test('pendingSync, synced, syncError, network retry and idempotent Firestore writes', async () => {
     const h = matchHarness();
     const cloud = firestoreHarness();
-    h.run("recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
+    h.run("state.matchType='tournament';recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
     assert.equal(h.state().savedMatches[0].syncStatus, 'pendingSync');
+    assert.equal(h.state().savedMatches[0].matchType, 'tournament');
+    assert.equal(h.state().savedMatches[0].matchTypeLabel, 'Tournoi');
     h.sandbox.parent.CoachPulseCentralData = {
       matchSaveToFirestore: async match => {
         const local = JSON.parse(h.storage.get('coachStatsV170'));
@@ -434,6 +436,8 @@ async function main() {
     assert.equal(firstRefs.filter(ref => ref.startsWith('matchEvents/')).length, 1);
     assert(cloud.writes.every(write => write.options.merge === true));
     const matchRef = firstRefs.find(ref => ref.startsWith('matches/'));
+    assert.equal(cloud.documents.get(matchRef).matchType, 'tournament');
+    assert.equal(cloud.documents.get(matchRef).matchTypeLabel, 'Tournoi');
     delete cloud.documents.get(matchRef).log;
     delete cloud.documents.get(matchRef).events;
     const remote = await cloud.sandbox.matchListFromFirestore({teamId: 'team-u13-a'});
