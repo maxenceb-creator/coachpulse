@@ -17,15 +17,28 @@
     return Data.seasonOf(row) === period.season;
   }
   function filterRows(rows=[], state){ const period = periodFromState(state); return rows.filter(row => rowInPeriod(row, period)); }
+  function matchTypeOf(match={}){
+    const raw = String(match.matchType || match.match_type || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if(['championship','championnat','league'].includes(raw)) return 'championship';
+    if(['tournament','tournoi'].includes(raw)) return 'tournament';
+    if(raw === 'futsal') return 'futsal';
+    if(['friendly','amical','match amical'].includes(raw)) return 'friendly';
+    return '';
+  }
+  function matchTypeLabel(match={}){
+    return {championship:'Championnat', tournament:'Tournoi', futsal:'Futsal', friendly:'Match amical'}[matchTypeOf(match)] || 'Non renseigné';
+  }
   function filterMatches(matches=[], state){
     const period = periodFromState(state);
     const competition = state.filters.competition || '';
+    const matchType = state.filters.matchType || '';
     const venue = state.filters.venue || '';
     const result = state.filters.result || '';
     const opponent = (state.filters.opponent || '').toLowerCase();
     return matches.filter(match => {
       if(!rowInPeriod(match, period)) return false;
       if(competition && (match.competition || '') !== competition) return false;
+      if(matchType && matchTypeOf(match) !== matchType) return false;
       if(venue && venueOf(match) !== venue) return false;
       if(result && resultOf(match).code !== result) return false;
       if(opponent && !String(match.opponent || match.adversaire || '').toLowerCase().includes(opponent)) return false;
@@ -60,5 +73,5 @@
     if(score.forGoals < score.againstGoals) return {code:'loss', label:'Défaite'};
     return {code:'draw', label:'Nul'};
   }
-  global.TeamProfileFilters = {periodFromState, rowInPeriod, filterRows, filterMatches, seasonsFromCollections, venueOf, scoreOf, resultOf};
+  global.TeamProfileFilters = {periodFromState, rowInPeriod, filterRows, filterMatches, matchTypeOf, matchTypeLabel, seasonsFromCollections, venueOf, scoreOf, resultOf};
 })(window);

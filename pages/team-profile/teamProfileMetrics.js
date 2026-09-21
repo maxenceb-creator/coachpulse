@@ -22,6 +22,8 @@
       ...match,
       date:matchDate(match),
       opponent:match.opponent || match.adversaire || 'Adversaire non renseigné',
+      matchType:Filters.matchTypeOf(match),
+      matchTypeLabel:Filters.matchTypeLabel(match),
       competition:match.competition || match.championnat || 'Non renseignée',
       venue:Filters.venueOf(match),
       resultCode:result.code,
@@ -240,8 +242,12 @@
     const periodMatches = Filters.filterMatches((collections.matches || []).map(normalizeMatch), state).sort((a,b) => a.date.localeCompare(b.date));
     const period = Filters.periodFromState(state);
     const matchIds = new Set(periodMatches.map(match => match.matchId || match.id).filter(Boolean));
+    const matchFilterActive = !!(state.filters.matchType || state.filters.competition || state.filters.venue || state.filters.result || state.filters.opponent);
     const players = (collections.players || []).map(player => Data.playerForSeason(player, period.season || Data.currentSeason())).filter(player => !team?.teamId || Data.rowMatchesTeam(player, team.teamId));
-    const events = Filters.filterRows(collections.matchEvents || [], state).filter(row => !matchIds.size || matchIds.has(row.matchId) || Data.rowMatchesTeam(row, team?.teamId));
+    const events = Filters.filterRows(collections.matchEvents || [], state).filter(row => {
+      if(matchFilterActive) return matchIds.has(row.matchId);
+      return !matchIds.size || matchIds.has(row.matchId) || Data.rowMatchesTeam(row, team?.teamId);
+    });
     const sessions = Filters.filterRows(collections.sessions || [], state);
     const attendance = Filters.filterRows(collections.attendance || [], state);
     const technicalTests = Filters.filterRows(collections.technicalTests || [], state);

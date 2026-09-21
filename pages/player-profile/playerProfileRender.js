@@ -96,6 +96,7 @@
           <div class="field"><label>Saison</label><select id="seasonSelect">${seasons.map(s => option(s,s,state.filters.season)).join('')}</select></div>
           <div class="field"><label>Début</label><input id="startDate" type="date" value="${esc(state.filters.startDate || '')}"></div>
           <div class="field"><label>Fin</label><input id="endDate" type="date" value="${esc(state.filters.endDate || '')}"></div>
+          <div class="field"><label>Type de match</label><select id="matchTypeFilter">${option('','Tous les types',state.filters.matchType || '')}${option('championship','Championnat',state.filters.matchType)}${option('tournament','Tournoi',state.filters.matchType)}${option('futsal','Futsal',state.filters.matchType)}${option('friendly','Match amical',state.filters.matchType)}</select></div>
         </div>
         <div class="tabs">
           <button class="tab active" data-view="overview">Synthèse</button>
@@ -299,7 +300,7 @@
     ];
     const positions = Object.entries(stats.positionSeconds || {}).sort((a,b) => b[1] - a[1]);
     const maxPosition = Math.max(1, ...positions.map(([,seconds]) => Number(seconds) || 0));
-    const history = (stats.history || []).map(row => `<tr><td>${esc(formatDate(row.date))}</td><td>${esc(row.opponent)}</td><td>${esc(row.score)}</td><td>${esc(formatDuration(row.seconds))}</td><td>${esc(Object.entries(row.positions || {}).sort((a,b) => b[1] - a[1]).map(([position,seconds]) => `${position} ${formatDuration(seconds)}`).join(' · ') || '-')}</td><td>${esc(row.but)}</td><td>${esc(row.passe)}</td><td>${esc(row.tirCadre)}</td><td>${esc(row.recup)}</td></tr>`);
+    const history = (stats.history || []).map(row => `<tr><td>${esc(formatDate(row.date))}</td><td>${esc(row.opponent)}</td><td>${esc(row.matchTypeLabel || 'Non renseigné')}</td><td>${esc(row.score)}</td><td>${esc(formatDuration(row.seconds))}</td><td>${esc(Object.entries(row.positions || {}).sort((a,b) => b[1] - a[1]).map(([position,seconds]) => `${position} ${formatDuration(seconds)}`).join(' · ') || '-')}</td><td>${esc(row.but)}</td><td>${esc(row.passe)}</td><td>${esc(row.tirCadre)}</td><td>${esc(row.recup)}</td></tr>`);
     return `<div class="match-summary-kpis">
       <article><span>Matchs joués</span><b>${esc(stats.matches)}</b></article>
       <article><span>Temps total</span><b>${esc(formatDuration(stats.seconds))}</b></article>
@@ -312,7 +313,7 @@
       <section class="match-summary-block"><h3>Indicateurs cumulés</h3><div class="match-action-grid">${actions.map(([label,value]) => `<span><b>${esc(value)}</b>${esc(label)}</span>`).join('')}</div></section>
       <section class="match-summary-block"><h3>Temps par poste</h3><div class="match-position-list">${positions.length ? positions.map(([position,seconds]) => `<div><b>${esc(position)}</b><span><i style="width:${Math.round((Number(seconds) || 0) / maxPosition * 100)}%"></i></span><strong>${esc(formatDuration(seconds))}</strong></div>`).join('') : '<div class="empty-state">Aucun temps par poste enregistré.</div>'}</div></section>
     </div>
-    <section class="match-history"><h3>Détail par match</h3>${table(['Date','Adversaire','Score','Temps','Postes','Buts','PD','Tirs C.','Récup.'], history, 'Aucun match sur cette période.')}</section>`;
+    <section class="match-history"><h3>Détail par match</h3>${table(['Date','Adversaire','Type','Score','Temps','Postes','Buts','PD','Tirs C.','Récup.'], history, 'Aucun match sur cette période.')}</section>`;
   }
   function renderInjuryTable(rows=[]){
     const sorted = rows.slice().sort((a,b) => Filters.dateOf(b).localeCompare(Filters.dateOf(a))).slice(0,6);

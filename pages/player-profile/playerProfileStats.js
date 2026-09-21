@@ -54,6 +54,18 @@
   function normalizedName(value){
     return text(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   }
+  function matchTypeOf(match={}){
+    if(typeof Filters.matchTypeOf === 'function') return Filters.matchTypeOf(match);
+    const raw = text(match.matchType || match.match_type).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if(['championship','championnat','league'].includes(raw)) return 'championship';
+    if(['tournament','tournoi'].includes(raw)) return 'tournament';
+    if(raw === 'futsal') return 'futsal';
+    if(['friendly','amical','match amical'].includes(raw)) return 'friendly';
+    return '';
+  }
+  function matchTypeLabel(match={}){
+    return {championship:'Championnat', tournament:'Tournoi', futsal:'Futsal', friendly:'Match amical'}[matchTypeOf(match)] || 'Non renseigné';
+  }
   function matchPlayer(match={}, player={}){
     const aliases = new Set((Data?.playerAliases?.(player) || [player.playerId, player.id, player.displayName, player.name]).map(text).filter(Boolean));
     const nameAliases = new Set([...aliases].map(normalizedName).filter(Boolean));
@@ -87,6 +99,8 @@
         matchId:match.matchId || match.id || '',
         date:Filters.dateOf(match),
         opponent:match.opponent || match.adversaire || 'Adversaire',
+        matchType:matchTypeOf(match),
+        matchTypeLabel:matchTypeLabel(match),
         score:`${n(match.scoreUs ?? match.goalsFor)}-${n(match.scoreThem ?? match.goalsAgainst)}`,
         seconds,
         positions,
@@ -180,7 +194,9 @@
     const attendance = allAttendance.filter(isCountedAttendance);
     const sessions = Filters.filterRows(collections.sessions, state);
     const matchEvents = Filters.filterRows(collections.matchEvents, state);
-    const matches = Filters.filterRows(collections.matches || [], state);
+    const matches = typeof Filters.filterMatches === 'function'
+      ? Filters.filterMatches(collections.matches || [], state)
+      : Filters.filterRows(collections.matches || [], state);
     const technicalTests = Filters.filterRows(collections.technicalTests, state);
     const physicalTests = Filters.filterRows(collections.physicalTests, state);
     const injuries = Filters.filterRows(collections.injuries, state);

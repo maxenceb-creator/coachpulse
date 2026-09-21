@@ -12,7 +12,7 @@
     teamCache:{},
     seasons:[Data.currentSeason()],
     view:'overview',
-    filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', competition:'', venue:'', result:'', opponent:''},
+    filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', competition:'', matchType:'', venue:'', result:'', opponent:''},
     renderToken:0,
     loadingTeamId:'',
     detailLoadingTeamId:''
@@ -120,6 +120,7 @@
     document.getElementById('startDate')?.addEventListener('change', e => { state.filters.startDate = e.target.value; render(); });
     document.getElementById('endDate')?.addEventListener('change', e => { state.filters.endDate = e.target.value; render(); });
     document.getElementById('competitionFilter')?.addEventListener('change', e => { state.filters.competition = e.target.value; render(); });
+    document.getElementById('matchTypeFilter')?.addEventListener('change', e => { state.filters.matchType = e.target.value; render(); });
     document.getElementById('venueFilter')?.addEventListener('change', e => { state.filters.venue = e.target.value; render(); });
     document.getElementById('resultFilter')?.addEventListener('change', e => { state.filters.result = e.target.value; render(); });
     document.getElementById('opponentFilter')?.addEventListener('input', e => { state.filters.opponent = e.target.value; render(); });
