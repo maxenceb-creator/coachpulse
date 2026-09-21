@@ -142,6 +142,10 @@ service cloud.firestore {
 
     function authorizedTeams() {
       let profile = staffDoc().data;
+      return authorizedTeamsFrom(profile);
+    }
+
+    function authorizedTeamsFrom(profile) {
       return profileListFrom(profile, 'authorizedTeamIds')
         .concat(profileListFrom(profile, 'teamIds'))
         .concat(profileListFrom(profile, 'allowedTeamIds'))
@@ -268,6 +272,45 @@ service cloud.firestore {
         && canAccessDirectData(data);
     }
 
+    function canReadPlayerRecord(playerId, data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      let playerIds = profileListFrom(profile, 'playerIds');
+      let allowedPlayerIds = profileListFrom(profile, 'allowedPlayerIds');
+      let scopes = profile.get('moduleScopes', {});
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && (level == 'ADMIN' || (playerIds.size() == 0 && allowedPlayerIds.size() == 0)
+          || playerIds.hasAny([playerId]) || allowedPlayerIds.hasAny([playerId]))
+        && (
+          ((level == 'ADMIN' || (hasScopeFields(data) && scopedTeams(data).hasAny(teams)))
+            && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0
+              || modules.hasAny(['database', 'playerProfile', 'presences'])))
+          || level == 'ADMIN'
+          || staffRole == 'ADMIN'
+          || (scopes is map && (
+            moduleScopeHasAllPlayers(scopes, 'stats')
+            || moduleScopeHasAllPlayers(scopes, 'presences')
+            || moduleScopeHasAllPlayers(scopes, 'tests')
+            || moduleScopeHasAllPlayers(scopes, 'tests-athletiques')
+            || moduleScopeHasAllPlayers(scopes, 'medical')
+            || moduleScopeHasAllPlayers(scopes, 'playerProfile')
+            || moduleScopeHasAllPlayers(scopes, 'teamProfile')
+          ))
+        );
+    }
+
+    function legacyPermissionFromRoleValue(staffRole) {
+      return staffRole == 'ADMIN' ? 'ADMIN'
+        : (staffRole in ['RESPONSABLE', 'RESPONSABLE_CATEGORIE'] ? 'EDITEUR'
+        : (staffRole in ['LECTURE', 'LECTURE_SEULE', 'OBSERVATEUR', 'OBSERVATEUR_STAFF', 'JOUEUSE_PARENT'] ? 'LECTEUR' : 'SAISIE'));
+    }
+
     function noDelete() {
       return false;
     }
@@ -298,9 +341,7 @@ service cloud.firestore {
     }
 
     match /players/{playerId} {
-      allow read: if canReadPlayerDoc(playerId, resource.data)
-        && (canAccessModule('database') || canAccessModule('playerProfile') || canAccessModule('presences'));
-      allow read: if canReadData() && canAccessPlayerId(playerId) && hasAnyAllPlayersModuleScope();
+      allow read: if canReadPlayerRecord(playerId, resource.data);
       allow create: if canManageCoreData()
         && canAccessModule('database')
         && request.resource.data.playerId == playerId
