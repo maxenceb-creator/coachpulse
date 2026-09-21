@@ -446,39 +446,15 @@ service cloud.firestore {
       allow delete: if canEditData() && canAccessModule('playerProfile') && canAccessScopedData(resource.data);
     }
 
-    match /injuries/{injuryId} {
-      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
-      allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
-      allow delete: if canDeleteCoreData(resource.data);
-    }
-
-    match /injuryUpdates/{updateId} {
-      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
-      allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
-      allow delete: if canDeleteCoreData(resource.data);
-    }
-
-    match /medicalAppointments/{appointmentId} {
-      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
-      allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
-      allow delete: if canDeleteCoreData(resource.data);
-    }
-
-    match /rehabRoutines/{routineId} {
-      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
-      allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
-      allow delete: if canDeleteCoreData(resource.data);
-    }
-
-    match /medicalFollowUps/{followUpId} {
-      allow read: if (canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data);
-      allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
-      allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
-      allow delete: if canDeleteCoreData(resource.data);
+    match /{medicalCollection}/{recordId} {
+      allow read: if medicalCollection in ['injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines', 'medicalFollowUps']
+        && ((canReadMedicalData() && canAccessScopedData(resource.data)) || canReadPlayerProfileData(resource.data));
+      allow create: if medicalCollection in ['injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines', 'medicalFollowUps']
+        && canWriteMedicalData() && canAccessScopedData(request.resource.data);
+      allow update: if medicalCollection in ['injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines', 'medicalFollowUps']
+        && canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
+      allow delete: if medicalCollection in ['injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines', 'medicalFollowUps']
+        && canDeleteCoreData(resource.data);
     }
 
     match /workloads/{workloadId} {
