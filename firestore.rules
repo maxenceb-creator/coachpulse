@@ -210,16 +210,15 @@ service cloud.firestore {
       return data.keys().hasAny(['teamId', 'teamIds', 'rosterTeamIds']);
     }
 
+    function scopedTeams(data) {
+      return [valueOrEmpty(data, 'teamId')]
+        .concat(data.keys().hasAny(['teamIds']) && data.teamIds is list ? data.teamIds : [])
+        .concat(data.keys().hasAny(['rosterTeamIds']) && data.rosterTeamIds is list ? data.rosterTeamIds : []);
+    }
+
     function canAccessScopedData(data) {
       return permissionLevel() == 'ADMIN'
-        || (
-          hasScopeFields(data)
-          && (
-            canAccessTeam(valueOrEmpty(data, 'teamId'))
-            || (data.keys().hasAny(['teamIds']) && canAccessTeamList(data.teamIds))
-            || (data.keys().hasAny(['rosterTeamIds']) && canAccessTeamList(data.rosterTeamIds))
-          )
-        )
+        || (hasScopeFields(data) && canAccessTeamList(scopedTeams(data)))
         || (data.keys().hasAny(['playerId']) && canAccessLinkedPlayer(data.playerId))
         || (data.keys().hasAny(['matchId']) && canAccessLinkedMatch(data.matchId))
         || (data.keys().hasAny(['sessionId']) && canAccessLinkedSession(data.sessionId));
