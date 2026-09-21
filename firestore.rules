@@ -19,7 +19,8 @@ service cloud.firestore {
     }
 
     function staffStatus() {
-      return staffExists() && staffDoc().data.keys().hasAny(['status']) ? staffDoc().data.status : 'ACTIVE';
+      let profile = staffDoc().data;
+      return staffExists() && profile.keys().hasAny(['status']) ? profile.status : 'ACTIVE';
     }
 
     function hasActiveStaffProfile() {
@@ -27,7 +28,8 @@ service cloud.firestore {
     }
 
     function role() {
-      return hasActiveStaffProfile() && staffDoc().data.keys().hasAny(['role']) ? staffDoc().data.role : 'NONE';
+      let profile = staffDoc().data;
+      return hasActiveStaffProfile() && profile.keys().hasAny(['role']) ? profile.role : 'NONE';
     }
 
     function hasRole(roles) {
@@ -35,7 +37,8 @@ service cloud.firestore {
     }
 
     function permissionLevel() {
-      return hasActiveStaffProfile() && staffDoc().data.keys().hasAny(['permissionLevel']) ? staffDoc().data.permissionLevel : legacyPermissionFromRole();
+      let profile = staffDoc().data;
+      return hasActiveStaffProfile() && profile.keys().hasAny(['permissionLevel']) ? profile.permissionLevel : legacyPermissionFromRole();
     }
 
     function legacyPermissionFromRole() {
@@ -57,12 +60,13 @@ service cloud.firestore {
     }
 
     function canAccessModule(moduleId) {
+      let modules = profileList('allowedModules');
       return hasActiveStaffProfile()
         && (
           permissionLevel() == 'ADMIN'
           || role() == 'ADMIN'
-          || profileList('allowedModules').size() == 0
-          || profileList('allowedModules').hasAny([moduleId])
+          || modules.size() == 0
+          || modules.hasAny([moduleId])
         );
     }
 
@@ -123,15 +127,20 @@ service cloud.firestore {
 
     function profileList(field) {
       let profile = staffDoc().data;
+      return profileListFrom(profile, field);
+    }
+
+    function profileListFrom(profile, field) {
       return profile.keys().hasAny([field]) && profile[field] is list ? profile[field] : [];
     }
 
     function authorizedTeams() {
-      return profileList('authorizedTeamIds')
-        .concat(profileList('teamIds'))
-        .concat(profileList('allowedTeamIds'))
-        .concat(profileList('authorizedTeams'))
-        .concat(profileList('equipesAutorisees'));
+      let profile = staffDoc().data;
+      return profileListFrom(profile, 'authorizedTeamIds')
+        .concat(profileListFrom(profile, 'teamIds'))
+        .concat(profileListFrom(profile, 'allowedTeamIds'))
+        .concat(profileListFrom(profile, 'authorizedTeams'))
+        .concat(profileListFrom(profile, 'equipesAutorisees'));
     }
 
     function hasTeamScope() {
@@ -156,10 +165,12 @@ service cloud.firestore {
     }
 
     function canAccessPlayerId(playerId) {
+      let playerIds = profileList('playerIds');
+      let allowedPlayerIds = profileList('allowedPlayerIds');
       return permissionLevel() == 'ADMIN'
-        || profileList('playerIds').size() == 0 && profileList('allowedPlayerIds').size() == 0
-        || profileList('playerIds').hasAny([playerId])
-        || profileList('allowedPlayerIds').hasAny([playerId]);
+        || playerIds.size() == 0 && allowedPlayerIds.size() == 0
+        || playerIds.hasAny([playerId])
+        || allowedPlayerIds.hasAny([playerId]);
     }
 
     function valueOrEmpty(data, key) {
