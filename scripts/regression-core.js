@@ -868,6 +868,36 @@ function testPlayerProfileAttendanceUsesExistingSessionsAsSource(){
   assert(profileCss.includes('.attendance-summary-detail{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))'), 'Les dix motifs doivent occuper exactement deux lignes sur desktop.');
 }
 
+function testPlayerProfileUsesCompleteMatchPlayerStats(){
+  const window = loadBrowserScript('pages/player-profile/playerProfileStats.js', {
+    PlayerProfileData:{playerAliases(player){ return [player.playerId, player.displayName]; }},
+    PlayerProfileFilters:{dateOf(row){ return row.date || ''; }, filterRows(rows){ return rows; }}
+  });
+  const player = {playerId:'player-lisa', displayName:'BOMBARD LISA'};
+  const matches = [
+    {matchId:'match-1', date:'2026-09-19', opponent:'GS Dervaux', scoreUs:0, scoreThem:6, players:{
+      'BOMBARD LISA':{playerId:'player-lisa', seconds:1200, positionSeconds:{DCG:1200, MG:500}, but:1, passe:2, tirCadre:3, recup:4}
+    }},
+    {matchId:'match-2', date:'2026-09-20', opponent:'ASSE B', scoreUs:2, scoreThem:1, players:{
+      'BOMBARD LISA':{playerId:'player-lisa', seconds:600, positionSeconds:{MG:600}}
+    }}
+  ];
+  const stats = window.PlayerProfileStats.matchPerformance(player, matches);
+  assert.equal(stats.matches, 2, 'Un match sans action doit compter dès lors que la joueuse possède du temps de jeu.');
+  assert.equal(stats.seconds, 1800);
+  assert.equal(stats.averageSeconds, 900);
+  assert.equal(stats.but, 1);
+  assert.equal(stats.passe, 2);
+  assert.equal(Object.values(stats.history[1].positions).reduce((total,value) => total + value, 0), 1200, 'Le cumul des postes doit être plafonné au temps joué du match.');
+
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  assert(appSource.includes('...Object.values(raw.players || {}).flatMap'), 'Les prochains matchs synchronisés doivent indexer leurs playerId.');
+  assert(appSource.includes("firebaseFns.where('teamIds', 'array-contains-any', chunk)"), 'La fiche individuelle doit retrouver les matchs des différentes équipes de la joueuse.');
+  assert(appSource.includes('const playerMatches = teamMatches.filter'), 'Les matchs historiques sans événement individuel doivent être relus depuis leur bloc players.');
+  const renderSource = fs.readFileSync('pages/player-profile/playerProfileRender.js', 'utf8');
+  assert(renderSource.includes('Temps par poste') && renderSource.includes('Détail par match'), 'La fiche doit afficher les temps par poste et le détail de chaque match.');
+}
+
 function testHomeDashboardStaysScopedToAuthorizedTeams(){
   const appSource = fs.readFileSync('app.js', 'utf8');
 
@@ -1219,6 +1249,7 @@ testMatchDataStayLinkedToPlayerAndTeamIds();
 testPresenceEventsStayLinkedToPlayerAndTeamIds();
 testPresenceD2CodeStaysScopedToU19();
 testPlayerProfileAttendanceUsesExistingSessionsAsSource();
+testPlayerProfileUsesCompleteMatchPlayerStats();
 testHomeDashboardStaysScopedToAuthorizedTeams();
 testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
