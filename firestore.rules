@@ -541,6 +541,9 @@ service cloud.firestore {
     }
 
     match /sessions/{sessionId} {
+      allow get: if canWriteSportData()
+        && canAccessModule('presences')
+        && !exists(/databases/$(database)/documents/sessions/$(sessionId));
       allow read: if canReadSessionRecord(sessionId, resource.data);
       allow create: if canWriteSportData()
         && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(sessionId))

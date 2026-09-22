@@ -654,6 +654,7 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes("firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId)"), 'La suppression atomique doit écrire son journal dans Firebase.');
   assert(appSource.includes("const [deletionLogSnap, existingAttendanceSnap] = await Promise.all(["), 'La sauvegarde Présences doit lire ensemble le tombstone et les présences existantes.');
   assert(appSource.includes('const latestSessionSnap = await transaction.get(sessionRef);'), 'La version cloud de la séance doit être relue dans la transaction Firestore.');
+  assert(rulesSource.includes("allow get: if canWriteSportData()\n        && canAccessModule('presences')\n        && !exists(/databases/$(database)/documents/sessions/$(sessionId));"), 'La transaction Présences doit pouvoir constater qu’une nouvelle séance n’existe pas encore sans élargir la lecture des séances existantes.');
   assert(appSource.includes('if(latestSessionSnap.exists() && cloudVersion > localVersion)'), 'Une ancienne copie locale ne doit jamais écraser une séance cloud plus récente.');
   assert(appSource.includes("if(!firebaseFns.runTransaction) throw new Error('Synchronisation atomique Firebase indisponible.')"), 'La sauvegarde Présences doit exiger une transaction Firestore atomique.');
   assert(appSource.includes('await firebaseFns.runTransaction(db, async transaction => {'), 'La séance et ses présences doivent être sauvegardées dans la même transaction Firestore.');
