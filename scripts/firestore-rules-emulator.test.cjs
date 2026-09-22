@@ -22,6 +22,14 @@ async function main() {
         allowedModules: ['database', 'playerProfile', 'stats', 'presences', 'tests', 'medical'],
         authorizedTeamIds: ['U11']
       });
+      await setDoc(doc(db, 'staff_members', 'editor'), {
+        status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
+        allowedModules: ['stats', 'presences', 'tests'], authorizedTeamIds: ['U11']
+      });
+      await setDoc(doc(db, 'staff_members', 'noTests'), {
+        status: 'ACTIVE', role: 'COACH', permissionLevel: 'SAISIE',
+        allowedModules: ['presences'], authorizedTeamIds: ['U11']
+      });
       await setDoc(doc(db, 'staff_members', 'admin'), {
         status: 'ACTIVE', role: 'ADMIN', permissionLevel: 'ADMIN'
       });
@@ -67,6 +75,8 @@ async function main() {
     await assertFails(getDoc(doc(environment.unauthenticatedContext().firestore(), 'players', 'pU11')));
     await assertFails(getDoc(doc(db, 'unexpected', 'record')));
     const readerDb = environment.authenticatedContext('reader').firestore();
+    const editorDb = environment.authenticatedContext('editor').firestore();
+    const noTestsDb = environment.authenticatedContext('noTests').firestore();
     const adminDb = environment.authenticatedContext('admin').firestore();
     const limitedDb = environment.authenticatedContext('limited').firestore();
     const allPlayersDb = environment.authenticatedContext('allPlayers').firestore();
@@ -80,8 +90,14 @@ async function main() {
     await assertSucceeds(getDoc(doc(allPlayersDb, 'players', 'pU13')));
     await assertSucceeds(getDoc(doc(allPlayersDb, 'technicalTests', 'tU13')));
     await assertFails(getDoc(doc(inactiveDb, 'players', 'pU11')));
+    await assertFails(getDoc(doc(noTestsDb, 'technicalTests', 'tU11')));
     process.stdout.write('Checking read-only role cannot write\n');
     await assertFails(setDoc(doc(readerDb, 'technicalTests', 'readerTest'), {testId: 'readerTest', playerId: 'pU11'}));
+    await assertFails(setDoc(doc(readerDb, 'matches', 'readerMatch'), {matchId: 'readerMatch', teamId: 'U11'}));
+    await assertFails(setDoc(doc(noTestsDb, 'technicalTests', 'noModuleTest'), {testId: 'noModuleTest', playerId: 'pU11'}));
+    process.stdout.write('Checking editor and admin writes\n');
+    await assertSucceeds(setDoc(doc(editorDb, 'technicalTests', 'editorTest'), {testId: 'editorTest', playerId: 'pU11'}));
+    await assertSucceeds(setDoc(doc(adminDb, 'matches', 'adminMatch'), {matchId: 'adminMatch', teamId: 'U13'}));
     process.stdout.write('Checking authorized match update\n');
     await assertSucceeds(setDoc(doc(db, 'matches', 'mU11'), {matchId: 'mU11', teamId: 'U11', score: '1-0'}));
     process.stdout.write('Checking authorized match event update\n');
