@@ -403,8 +403,8 @@ service cloud.firestore {
         && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
         && moduleAllowedFrom(modules, level, staffRole, 'presences')
         && (level == 'ADMIN'
-          || (data.keys().hasAny(['teamId']) && teams.hasAny([data.teamId]))
-          || (data.keys().hasAny(['teamIds']) && data.teamIds is list && data.teamIds.hasAny(teams)));
+          || teams.hasAny([data.teamId])
+          || data.teamIds.hasAny(teams));
     }
 
     function canAccessTechnicalTestScope(data, teams, allPlayers) {
