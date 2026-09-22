@@ -139,6 +139,8 @@ async function main() {
     await assertFails(setDoc(doc(limitedDb, 'matchEvents', 'limitedEvent'), {eventId: 'limitedEvent', matchId: 'mU11'}));
     await assertFails(setDoc(doc(inactiveDb, 'matches', 'inactiveMatch'), {matchId: 'inactiveMatch', teamId: 'U11'}));
     process.stdout.write('Checking atomic presence deletion and tombstone\n');
+    const sessionQuery = query(collection(db, 'sessions'), where('sessionId', '==', 'sU11'));
+    assert.equal((await assertSucceeds(getDocs(sessionQuery))).size, 1);
     const directAttendanceQuery = query(collection(db, 'attendance'), where('teamId', '==', 'U11'));
     const dualAttendanceQuery = query(collection(db, 'attendance'), where('teamIds', 'array-contains', 'U11'));
     const [directAttendance, dualAttendance] = await Promise.all([
