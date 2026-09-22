@@ -50,7 +50,7 @@ async function main() {
         await setDoc(doc(db, 'matches', `m${teamId}`), {matchId: `m${teamId}`, teamId});
         await setDoc(doc(db, 'sessions', `s${teamId}`), {sessionId: `s${teamId}`, teamId, source: 'Présences'});
         await setDoc(doc(db, 'matchEvents', `e${teamId}`), {eventId: `e${teamId}`, matchId: `m${teamId}`});
-        await setDoc(doc(db, 'attendance', `a${teamId}`), {attendanceId: `a${teamId}`, sessionId: `s${teamId}`});
+        await setDoc(doc(db, 'attendance', `a${teamId}`), {attendanceId: `a${teamId}`, sessionId: `s${teamId}`, teamId});
         await setDoc(doc(db, 'technicalTests', `t${teamId}`), {testId: `t${teamId}`, playerId: `p${teamId}`});
         await setDoc(doc(db, 'injuries', `i${teamId}`), {injuryId: `i${teamId}`, playerId: `p${teamId}`});
       }
@@ -117,9 +117,9 @@ async function main() {
     process.stdout.write('Checking authorized match event update\n');
     await assertSucceeds(setDoc(doc(db, 'matchEvents', 'eU11'), {eventId: 'eU11', matchId: 'mU11', type: 'goal'}));
     process.stdout.write('Checking authorized attendance create\n');
-    await assertSucceeds(setDoc(doc(db, 'attendance', 'newU11'), {attendanceId: 'newU11', sessionId: 'sU11'}));
+    await assertSucceeds(setDoc(doc(db, 'attendance', 'newU11'), {attendanceId: 'newU11', sessionId: 'sU11', teamId: 'U11'}));
     process.stdout.write('Checking authorized attendance update\n');
-    await assertSucceeds(setDoc(doc(db, 'attendance', 'aU11'), {attendanceId: 'aU11', sessionId: 'sU11', status: 'P'}));
+    await assertSucceeds(setDoc(doc(db, 'attendance', 'aU11'), {attendanceId: 'aU11', sessionId: 'sU11', teamId: 'U11', status: 'P'}));
     process.stdout.write('Checking authorized technical test create\n');
     await assertSucceeds(setDoc(doc(db, 'technicalTests', 'newU11'), {testId: 'newU11', playerId: 'pU11'}));
     process.stdout.write('Checking authorized technical test update\n');
@@ -136,7 +136,7 @@ async function main() {
     await assertFails(setDoc(doc(limitedDb, 'matchEvents', 'limitedEvent'), {eventId: 'limitedEvent', matchId: 'mU11'}));
     await assertFails(setDoc(doc(inactiveDb, 'matches', 'inactiveMatch'), {matchId: 'inactiveMatch', teamId: 'U11'}));
     process.stdout.write('Checking atomic presence deletion and tombstone\n');
-    const attendanceQuery = query(collection(db, 'attendance'), where('sessionId', '==', 'sU11'));
+    const attendanceQuery = query(collection(db, 'attendance'), where('sessionId', '==', 'sU11'), where('teamId', '==', 'U11'));
     const matchingAttendance = await assertSucceeds(getDocs(attendanceQuery));
     assert.equal(matchingAttendance.size, 2);
     const deletion = writeBatch(db);
