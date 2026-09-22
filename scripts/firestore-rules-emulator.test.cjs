@@ -48,7 +48,7 @@ async function main() {
       for (const teamId of ['U11', 'U13']) {
         await setDoc(doc(db, 'players', `p${teamId}`), {playerId: `p${teamId}`, teamId, status: 'ACTIVE'});
         await setDoc(doc(db, 'matches', `m${teamId}`), {matchId: `m${teamId}`, teamId});
-        await setDoc(doc(db, 'sessions', `s${teamId}`), {sessionId: `s${teamId}`, teamId, source: 'Présences'});
+        await setDoc(doc(db, 'sessions', `s${teamId}`), {sessionId: `s${teamId}`, teamId, teamIds: [teamId], source: 'Présences', createdFromPresenceModule: true});
         await setDoc(doc(db, 'matchEvents', `e${teamId}`), {eventId: `e${teamId}`, matchId: `m${teamId}`});
         await setDoc(doc(db, 'attendance', `a${teamId}`), {attendanceId: `a${teamId}`, sessionId: `s${teamId}`, teamId});
         await setDoc(doc(db, 'technicalTests', `t${teamId}`), {testId: `t${teamId}`, playerId: `p${teamId}`});
@@ -139,8 +139,15 @@ async function main() {
     await assertFails(setDoc(doc(limitedDb, 'matchEvents', 'limitedEvent'), {eventId: 'limitedEvent', matchId: 'mU11'}));
     await assertFails(setDoc(doc(inactiveDb, 'matches', 'inactiveMatch'), {matchId: 'inactiveMatch', teamId: 'U11'}));
     process.stdout.write('Checking atomic presence deletion and tombstone\n');
-    const sessionQuery = query(collection(db, 'sessions'), where('sessionId', '==', 'sU11'));
-    assert.equal((await assertSucceeds(getDocs(sessionQuery))).size, 1);
+    const sessionQueries = [
+      query(collection(db, 'sessions'), where('source', '==', 'Présences'), where('teamId', '==', 'U11')),
+      query(collection(db, 'sessions'), where('source', '==', 'Présences'), where('teamIds', 'array-contains', 'U11')),
+      query(collection(db, 'sessions'), where('createdFromPresenceModule', '==', true), where('teamId', '==', 'U11')),
+      query(collection(db, 'sessions'), where('createdFromPresenceModule', '==', true), where('teamIds', 'array-contains', 'U11'))
+    ];
+    for (const sessionQuery of sessionQueries) {
+      assert.equal((await assertSucceeds(getDocs(sessionQuery))).docs.some(snapshot => snapshot.id === 'sU11'), true);
+    }
     const directAttendanceQuery = query(collection(db, 'attendance'), where('teamId', '==', 'U11'));
     const dualAttendanceQuery = query(collection(db, 'attendance'), where('teamIds', 'array-contains', 'U11'));
     const [directAttendance, dualAttendance] = await Promise.all([

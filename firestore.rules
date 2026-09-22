@@ -478,6 +478,21 @@ service cloud.firestore {
         );
     }
 
+    function canListPresenceSessionByTeam(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && moduleAllowedFrom(modules, level, staffRole, 'presences')
+        && isPresenceSession(data)
+        && (level == 'ADMIN' || teams.hasAny([data.teamId]) || data.teamIds.hasAny(teams));
+    }
+
     function legacyPermissionFromRoleValue(staffRole) {
       return staffRole == 'ADMIN' ? 'ADMIN'
         : (staffRole in ['RESPONSABLE', 'RESPONSABLE_CATEGORIE'] ? 'EDITEUR'
@@ -581,6 +596,7 @@ service cloud.firestore {
         && canAccessModule('presences')
         && !exists(/databases/$(database)/documents/sessions/$(sessionId));
       allow read: if canReadSessionRecord(sessionId, resource.data);
+      allow list: if canListPresenceSessionByTeam(resource.data);
       allow create: if canWriteSportData()
         && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(sessionId))
         && (
