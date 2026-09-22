@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {doc, getDoc, setDoc} = require('firebase/firestore');
+const {collection, doc, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
 
 async function main() {
   const environment = await initializeTestEnvironment({
@@ -48,9 +48,9 @@ async function main() {
       for (const teamId of ['U11', 'U13']) {
         await setDoc(doc(db, 'players', `p${teamId}`), {playerId: `p${teamId}`, teamId, status: 'ACTIVE'});
         await setDoc(doc(db, 'matches', `m${teamId}`), {matchId: `m${teamId}`, teamId});
-        await setDoc(doc(db, 'sessions', `s${teamId}`), {sessionId: `s${teamId}`, teamId, source: 'Présences'});
+        await setDoc(doc(db, 'sessions', `s${teamId}`), {sessionId: `s${teamId}`, teamId, teamIds: [teamId], source: 'Présences', createdFromPresenceModule: true});
         await setDoc(doc(db, 'matchEvents', `e${teamId}`), {eventId: `e${teamId}`, matchId: `m${teamId}`});
-        await setDoc(doc(db, 'attendance', `a${teamId}`), {attendanceId: `a${teamId}`, sessionId: `s${teamId}`});
+        await setDoc(doc(db, 'attendance', `a${teamId}`), {attendanceId: `a${teamId}`, sessionId: `s${teamId}`, teamId});
         await setDoc(doc(db, 'technicalTests', `t${teamId}`), {testId: `t${teamId}`, playerId: `p${teamId}`});
         await setDoc(doc(db, 'injuries', `i${teamId}`), {injuryId: `i${teamId}`, playerId: `p${teamId}`});
       }
@@ -58,6 +58,16 @@ async function main() {
         playerId: 'pDual', teamId: 'U13', teamIds: ['U13', 'U11'], status: 'ACTIVE'
       });
       await setDoc(doc(db, 'technicalTests', 'tDual'), {testId: 'tDual', playerId: 'pDual'});
+      await setDoc(doc(db, 'players', 'pLegacy'), {playerId: 'pLegacy', teamId: 'U11', status: 'ACTIVE'});
+      await setDoc(doc(db, 'sessions', 'sLegacy'), {sessionId: 'sLegacy', teamId: 'U11', source: 'Présences'});
+      await setDoc(doc(db, 'attendance', 'aLegacy'), {attendanceId: 'aLegacy', sessionId: 'sLegacy'});
+      await setDoc(doc(db, 'attendance', 'aDual'), {
+        attendanceId: 'aDual', sessionId: 'sU11', playerId: 'pDual', teamId: 'U13', teamIds: ['U13', 'U11']
+      });
+      await setDoc(doc(db, 'technicalTests', 'tLegacy'), {testId: 'tLegacy', playerId: 'pLegacy'});
+      await setDoc(doc(db, 'sessions', 'xlsx-2026-05-old'), {sessionId: 'xlsx-2026-05-old', teamId: 'U11', source: 'Import présence'});
+      await setDoc(doc(db, 'players', 'pOrphan'), {playerId: 'pOrphan', status: 'ACTIVE'});
+      await setDoc(doc(db, 'sessions', 'sOrphan'), {sessionId: 'sOrphan', source: 'Présences'});
     });
 
     const db = environment.authenticatedContext('coach').firestore();
@@ -91,6 +101,13 @@ async function main() {
     await assertSucceeds(getDoc(doc(allPlayersDb, 'technicalTests', 'tU13')));
     await assertFails(getDoc(doc(inactiveDb, 'players', 'pU11')));
     await assertFails(getDoc(doc(noTestsDb, 'technicalTests', 'tU11')));
+    process.stdout.write('Checking historical scope formats\n');
+    for (const [name, id] of [
+      ['players', 'pLegacy'], ['sessions', 'sLegacy'], ['attendance', 'aLegacy'],
+      ['technicalTests', 'tLegacy'], ['sessions', 'xlsx-2026-05-old']
+    ]) await assertSucceeds(getDoc(doc(db, name, id)));
+    await assertFails(getDoc(doc(db, 'players', 'pOrphan')));
+    await assertFails(getDoc(doc(db, 'sessions', 'sOrphan')));
     process.stdout.write('Checking read-only role cannot write\n');
     await assertFails(setDoc(doc(readerDb, 'technicalTests', 'readerTest'), {testId: 'readerTest', playerId: 'pU11'}));
     await assertFails(setDoc(doc(readerDb, 'matches', 'readerMatch'), {matchId: 'readerMatch', teamId: 'U11'}));
@@ -103,9 +120,9 @@ async function main() {
     process.stdout.write('Checking authorized match event update\n');
     await assertSucceeds(setDoc(doc(db, 'matchEvents', 'eU11'), {eventId: 'eU11', matchId: 'mU11', type: 'goal'}));
     process.stdout.write('Checking authorized attendance create\n');
-    await assertSucceeds(setDoc(doc(db, 'attendance', 'newU11'), {attendanceId: 'newU11', sessionId: 'sU11'}));
+    await assertSucceeds(setDoc(doc(db, 'attendance', 'newU11'), {attendanceId: 'newU11', sessionId: 'sU11', teamId: 'U11'}));
     process.stdout.write('Checking authorized attendance update\n');
-    await assertSucceeds(setDoc(doc(db, 'attendance', 'aU11'), {attendanceId: 'aU11', sessionId: 'sU11', status: 'P'}));
+    await assertSucceeds(setDoc(doc(db, 'attendance', 'aU11'), {attendanceId: 'aU11', sessionId: 'sU11', teamId: 'U11', status: 'P'}));
     process.stdout.write('Checking authorized technical test create\n');
     await assertSucceeds(setDoc(doc(db, 'technicalTests', 'newU11'), {testId: 'newU11', playerId: 'pU11'}));
     process.stdout.write('Checking authorized technical test update\n');
@@ -121,6 +138,45 @@ async function main() {
     await assertFails(setDoc(doc(db, 'technicalTests', 'tU11'), {testId: 'tU11', playerId: 'pU13'}));
     await assertFails(setDoc(doc(limitedDb, 'matchEvents', 'limitedEvent'), {eventId: 'limitedEvent', matchId: 'mU11'}));
     await assertFails(setDoc(doc(inactiveDb, 'matches', 'inactiveMatch'), {matchId: 'inactiveMatch', teamId: 'U11'}));
+    process.stdout.write('Checking atomic presence deletion and tombstone\n');
+    const sessionQueries = [
+      query(collection(db, 'sessions'), where('source', '==', 'Présences'), where('teamId', '==', 'U11')),
+      query(collection(db, 'sessions'), where('source', '==', 'Présences'), where('teamIds', 'array-contains', 'U11')),
+      query(collection(db, 'sessions'), where('createdFromPresenceModule', '==', true), where('teamId', '==', 'U11')),
+      query(collection(db, 'sessions'), where('createdFromPresenceModule', '==', true), where('teamIds', 'array-contains', 'U11'))
+    ];
+    for (const sessionQuery of sessionQueries) {
+      assert.equal((await assertSucceeds(getDocs(sessionQuery))).docs.some(snapshot => snapshot.id === 'sU11'), true);
+    }
+    const directAttendanceQuery = query(collection(db, 'attendance'), where('teamId', '==', 'U11'));
+    const dualAttendanceQuery = query(collection(db, 'attendance'), where('teamIds', 'array-contains', 'U11'));
+    const [directAttendance, dualAttendance] = await Promise.all([
+      assertSucceeds(getDocs(directAttendanceQuery)), assertSucceeds(getDocs(dualAttendanceQuery))
+    ]);
+    const matchingAttendance = new Map();
+    for (const result of [directAttendance, dualAttendance]) result.forEach(snapshot => {
+      if (snapshot.data().sessionId === 'sU11') matchingAttendance.set(snapshot.id, snapshot.ref);
+    });
+    assert.equal(matchingAttendance.size, 3);
+    const deletion = writeBatch(db);
+    matchingAttendance.forEach(ref => deletion.delete(ref));
+    deletion.delete(doc(db, 'sessions', 'sU11'));
+    deletion.set(doc(db, 'presenceDeletionLogs', 'sU11'), {
+      deletionId: 'sU11', sessionId: 'sU11', teamId: 'U11', source: 'Présences'
+    });
+    await assertSucceeds(deletion.commit());
+    assert.equal((await getDoc(doc(db, 'sessions', 'sU11'))).exists(), false);
+    assert.equal((await getDocs(directAttendanceQuery)).size, 0);
+    assert.equal((await getDocs(dualAttendanceQuery)).size, 0);
+    await assertFails(setDoc(doc(db, 'sessions', 'sU11'), {sessionId: 'sU11', teamId: 'U11', source: 'Présences'}));
+    await assertFails(setDoc(doc(db, 'attendance', 'recreatedU11'), {attendanceId: 'recreatedU11', sessionId: 'sU11'}));
+    const foreignDeletion = writeBatch(db);
+    foreignDeletion.delete(doc(db, 'sessions', 'sU13'));
+    foreignDeletion.set(doc(db, 'presenceDeletionLogs', 'sU13'), {
+      deletionId: 'sU13', sessionId: 'sU13', teamId: 'U13', source: 'Présences'
+    });
+    await assertFails(foreignDeletion.commit());
+    assert.equal((await getDoc(doc(adminDb, 'sessions', 'sU13'))).exists(), true);
     assert.equal((await getDoc(doc(db, 'matches', 'mU11'))).data().teamId, 'U11');
     process.stdout.write('Firestore rules emulator guards OK\n');
   } finally {

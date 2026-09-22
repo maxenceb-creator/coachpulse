@@ -5999,22 +5999,40 @@ async function presenceDeleteEvent(event={}){
   const sessionId = String(event.sessionId || event.id || '').trim();
   if(!sessionId) throw new Error('Événement introuvable.');
   const directSessionRef = firebaseFns.doc(db, 'sessions', sessionId);
-  const [attendanceSnap, sessionSnap, directSessionSnap] = await Promise.all([
-    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId))),
-    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('sessionId', '==', sessionId))),
-    firebaseFns.getDoc(directSessionRef)
+  const directSessionSnap = await firebaseFns.getDoc(directSessionRef);
+  const lookupTeamIds = [...new Set(presenceTeamIdRefs(directSessionSnap.exists() ? directSessionSnap.data() : {}, event)
+    .filter(teamId => teamId && canAccessTeamId(teamId)))];
+  if(!lookupTeamIds.length) throw new Error('Équipe de la séance non autorisée.');
+  const sessionQueries = lookupTeamIds.flatMap(teamId => [
+    firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences'), firebaseFns.where('teamId', '==', teamId)),
+    firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences'), firebaseFns.where('teamIds', 'array-contains', teamId)),
+    firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true), firebaseFns.where('teamId', '==', teamId)),
+    firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true), firebaseFns.where('teamIds', 'array-contains', teamId))
   ]);
+  const sessionSnaps = await Promise.all(sessionQueries.map(query => firebaseFns.getDocs(query)));
   const refs = new Map();
-  attendanceSnap.forEach(docSnap => refs.set(`attendance/${docSnap.id}`, firebaseFns.doc(db, 'attendance', docSnap.id)));
-  sessionSnap.forEach(docSnap => refs.set(`sessions/${docSnap.id}`, firebaseFns.doc(db, 'sessions', docSnap.id)));
-  if(directSessionSnap.exists()) refs.set(`sessions/${sessionId}`, directSessionRef);
   const sessionRows = [];
-  sessionSnap.forEach(docSnap => sessionRows.push({id:docSnap.id, ...docSnap.data()}));
+  sessionSnaps.forEach(snapshot => snapshot.forEach(docSnap => {
+    if(docSnap.data().sessionId !== sessionId || refs.has(`sessions/${docSnap.id}`)) return;
+    refs.set(`sessions/${docSnap.id}`, docSnap.ref);
+    sessionRows.push({id:docSnap.id, ...docSnap.data()});
+  }));
+  if(directSessionSnap.exists()) refs.set(`sessions/${sessionId}`, directSessionRef);
   if(directSessionSnap.exists() && !sessionRows.some(row => row.id === directSessionSnap.id)) sessionRows.push({id:directSessionSnap.id, ...directSessionSnap.data()});
   const sourceSession = sessionRows[0] || event;
   const teamIds = presenceTeamIdRefs(sourceSession, event, sourceSession.teamSnapshot, event.teamSnapshot);
   const primaryTeamId = sourceSession.teamId || event.teamId || teamIds[0] || '';
   if(!primaryTeamId && !canAccessAnyPresenceTeam(sourceSession, event)) throw new Error('Équipe de la séance introuvable.');
+  const authorizedTeamIds = [...new Set(teamIds.filter(teamId => teamId && canAccessTeamId(teamId)))];
+  if(!authorizedTeamIds.length) throw new Error('Équipe de la séance non autorisée.');
+  const attendanceQueries = authorizedTeamIds.flatMap(teamId => [
+    firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('teamId', '==', teamId)),
+    firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('teamIds', 'array-contains', teamId))
+  ]);
+  const attendanceSnaps = await Promise.all(attendanceQueries.map(query => firebaseFns.getDocs(query)));
+  attendanceSnaps.forEach(snapshot => snapshot.forEach(docSnap => {
+    if(docSnap.data().sessionId === sessionId) refs.set(`attendance/${docSnap.id}`, docSnap.ref);
+  }));
   if(!firebaseFns.writeBatch) throw new Error('Suppression atomique Firebase indisponible.');
   const deletedAtIso = new Date().toISOString();
   const deletionLogId = sessionId;
