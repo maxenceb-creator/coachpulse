@@ -61,6 +61,9 @@ async function main() {
       await setDoc(doc(db, 'players', 'pLegacy'), {playerId: 'pLegacy', teamId: 'U11', status: 'ACTIVE'});
       await setDoc(doc(db, 'sessions', 'sLegacy'), {sessionId: 'sLegacy', teamId: 'U11', source: 'Présences'});
       await setDoc(doc(db, 'attendance', 'aLegacy'), {attendanceId: 'aLegacy', sessionId: 'sLegacy'});
+      await setDoc(doc(db, 'attendance', 'aDual'), {
+        attendanceId: 'aDual', sessionId: 'sU11', playerId: 'pDual', teamId: 'U13', teamIds: ['U13', 'U11']
+      });
       await setDoc(doc(db, 'technicalTests', 'tLegacy'), {testId: 'tLegacy', playerId: 'pLegacy'});
       await setDoc(doc(db, 'sessions', 'xlsx-2026-05-old'), {sessionId: 'xlsx-2026-05-old', teamId: 'U11', source: 'Import présence'});
       await setDoc(doc(db, 'players', 'pOrphan'), {playerId: 'pOrphan', status: 'ACTIVE'});
@@ -136,18 +139,26 @@ async function main() {
     await assertFails(setDoc(doc(limitedDb, 'matchEvents', 'limitedEvent'), {eventId: 'limitedEvent', matchId: 'mU11'}));
     await assertFails(setDoc(doc(inactiveDb, 'matches', 'inactiveMatch'), {matchId: 'inactiveMatch', teamId: 'U11'}));
     process.stdout.write('Checking atomic presence deletion and tombstone\n');
-    const attendanceQuery = query(collection(db, 'attendance'), where('sessionId', '==', 'sU11'), where('teamId', '==', 'U11'));
-    const matchingAttendance = await assertSucceeds(getDocs(attendanceQuery));
-    assert.equal(matchingAttendance.size, 2);
+    const directAttendanceQuery = query(collection(db, 'attendance'), where('teamId', '==', 'U11'));
+    const dualAttendanceQuery = query(collection(db, 'attendance'), where('teamIds', 'array-contains', 'U11'));
+    const [directAttendance, dualAttendance] = await Promise.all([
+      assertSucceeds(getDocs(directAttendanceQuery)), assertSucceeds(getDocs(dualAttendanceQuery))
+    ]);
+    const matchingAttendance = new Map();
+    for (const result of [directAttendance, dualAttendance]) result.forEach(snapshot => {
+      if (snapshot.data().sessionId === 'sU11') matchingAttendance.set(snapshot.id, snapshot.ref);
+    });
+    assert.equal(matchingAttendance.size, 3);
     const deletion = writeBatch(db);
-    matchingAttendance.forEach(snapshot => deletion.delete(snapshot.ref));
+    matchingAttendance.forEach(ref => deletion.delete(ref));
     deletion.delete(doc(db, 'sessions', 'sU11'));
     deletion.set(doc(db, 'presenceDeletionLogs', 'sU11'), {
       deletionId: 'sU11', sessionId: 'sU11', teamId: 'U11', source: 'Présences'
     });
     await assertSucceeds(deletion.commit());
     assert.equal((await getDoc(doc(db, 'sessions', 'sU11'))).exists(), false);
-    assert.equal((await getDocs(attendanceQuery)).size, 0);
+    assert.equal((await getDocs(directAttendanceQuery)).size, 0);
+    assert.equal((await getDocs(dualAttendanceQuery)).size, 0);
     await assertFails(setDoc(doc(db, 'sessions', 'sU11'), {sessionId: 'sU11', teamId: 'U11', source: 'Présences'}));
     await assertFails(setDoc(doc(db, 'attendance', 'recreatedU11'), {attendanceId: 'recreatedU11', sessionId: 'sU11'}));
     const foreignDeletion = writeBatch(db);

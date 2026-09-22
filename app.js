@@ -5999,13 +5999,11 @@ async function presenceDeleteEvent(event={}){
   const sessionId = String(event.sessionId || event.id || '').trim();
   if(!sessionId) throw new Error('Événement introuvable.');
   const directSessionRef = firebaseFns.doc(db, 'sessions', sessionId);
-  const [attendanceSnap, sessionSnap, directSessionSnap] = await Promise.all([
-    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId))),
+  const [sessionSnap, directSessionSnap] = await Promise.all([
     firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('sessionId', '==', sessionId))),
     firebaseFns.getDoc(directSessionRef)
   ]);
   const refs = new Map();
-  attendanceSnap.forEach(docSnap => refs.set(`attendance/${docSnap.id}`, firebaseFns.doc(db, 'attendance', docSnap.id)));
   sessionSnap.forEach(docSnap => refs.set(`sessions/${docSnap.id}`, firebaseFns.doc(db, 'sessions', docSnap.id)));
   if(directSessionSnap.exists()) refs.set(`sessions/${sessionId}`, directSessionRef);
   const sessionRows = [];
@@ -6015,6 +6013,16 @@ async function presenceDeleteEvent(event={}){
   const teamIds = presenceTeamIdRefs(sourceSession, event, sourceSession.teamSnapshot, event.teamSnapshot);
   const primaryTeamId = sourceSession.teamId || event.teamId || teamIds[0] || '';
   if(!primaryTeamId && !canAccessAnyPresenceTeam(sourceSession, event)) throw new Error('Équipe de la séance introuvable.');
+  const authorizedTeamIds = [...new Set(teamIds.filter(teamId => teamId && canAccessTeamId(teamId)))];
+  if(!authorizedTeamIds.length) throw new Error('Équipe de la séance non autorisée.');
+  const attendanceQueries = authorizedTeamIds.flatMap(teamId => [
+    firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('teamId', '==', teamId)),
+    firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('teamIds', 'array-contains', teamId))
+  ]);
+  const attendanceSnaps = await Promise.all(attendanceQueries.map(query => firebaseFns.getDocs(query)));
+  attendanceSnaps.forEach(snapshot => snapshot.forEach(docSnap => {
+    if(docSnap.data().sessionId === sessionId) refs.set(`attendance/${docSnap.id}`, docSnap.ref);
+  }));
   if(!firebaseFns.writeBatch) throw new Error('Suppression atomique Firebase indisponible.');
   const deletedAtIso = new Date().toISOString();
   const deletionLogId = sessionId;

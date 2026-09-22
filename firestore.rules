@@ -391,21 +391,6 @@ service cloud.firestore {
         );
     }
 
-    function canListAttendanceForSession(data) {
-      let profile = staffDoc().data;
-      let staffRole = profile.get('role', 'NONE');
-      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
-      let modules = profileListFrom(profile, 'allowedModules');
-      let teams = authorizedTeamsFrom(profile);
-      return signedIn()
-        && exists(staffPath(request.auth.uid))
-        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
-        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
-        && moduleAllowedFrom(modules, level, staffRole, 'presences')
-        && data.keys().hasAny(['sessionId'])
-        && (level == 'ADMIN' || linkedTeamMatches('sessions', data.sessionId, teams));
-    }
-
     function canAccessTechnicalTestScope(data, teams, allPlayers) {
       return allPlayers
         || (hasScopeFields(data) && scopedTeams(data).hasAny(teams))
@@ -599,7 +584,6 @@ service cloud.firestore {
 
     match /attendance/{attendanceId} {
       allow read: if canReadAttendanceData(resource.data);
-      allow list: if canListAttendanceForSession(resource.data);
       allow create: if canWriteAttendanceData(request.resource.data, request.resource.data)
         && request.resource.data.keys().hasAny(['sessionId'])
         && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(request.resource.data.sessionId));
