@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {doc, getDoc, setDoc} = require('firebase/firestore');
+const {collection, doc, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
 
 async function main() {
   const environment = await initializeTestEnvironment({
@@ -58,6 +58,13 @@ async function main() {
         playerId: 'pDual', teamId: 'U13', teamIds: ['U13', 'U11'], status: 'ACTIVE'
       });
       await setDoc(doc(db, 'technicalTests', 'tDual'), {testId: 'tDual', playerId: 'pDual'});
+      await setDoc(doc(db, 'players', 'pLegacy'), {playerId: 'pLegacy', teamId: 'U11', status: 'ACTIVE'});
+      await setDoc(doc(db, 'sessions', 'sLegacy'), {sessionId: 'sLegacy', teamId: 'U11', source: 'Présences'});
+      await setDoc(doc(db, 'attendance', 'aLegacy'), {attendanceId: 'aLegacy', sessionId: 'sLegacy'});
+      await setDoc(doc(db, 'technicalTests', 'tLegacy'), {testId: 'tLegacy', playerId: 'pLegacy'});
+      await setDoc(doc(db, 'sessions', 'xlsx-2026-05-old'), {sessionId: 'xlsx-2026-05-old', teamId: 'U11', source: 'Import présence'});
+      await setDoc(doc(db, 'players', 'pOrphan'), {playerId: 'pOrphan', status: 'ACTIVE'});
+      await setDoc(doc(db, 'sessions', 'sOrphan'), {sessionId: 'sOrphan', source: 'Présences'});
     });
 
     const db = environment.authenticatedContext('coach').firestore();
@@ -91,6 +98,13 @@ async function main() {
     await assertSucceeds(getDoc(doc(allPlayersDb, 'technicalTests', 'tU13')));
     await assertFails(getDoc(doc(inactiveDb, 'players', 'pU11')));
     await assertFails(getDoc(doc(noTestsDb, 'technicalTests', 'tU11')));
+    process.stdout.write('Checking historical scope formats\n');
+    for (const [name, id] of [
+      ['players', 'pLegacy'], ['sessions', 'sLegacy'], ['attendance', 'aLegacy'],
+      ['technicalTests', 'tLegacy'], ['sessions', 'xlsx-2026-05-old']
+    ]) await assertSucceeds(getDoc(doc(db, name, id)));
+    await assertFails(getDoc(doc(db, 'players', 'pOrphan')));
+    await assertFails(getDoc(doc(db, 'sessions', 'sOrphan')));
     process.stdout.write('Checking read-only role cannot write\n');
     await assertFails(setDoc(doc(readerDb, 'technicalTests', 'readerTest'), {testId: 'readerTest', playerId: 'pU11'}));
     await assertFails(setDoc(doc(readerDb, 'matches', 'readerMatch'), {matchId: 'readerMatch', teamId: 'U11'}));
@@ -121,6 +135,28 @@ async function main() {
     await assertFails(setDoc(doc(db, 'technicalTests', 'tU11'), {testId: 'tU11', playerId: 'pU13'}));
     await assertFails(setDoc(doc(limitedDb, 'matchEvents', 'limitedEvent'), {eventId: 'limitedEvent', matchId: 'mU11'}));
     await assertFails(setDoc(doc(inactiveDb, 'matches', 'inactiveMatch'), {matchId: 'inactiveMatch', teamId: 'U11'}));
+    process.stdout.write('Checking atomic presence deletion and tombstone\n');
+    const attendanceQuery = query(collection(db, 'attendance'), where('sessionId', '==', 'sU11'));
+    const matchingAttendance = await assertSucceeds(getDocs(attendanceQuery));
+    assert.equal(matchingAttendance.size, 2);
+    const deletion = writeBatch(db);
+    matchingAttendance.forEach(snapshot => deletion.delete(snapshot.ref));
+    deletion.delete(doc(db, 'sessions', 'sU11'));
+    deletion.set(doc(db, 'presenceDeletionLogs', 'sU11'), {
+      deletionId: 'sU11', sessionId: 'sU11', teamId: 'U11', source: 'Présences'
+    });
+    await assertSucceeds(deletion.commit());
+    assert.equal((await getDoc(doc(db, 'sessions', 'sU11'))).exists(), false);
+    assert.equal((await getDocs(attendanceQuery)).size, 0);
+    await assertFails(setDoc(doc(db, 'sessions', 'sU11'), {sessionId: 'sU11', teamId: 'U11', source: 'Présences'}));
+    await assertFails(setDoc(doc(db, 'attendance', 'recreatedU11'), {attendanceId: 'recreatedU11', sessionId: 'sU11'}));
+    const foreignDeletion = writeBatch(db);
+    foreignDeletion.delete(doc(db, 'sessions', 'sU13'));
+    foreignDeletion.set(doc(db, 'presenceDeletionLogs', 'sU13'), {
+      deletionId: 'sU13', sessionId: 'sU13', teamId: 'U13', source: 'Présences'
+    });
+    await assertFails(foreignDeletion.commit());
+    assert.equal((await getDoc(doc(adminDb, 'sessions', 'sU13'))).exists(), true);
     assert.equal((await getDoc(doc(db, 'matches', 'mU11'))).data().teamId, 'U11');
     process.stdout.write('Firestore rules emulator guards OK\n');
   } finally {
