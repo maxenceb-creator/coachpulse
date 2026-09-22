@@ -707,7 +707,7 @@ function testAccessRegressionSurfaceStaysComplete(){
 
   assert(teamsSource.includes("name:'U19', category:'U19', subCategories:['U16','U17','U18','U19']"), 'U16 doit rester rattachable à U19 pour les surclassements.');
   assert(rulesSource.includes('function canAccessScopedData(data)'), 'Les règles Firestore doivent conserver le verrou teamId/playerId central.');
-  assert((rulesSource.match(/canAccessScopedData\(resource\.data\) && canAccessScopedData\(request\.resource\.data\)/g) || []).length >= 10, 'Les updates Firestore doivent contrôler ancien et nouveau périmètre sur les collections sensibles.');
+  assert((rulesSource.match(/canAccess(?:Direct|Scoped|MatchScoped|SessionScoped)Data\(resource\.data\) && canAccess(?:Direct|Scoped|MatchScoped|SessionScoped)Data\(request\.resource\.data\)/g) || []).length >= 10, 'Les updates Firestore doivent contrôler ancien et nouveau périmètre sur les collections sensibles.');
 }
 
 function testMatchDataStayLinkedToPlayerAndTeamIds(){
@@ -1113,7 +1113,7 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(appSource.includes("Array.isArray(stats?.savedMatches) ? stats.savedMatches"), 'Les matchs locaux historiques doivent être récupérables par la migration non destructive.');
   assert(appSource.includes("Array.isArray(m.log) ? m.log"), 'Le fil réel du match doit alimenter matchEvents.');
   assert(rulesSource.includes('match /matches/{matchId}') && rulesSource.includes('match /matchEvents/{eventId}'), 'Les règles doivent couvrir matches et matchEvents.');
-  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessScopedDataForModule(resource.data, 'stats');"), 'La suppression d’un événement Match doit utiliser les permissions du module Match.');
+  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessMatchScopedDataForModule(resource.data, 'stats');"), 'La suppression d’un événement Match doit utiliser les permissions du module Match.');
 }
 
 function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
