@@ -5898,8 +5898,13 @@ async function presenceSaveEvent(event={}){
   const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
   const sessionId = session.sessionId || event.id;
   const deletionLogId = sessionId;
-  const deletionLogSnap = await firebaseFns.getDoc(firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId));
+  const sessionRef = firebaseFns.doc(db, 'sessions', sessionId);
+  const [deletionLogSnap, existingAttendanceSnap] = await Promise.all([
+    firebaseFns.getDoc(firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId)),
+    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)))
+  ]);
   if(deletionLogSnap.exists()) throw new Error('Cette séance a été supprimée définitivement et ne peut pas être recréée depuis un ancien cache.');
+  const localVersion = Date.parse(session.updatedAtIso || event.updatedAtIso || session.createdAt || event.createdAt || session.date || event.date || 0) || 0;
   const now = new Date().toISOString();
   const sessionTeamIds = presenceTeamIdRefs(session, event, session.teamSnapshot, event.teamSnapshot);
   const primaryTeamId = presenceTeamIdRefs(session.teamId || event.teamId, session, event).find(teamId => canAccessTeamId(teamId)) || session.teamId || event.teamId || sessionTeamIds[0] || '';
@@ -5919,18 +5924,6 @@ async function presenceSaveEvent(event={}){
     embeddedAttendanceVersion:2
   };
   const safeSessionPayload = firestoreSafeData(sessionPayload);
-  await firebaseFns.setDoc(firebaseFns.doc(db, 'sessions', sessionId), {
-    ...safeSessionPayload,
-    id:sessionId,
-    sessionId,
-    source:'Présences',
-    createdFromPresenceModule:true,
-    updatedAt:firebaseFns.serverTimestamp(),
-    updatedAtIso:now,
-    updatedBy:currentUser.uid,
-    updatedByEmail:currentUser.email || '',
-    createdAtIso:session.createdAt || event.createdAt || now
-  }, {merge:true});
   const attendanceRows = (service?.attendanceRowsFromEvent ? service.attendanceRowsFromEvent(event) : [])
     .filter(row => row.playerId)
     .map(row => ({
@@ -5954,16 +5947,36 @@ async function presenceSaveEvent(event={}){
     }))
     .filter(row => canAccessAnyPresenceTeam(row, row.playerSnapshot, row.sessionSnapshot, sessionTeamIds));
   const nextAttendanceIds = new Set(attendanceRows.map(row => row.attendanceId || row.id).filter(Boolean));
-  const existingAttendanceSnap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)));
-  const staleAttendanceDeletes = [];
+  const staleAttendanceRefs = [];
   existingAttendanceSnap.forEach(docSnap => {
-    if(!nextAttendanceIds.has(docSnap.id)) staleAttendanceDeletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, 'attendance', docSnap.id)));
+    if(!nextAttendanceIds.has(docSnap.id)) staleAttendanceRefs.push(firebaseFns.doc(db, 'attendance', docSnap.id));
   });
-  await Promise.all([
-    ...staleAttendanceDeletes,
-    ...attendanceRows.map(row => {
+  if(!firebaseFns.runTransaction) throw new Error('Synchronisation atomique Firebase indisponible.');
+  const writeCount = 1 + attendanceRows.length + staleAttendanceRefs.length;
+  if(writeCount > 500) throw new Error('Cette séance contient trop de présences pour une synchronisation atomique Firestore.');
+  await firebaseFns.runTransaction(db, async transaction => {
+    const latestSessionSnap = await transaction.get(sessionRef);
+    const cloudSession = latestSessionSnap.exists() ? latestSessionSnap.data() : {};
+    const cloudVersion = Date.parse(cloudSession.updatedAtIso || cloudSession.createdAtIso || cloudSession.date || 0) || 0;
+    if(latestSessionSnap.exists() && cloudVersion > localVersion){
+      throw new Error('Une version cloud plus récente de cette séance a été conservée. Recharge les présences avant de réessayer.');
+    }
+    transaction.set(sessionRef, {
+      ...safeSessionPayload,
+      id:sessionId,
+      sessionId,
+      source:'Présences',
+      createdFromPresenceModule:true,
+      updatedAt:firebaseFns.serverTimestamp(),
+      updatedAtIso:now,
+      updatedBy:currentUser.uid,
+      updatedByEmail:currentUser.email || '',
+      createdAtIso:session.createdAt || event.createdAt || now
+    }, {merge:true});
+    staleAttendanceRefs.forEach(ref => transaction.delete(ref));
+    attendanceRows.forEach(row => {
       const safeAttendancePayload = firestoreSafeData(row);
-      return firebaseFns.setDoc(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
+      transaction.set(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
         ...safeAttendancePayload,
         source:'Présences',
         createdFromPresenceModule:true,
@@ -5972,8 +5985,8 @@ async function presenceSaveEvent(event={}){
         updatedBy:currentUser.uid,
         updatedByEmail:currentUser.email || ''
       }, {merge:true});
-    })
-  ]);
+    });
+  });
   invalidateAppDataCaches('presences');
   invalidateAppDataCaches('playerProfiles');
   invalidateAppDataCaches('teamProfiles');
@@ -5986,22 +5999,40 @@ async function presenceDeleteEvent(event={}){
   const sessionId = String(event.sessionId || event.id || '').trim();
   if(!sessionId) throw new Error('Événement introuvable.');
   const directSessionRef = firebaseFns.doc(db, 'sessions', sessionId);
-  const [attendanceSnap, sessionSnap, directSessionSnap] = await Promise.all([
-    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId))),
-    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('sessionId', '==', sessionId))),
-    firebaseFns.getDoc(directSessionRef)
+  const directSessionSnap = await firebaseFns.getDoc(directSessionRef);
+  const lookupTeamIds = [...new Set(presenceTeamIdRefs(directSessionSnap.exists() ? directSessionSnap.data() : {}, event)
+    .filter(teamId => teamId && canAccessTeamId(teamId)))];
+  if(!lookupTeamIds.length) throw new Error('Équipe de la séance non autorisée.');
+  const sessionQueries = lookupTeamIds.flatMap(teamId => [
+    firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences'), firebaseFns.where('teamId', '==', teamId)),
+    firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences'), firebaseFns.where('teamIds', 'array-contains', teamId)),
+    firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true), firebaseFns.where('teamId', '==', teamId)),
+    firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true), firebaseFns.where('teamIds', 'array-contains', teamId))
   ]);
+  const sessionSnaps = await Promise.all(sessionQueries.map(query => firebaseFns.getDocs(query)));
   const refs = new Map();
-  attendanceSnap.forEach(docSnap => refs.set(`attendance/${docSnap.id}`, firebaseFns.doc(db, 'attendance', docSnap.id)));
-  sessionSnap.forEach(docSnap => refs.set(`sessions/${docSnap.id}`, firebaseFns.doc(db, 'sessions', docSnap.id)));
-  if(directSessionSnap.exists()) refs.set(`sessions/${sessionId}`, directSessionRef);
   const sessionRows = [];
-  sessionSnap.forEach(docSnap => sessionRows.push({id:docSnap.id, ...docSnap.data()}));
+  sessionSnaps.forEach(snapshot => snapshot.forEach(docSnap => {
+    if(docSnap.data().sessionId !== sessionId || refs.has(`sessions/${docSnap.id}`)) return;
+    refs.set(`sessions/${docSnap.id}`, docSnap.ref);
+    sessionRows.push({id:docSnap.id, ...docSnap.data()});
+  }));
+  if(directSessionSnap.exists()) refs.set(`sessions/${sessionId}`, directSessionRef);
   if(directSessionSnap.exists() && !sessionRows.some(row => row.id === directSessionSnap.id)) sessionRows.push({id:directSessionSnap.id, ...directSessionSnap.data()});
   const sourceSession = sessionRows[0] || event;
   const teamIds = presenceTeamIdRefs(sourceSession, event, sourceSession.teamSnapshot, event.teamSnapshot);
   const primaryTeamId = sourceSession.teamId || event.teamId || teamIds[0] || '';
   if(!primaryTeamId && !canAccessAnyPresenceTeam(sourceSession, event)) throw new Error('Équipe de la séance introuvable.');
+  const authorizedTeamIds = [...new Set(teamIds.filter(teamId => teamId && canAccessTeamId(teamId)))];
+  if(!authorizedTeamIds.length) throw new Error('Équipe de la séance non autorisée.');
+  const attendanceQueries = authorizedTeamIds.flatMap(teamId => [
+    firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('teamId', '==', teamId)),
+    firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('teamIds', 'array-contains', teamId))
+  ]);
+  const attendanceSnaps = await Promise.all(attendanceQueries.map(query => firebaseFns.getDocs(query)));
+  attendanceSnaps.forEach(snapshot => snapshot.forEach(docSnap => {
+    if(docSnap.data().sessionId === sessionId) refs.set(`attendance/${docSnap.id}`, docSnap.ref);
+  }));
   if(!firebaseFns.writeBatch) throw new Error('Suppression atomique Firebase indisponible.');
   const deletedAtIso = new Date().toISOString();
   const deletionLogId = sessionId;

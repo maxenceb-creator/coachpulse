@@ -371,6 +371,42 @@ service cloud.firestore {
         && canAccessAttendanceScope(after, teams, allPlayers);
     }
 
+    function canReadAttendanceData(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      let scopes = profile.get('moduleScopes', {});
+      let direct = level == 'ADMIN' || canAccessAttendanceScope(data, teams, false);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && (
+          (moduleAllowedFrom(modules, level, staffRole, 'presences')
+            && (direct || staffRole == 'ADMIN'
+              || (scopes is map && moduleScopeHasAllPlayers(scopes, 'presences'))))
+          || (moduleAllowedFrom(modules, level, staffRole, 'playerProfile') && direct)
+        );
+    }
+
+    function canListAttendanceByTeam(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && moduleAllowedFrom(modules, level, staffRole, 'presences')
+        && (level == 'ADMIN'
+          || teams.hasAny([data.teamId])
+          || data.teamIds.hasAny(teams));
+    }
+
     function canAccessTechnicalTestScope(data, teams, allPlayers) {
       return allPlayers
         || (hasScopeFields(data) && scopedTeams(data).hasAny(teams))
@@ -393,6 +429,27 @@ service cloud.firestore {
         && moduleAllowedFrom(modules, level, staffRole, 'tests')
         && canAccessTechnicalTestScope(before, teams, allPlayers)
         && canAccessTechnicalTestScope(after, teams, allPlayers);
+    }
+
+    function canReadTechnicalTestData(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      let scopes = profile.get('moduleScopes', {});
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && (
+          (moduleAllowedFrom(modules, level, staffRole, 'tests')
+            && ((level == 'ADMIN' || staffRole == 'ADMIN'
+              || (scopes is map && moduleScopeHasAllPlayers(scopes, 'tests')))
+              || canAccessTechnicalTestScope(data, teams, false)))
+          || (moduleAllowedFrom(modules, level, staffRole, 'playerProfile')
+            && (level == 'ADMIN' || canAccessTechnicalTestScope(data, teams, false)))
+        );
     }
 
     function moduleAllowedFrom(modules, level, staffRole, moduleId) {
@@ -419,6 +476,21 @@ service cloud.firestore {
             && (direct || staffRole == 'ADMIN'
               || (scopes is map && moduleScopeHasAllPlayers(scopes, 'presences'))))
         );
+    }
+
+    function canListPresenceSessionByTeam(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && moduleAllowedFrom(modules, level, staffRole, 'presences')
+        && isPresenceSession(data)
+        && (level == 'ADMIN' || teams.hasAny([data.teamId]) || data.teamIds.hasAny(teams));
     }
 
     function legacyPermissionFromRoleValue(staffRole) {
@@ -520,7 +592,11 @@ service cloud.firestore {
     }
 
     match /sessions/{sessionId} {
+      allow get: if canWriteSportData()
+        && canAccessModule('presences')
+        && !exists(/databases/$(database)/documents/sessions/$(sessionId));
       allow read: if canReadSessionRecord(sessionId, resource.data);
+      allow list: if canListPresenceSessionByTeam(resource.data);
       allow create: if canWriteSportData()
         && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(sessionId))
         && (
@@ -539,8 +615,8 @@ service cloud.firestore {
     }
 
     match /attendance/{attendanceId} {
-      allow read: if (canReadData() && canAccessModule('presences') && canAccessSessionScopedDataForModule(resource.data, 'presences'))
-        || (canReadData() && canAccessModule('playerProfile') && canAccessSessionScopedData(resource.data));
+      allow read: if canReadAttendanceData(resource.data);
+      allow list: if canListAttendanceByTeam(resource.data);
       allow create: if canWriteAttendanceData(request.resource.data, request.resource.data)
         && request.resource.data.keys().hasAny(['sessionId'])
         && !exists(/databases/$(database)/documents/presenceDeletionLogs/$(request.resource.data.sessionId));
@@ -564,7 +640,7 @@ service cloud.firestore {
     }
 
     match /technicalTests/{testId} {
-      allow read: if (canReadData() && canAccessModule('tests') && canAccessScopedDataForModule(resource.data, 'tests')) || canReadPlayerProfileData(resource.data);
+      allow read: if canReadTechnicalTestData(resource.data);
       allow create: if canWriteTechnicalTestData(request.resource.data, request.resource.data);
       allow update: if canWriteTechnicalTestData(resource.data, request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);
