@@ -652,6 +652,11 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes('function isRetiredPresenceImportSession'), 'Le module Présences doit pouvoir purger les anciennes séances importées 2025-2026.');
   assert(appSource.includes("sessionId.startsWith('xlsx-')"), 'Les anciennes séances xlsx 2025-2026 doivent être reconnues pour la purge cloud.');
   assert(appSource.includes("firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId)"), 'La suppression atomique doit écrire son journal dans Firebase.');
+  assert(appSource.includes("const [deletionLogSnap, existingAttendanceSnap] = await Promise.all(["), 'La sauvegarde Présences doit lire ensemble le tombstone et les présences existantes.');
+  assert(appSource.includes('const latestSessionSnap = await transaction.get(sessionRef);'), 'La version cloud de la séance doit être relue dans la transaction Firestore.');
+  assert(appSource.includes('if(latestSessionSnap.exists() && cloudVersion > localVersion)'), 'Une ancienne copie locale ne doit jamais écraser une séance cloud plus récente.');
+  assert(appSource.includes("if(!firebaseFns.runTransaction) throw new Error('Synchronisation atomique Firebase indisponible.')"), 'La sauvegarde Présences doit exiger une transaction Firestore atomique.');
+  assert(appSource.includes('await firebaseFns.runTransaction(db, async transaction => {'), 'La séance et ses présences doivent être sauvegardées dans la même transaction Firestore.');
   assert(appSource.includes("Cette séance a été supprimée définitivement"), 'Une séance supprimée ne doit pas pouvoir être recréée depuis un cache ancien.');
   const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
   assert(presencePageSource.includes('await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);'), 'Les suppressions historiques doivent être réconciliées au chargement du calendrier.');
