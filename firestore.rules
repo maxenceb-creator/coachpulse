@@ -395,6 +395,27 @@ service cloud.firestore {
         && canAccessTechnicalTestScope(after, teams, allPlayers);
     }
 
+    function canReadTechnicalTestData(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      let scopes = profile.get('moduleScopes', {});
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && (
+          (moduleAllowedFrom(modules, level, staffRole, 'tests')
+            && ((level == 'ADMIN' || staffRole == 'ADMIN'
+              || (scopes is map && moduleScopeHasAllPlayers(scopes, 'tests')))
+              || canAccessTechnicalTestScope(data, teams, false)))
+          || (moduleAllowedFrom(modules, level, staffRole, 'playerProfile')
+            && (level == 'ADMIN' || canAccessTechnicalTestScope(data, teams, false)))
+        );
+    }
+
     function moduleAllowedFrom(modules, level, staffRole, moduleId) {
       return level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0 || modules.hasAny([moduleId]);
     }
@@ -564,7 +585,7 @@ service cloud.firestore {
     }
 
     match /technicalTests/{testId} {
-      allow read: if (canReadData() && canAccessModule('tests') && canAccessScopedDataForModule(resource.data, 'tests')) || canReadPlayerProfileData(resource.data);
+      allow read: if canReadTechnicalTestData(resource.data);
       allow create: if canWriteTechnicalTestData(request.resource.data, request.resource.data);
       allow update: if canWriteTechnicalTestData(resource.data, request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);
