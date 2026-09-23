@@ -700,6 +700,7 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes("const activeTool = storage.get('coachpulse:lastTool', 'home');"), 'Le contrôle de route après mise à jour du profil doit utiliser la route mémorisée.');
   assert(!appSource.includes('if(currentTool && !canAccessTool(currentTool))'), 'La variable currentTool inexistante ne doit plus être référencée.');
   assert(rulesSource.includes("modules.hasAny(['database', 'players', 'playerProfile', 'presences'])"), 'La lecture cloisonnée des joueuses doit reconnaître le module players.');
+  assert(rulesSource.includes('allow list: if canListPlayerRecords(resource.data);'), 'Les requêtes players doivent utiliser une règle de liste explicitement cloisonnée.');
   assert(rulesSource.includes("linkedTeamMatches('sessions', data.sessionId, teams)"), 'La lecture attendance par session doit rester liée à une séance autorisée.');
   assert(appSource.includes('const latestSessionSnap = await transaction.get(sessionRef);'), 'La version cloud de la séance doit être relue dans la transaction Firestore.');
   assert(rulesSource.includes("allow get: if canWriteSportData()\n        && canAccessModule('presences')\n        && !exists(/databases/$(database)/documents/sessions/$(sessionId));"), 'La transaction Présences doit pouvoir constater qu’une nouvelle séance n’existe pas encore sans élargir la lecture des séances existantes.');
