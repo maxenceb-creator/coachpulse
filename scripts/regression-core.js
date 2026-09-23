@@ -701,7 +701,12 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(!appSource.includes('if(currentTool && !canAccessTool(currentTool))'), 'La variable currentTool inexistante ne doit plus être référencée.');
   assert(rulesSource.includes("modules.hasAny(['database', 'players', 'playerProfile', 'presences'])"), 'La lecture cloisonnée des joueuses doit reconnaître le module players.');
   assert(rulesSource.includes('allow list: if canListPlayerRecords(resource.data);'), 'Les requêtes players doivent utiliser une règle de liste explicitement cloisonnée.');
-  assert(rulesSource.includes("linkedTeamMatches('sessions', data.sessionId, teams)"), 'La lecture attendance par session doit rester liée à une séance autorisée.');
+  const attendanceListRule = rulesSource.match(/function canListAttendanceByTeam\(data\)[\s\S]*?\n    }/)?.[0] || '';
+  assert(attendanceListRule.includes("data.get('teamId', '')") && attendanceListRule.includes("data.get('teamIds', [])"), 'La liste attendance doit borner chaque champ équipe optionnel avec une valeur par défaut.');
+  assert(!attendanceListRule.includes("linkedTeamMatches('sessions'"), 'La liste attendance ne doit effectuer aucune lecture documentaire de session dans les Rules.');
+  assert(presenceListBody[0].includes("readWhere('attendance', 'teamId', 'in', chunk)"), 'Le chargement non-admin doit requêter attendance par teamId autorisé.');
+  assert(presenceListBody[0].includes("readWhere('attendance', 'teamIds', 'array-contains-any', chunk)"), 'Le chargement non-admin doit requêter attendance par teamIds autorisés.');
+  assert(presenceListBody[0].includes("authorizedSessionIds.has(String(row.sessionId || ''))"), 'Les présences bornées par équipe doivent ensuite être filtrées par séances autorisées.');
   assert(appSource.includes('const latestSessionSnap = await transaction.get(sessionRef);'), 'La version cloud de la séance doit être relue dans la transaction Firestore.');
   assert(rulesSource.includes("allow get: if canWriteSportData()\n        && canAccessModule('presences')\n        && !exists(/databases/$(database)/documents/sessions/$(sessionId));"), 'La transaction Présences doit pouvoir constater qu’une nouvelle séance n’existe pas encore sans élargir la lecture des séances existantes.');
   assert(appSource.includes('if(latestSessionSnap.exists() && cloudVersion > localVersion)'), 'Une ancienne copie locale ne doit jamais écraser une séance cloud plus récente.');

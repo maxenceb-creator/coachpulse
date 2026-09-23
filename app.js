@@ -5858,11 +5858,25 @@ async function presenceListEvents(options={}){
     const sessionIdsNeedingAttendance = sessions
       .map(row => row.sessionId || row.id)
       .filter(Boolean);
-    const sessionChunks = [];
-    for(let i=0;i<sessionIdsNeedingAttendance.length;i+=10) sessionChunks.push(sessionIdsNeedingAttendance.slice(i,i+10));
-    const attendanceRows = sessionChunks.length
-      ? (await Promise.all(sessionChunks.map(chunk => readWhere('attendance', 'sessionId', 'in', chunk)))).flat()
-      : [];
+    const authorizedSessionIds = new Set(sessionIdsNeedingAttendance);
+    let attendanceRows = [];
+    if(presenceSettingsAdminAllowed()){
+      const sessionChunks = [];
+      for(let i=0;i<sessionIdsNeedingAttendance.length;i+=10) sessionChunks.push(sessionIdsNeedingAttendance.slice(i,i+10));
+      attendanceRows = sessionChunks.length
+        ? (await Promise.all(sessionChunks.map(chunk => readWhere('attendance', 'sessionId', 'in', chunk)))).flat()
+        : [];
+    }else{
+      const teamScopedReads = [];
+      teamChunks.forEach(chunk => {
+        teamScopedReads.push(readWhere('attendance', 'teamId', 'in', chunk));
+        teamScopedReads.push(readWhere('attendance', 'teamIds', 'array-contains-any', chunk));
+      });
+      const scopedRows = teamScopedReads.length ? (await Promise.all(teamScopedReads)).flat() : [];
+      attendanceRows = [...new Map(scopedRows
+        .filter(row => authorizedSessionIds.has(String(row.sessionId || '')))
+        .map(row => [row.attendanceId || row.id, row])).values()];
+    }
     const attendance = scopedRecordsForModuleAccess(attendanceRows, 'presences');
     const events = sessions
       .map(session => presenceCloudEventFromSession(session, attendance))

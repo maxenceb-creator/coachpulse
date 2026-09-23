@@ -334,9 +334,9 @@ service cloud.firestore {
         && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0
           || modules.hasAny(['database', 'players', 'playerProfile', 'presences']))
         && (allPlayers
-          || teams.hasAny([data.teamId])
-          || data.teamIds.hasAny(teams)
-          || data.rosterTeamIds.hasAny(teams));
+          || teams.hasAny([data.get('teamId', '')])
+          || data.get('teamIds', []).hasAny(teams)
+          || data.get('rosterTeamIds', []).hasAny(teams));
     }
 
     function canWriteDirectModuleData(moduleId, before, after) {
@@ -432,9 +432,8 @@ service cloud.firestore {
         && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
         && moduleAllowedFrom(modules, level, staffRole, 'presences')
         && (level == 'ADMIN'
-          || teams.hasAny([data.teamId])
-          || data.teamIds.hasAny(teams)
-          || (data.keys().hasAny(['sessionId']) && linkedTeamMatches('sessions', data.sessionId, teams)));
+          || teams.hasAny([data.get('teamId', '')])
+          || data.get('teamIds', []).hasAny(teams));
     }
 
     function canAccessTechnicalTestScope(data, teams, allPlayers) {
