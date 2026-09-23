@@ -107,7 +107,7 @@ async function main() {
       collection(assistantDb, 'attendance'),
       where('sessionId', 'in', ['sU11', 'sLegacy'])
     )));
-    assert.deepEqual(assistantAttendance.docs.map(snapshot => snapshot.id).sort(), ['aLegacy', 'aU11']);
+    assert.deepEqual(assistantAttendance.docs.map(snapshot => snapshot.id).sort(), ['aDual', 'aLegacy', 'aU11']);
     await assertFails(getDocs(query(collection(assistantDb, 'attendance'), where('sessionId', 'in', ['sU13']))));
     await assertFails(getDocs(query(collection(assistantDb, 'attendance'), where('sessionId', 'in', ['sU11', 'sU13']))));
     const assistantPlayers = await assertSucceeds(getDocs(query(
