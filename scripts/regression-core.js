@@ -653,6 +653,10 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes("sessionId.startsWith('xlsx-')"), 'Les anciennes séances xlsx 2025-2026 doivent être reconnues pour la purge cloud.');
   assert(appSource.includes("firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId)"), 'La suppression atomique doit écrire son journal dans Firebase.');
   assert(appSource.includes("const [deletionLogSnap, existingAttendanceSnap] = await Promise.all(["), 'La sauvegarde Présences doit lire ensemble le tombstone et les présences existantes.');
+  assert(appSource.includes("if(!includeRetiredPresenceSeasons || !presenceSettingsAdminAllowed()) return [];"), 'La purge historique globale Présences ne doit jamais être lancée pour un compte non-admin.');
+  const presenceListBody = appSource.match(/async function presenceListEvents[\s\S]*?\nfunction presenceSettingsAdminAllowed/);
+  assert(presenceListBody && !presenceListBody[0].includes('isAdmin()'), 'Le flux Présences ne doit pas confondre gestionnaire de données et ADMIN Firestore.');
+  assert(appSource.includes("if(presenceSettingsAdminAllowed() || canAccessAllPlayersForModule('presences')){"), 'Les écoutes Présences globales doivent exiger ADMIN ou un scope toutes joueuses explicite.');
   assert(appSource.includes('const latestSessionSnap = await transaction.get(sessionRef);'), 'La version cloud de la séance doit être relue dans la transaction Firestore.');
   assert(rulesSource.includes("allow get: if canWriteSportData()\n        && canAccessModule('presences')\n        && !exists(/databases/$(database)/documents/sessions/$(sessionId));"), 'La transaction Présences doit pouvoir constater qu’une nouvelle séance n’existe pas encore sans élargir la lecture des séances existantes.');
   assert(appSource.includes('if(latestSessionSnap.exists() && cloudVersion > localVersion)'), 'Une ancienne copie locale ne doit jamais écraser une séance cloud plus récente.');
