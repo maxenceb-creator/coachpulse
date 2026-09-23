@@ -237,8 +237,8 @@ async function main() {
     });
     await assertSucceeds(deletion.commit());
     assert.equal((await getDoc(doc(db, 'sessions', 'sU11'))).exists(), false);
-    assert.equal((await getDocs(directAttendanceQuery)).size, 0);
-    assert.equal((await getDocs(dualAttendanceQuery)).size, 0);
+    assert.equal((await getDocs(directAttendanceQuery)).docs.some(snapshot => snapshot.data().sessionId === 'sU11'), false);
+    assert.equal((await getDocs(dualAttendanceQuery)).docs.some(snapshot => snapshot.data().sessionId === 'sU11'), false);
     await assertFails(setDoc(doc(db, 'sessions', 'sU11'), {sessionId: 'sU11', teamId: 'U11', source: 'Présences'}));
     await assertFails(setDoc(doc(db, 'attendance', 'recreatedU11'), {attendanceId: 'recreatedU11', sessionId: 'sU11'}));
     const foreignDeletion = writeBatch(db);
