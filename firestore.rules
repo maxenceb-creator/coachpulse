@@ -295,7 +295,7 @@ service cloud.firestore {
         && (
           ((level == 'ADMIN' || (hasScopeFields(data) && scopedTeams(data).hasAny(teams)))
             && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0
-              || modules.hasAny(['database', 'playerProfile', 'presences'])))
+              || modules.hasAny(['database', 'players', 'playerProfile', 'presences'])))
           || level == 'ADMIN'
           || staffRole == 'ADMIN'
           || (scopes is map && (
@@ -404,7 +404,8 @@ service cloud.firestore {
         && moduleAllowedFrom(modules, level, staffRole, 'presences')
         && (level == 'ADMIN'
           || teams.hasAny([data.teamId])
-          || data.teamIds.hasAny(teams));
+          || data.teamIds.hasAny(teams)
+          || (data.keys().hasAny(['sessionId']) && linkedTeamMatches('sessions', data.sessionId, teams)));
     }
 
     function canAccessTechnicalTestScope(data, teams, allPlayers) {

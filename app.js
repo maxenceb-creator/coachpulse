@@ -1223,7 +1223,8 @@ function startStaffProfileSubscription(){
     currentUserRole = getCurrentUserRole();
     updateRoleUi();
     notifyFramesAccessUpdated();
-    if(currentTool && !canAccessTool(currentTool)) showHome();
+    const activeTool = storage.get('coachpulse:lastTool', 'home');
+    if(activeTool && !canAccessTool(activeTool)) showHome();
   }, error => {
     try{ loadingOperation?.fail?.(error, loadingFailureContext('profile:listen', {diagnostic:profileDiagnostic}, error)); }catch(_error){}
     console.warn('Actualisation des autorisations indisponible', cleanError(error));
