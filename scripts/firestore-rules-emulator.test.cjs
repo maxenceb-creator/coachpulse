@@ -22,6 +22,10 @@ async function main() {
         allowedModules: ['database', 'playerProfile', 'stats', 'presences', 'tests', 'medical'],
         authorizedTeamIds: ['U11']
       });
+      await setDoc(doc(db, 'staff_members', 'assistant'), {
+        status: 'ACTIVE', role: 'ENTRAINEUR_ADJOINT', permissionLevel: 'SAISIE',
+        allowedModules: ['players', 'presences'], authorizedTeamIds: ['U11']
+      });
       await setDoc(doc(db, 'staff_members', 'editor'), {
         status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
         allowedModules: ['stats', 'presences', 'tests'], authorizedTeamIds: ['U11']
@@ -86,6 +90,7 @@ async function main() {
     await assertFails(getDoc(doc(environment.unauthenticatedContext().firestore(), 'players', 'pU11')));
     await assertFails(getDoc(doc(db, 'unexpected', 'record')));
     const readerDb = environment.authenticatedContext('reader').firestore();
+    const assistantDb = environment.authenticatedContext('assistant').firestore();
     const editorDb = environment.authenticatedContext('editor').firestore();
     const noTestsDb = environment.authenticatedContext('noTests').firestore();
     const adminDb = environment.authenticatedContext('admin').firestore();
@@ -97,6 +102,24 @@ async function main() {
     await assertSucceeds(getDocs(query(collection(db, 'teams'), where(documentId(), 'in', ['U11']))));
     await assertFails(getDocs(collection(db, 'teams')));
     await assertFails(getDocs(query(collection(db, 'teams'), where(documentId(), 'in', ['U13']))));
+    process.stdout.write('Checking assistant attendance and players query scope\n');
+    const assistantAttendance = await assertSucceeds(getDocs(query(
+      collection(assistantDb, 'attendance'),
+      where('sessionId', 'in', ['sU11', 'sLegacy'])
+    )));
+    assert.deepEqual(assistantAttendance.docs.map(snapshot => snapshot.id).sort(), ['aDual', 'aLegacy', 'aU11']);
+    await assertFails(getDocs(query(collection(assistantDb, 'attendance'), where('sessionId', 'in', ['sU13']))));
+    await assertFails(getDocs(query(collection(assistantDb, 'attendance'), where('sessionId', 'in', ['sU11', 'sU13']))));
+    const assistantPlayers = await assertSucceeds(getDocs(query(
+      collection(assistantDb, 'players'),
+      where('teamId', 'in', ['U11'])
+    )));
+    assert.deepEqual(assistantPlayers.docs.map(snapshot => snapshot.id).sort(), ['pLegacy', 'pU11']);
+    await assertSucceeds(getDocs(query(collection(assistantDb, 'players'), where('teamIds', 'array-contains-any', ['U11']))));
+    await assertFails(getDocs(query(collection(assistantDb, 'players'), where('teamId', 'in', ['U13']))));
+    await assertFails(getDocs(query(collection(assistantDb, 'players'), where('teamId', 'in', ['U11', 'U13']))));
+    await assertSucceeds(getDocs(collection(adminDb, 'attendance')));
+    await assertSucceeds(getDocs(collection(adminDb, 'players')));
     process.stdout.write('Checking retired presence synchronization scope\n');
     const retiredPresenceQuery = query(collection(db, 'sessions'), where('source', '==', 'Import présence'));
     await assertSucceeds(getDocs(query(collection(adminDb, 'sessions'), where('source', '==', 'Import présence'))));
