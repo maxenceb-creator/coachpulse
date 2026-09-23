@@ -1,4 +1,4 @@
-const {GoogleAuth} = require('google-auth-library');
+const {execFileSync} = require('node:child_process');
 
 function parseArgs(argv) {
   const args = {project:'', apply:false};
@@ -21,16 +21,27 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.project) throw new Error('Usage: node scripts/migrate-attendance-team-scope.cjs --project PROJECT_ID [--apply]');
 
-  const auth = new GoogleAuth({scopes:['https://www.googleapis.com/auth/datastore']});
-  const client = await auth.getClient();
+  const accessToken = String(process.env.GOOGLE_OAUTH_ACCESS_TOKEN || execFileSync('gcloud', ['auth', 'print-access-token'], {encoding:'utf8'})).trim();
+  const request = async (url, options={}) => {
+    const response = await fetch(url, {
+      ...options,
+      headers:{Authorization:`Bearer ${accessToken}`, 'Content-Type':'application/json', ...(options.headers || {})},
+      body:options.data ? JSON.stringify(options.data) : undefined
+    });
+    if (!response.ok) {
+      const error = new Error(`Firestore API ${response.status}: ${await response.text()}`);
+      error.status = response.status;
+      throw error;
+    }
+    return response.status === 204 ? null : response.json();
+  };
   const databaseRoot = `projects/${args.project}/databases/(default)`;
   const runQueryUrl = `https://firestore.googleapis.com/v1/${databaseRoot}/documents:runQuery`;
-  const response = await client.request({
-    url:runQueryUrl,
+  const response = await request(runQueryUrl, {
     method:'POST',
     data:{structuredQuery:{from:[{collectionId:'attendance'}]}}
   });
-  const documents = (response.data || []).map(item => item.document).filter(Boolean);
+  const documents = (response || []).map(item => item.document).filter(Boolean);
   const candidates = documents.filter(document => {
     const fields = document.fields || {};
     return !stringValue(fields.teamId) && stringArray(fields.teamIds).length === 0;
@@ -48,10 +59,9 @@ async function main() {
     if (!sessionCache.has(sessionId)) {
       const sessionUrl = `https://firestore.googleapis.com/v1/${databaseRoot}/documents/sessions/${encodeURIComponent(sessionId)}`;
       try {
-        const sessionResponse = await client.request({url:sessionUrl});
-        sessionCache.set(sessionId, sessionResponse.data);
+        sessionCache.set(sessionId, await request(sessionUrl));
       } catch (error) {
-        if (error?.response?.status === 404) sessionCache.set(sessionId, null);
+        if (error?.status === 404) sessionCache.set(sessionId, null);
         else throw error;
       }
     }
@@ -74,8 +84,7 @@ async function main() {
 
   for (const change of changes) {
     const updateMask = ['teamId', 'teamIds'].map(field => `updateMask.fieldPaths=${field}`).join('&');
-    await client.request({
-      url:`https://firestore.googleapis.com/v1/${change.attendance}?${updateMask}`,
+    await request(`https://firestore.googleapis.com/v1/${change.attendance}?${updateMask}`, {
       method:'PATCH',
       data:{fields:{
         teamId:{stringValue:change.teamId},
@@ -87,6 +96,6 @@ async function main() {
 }
 
 main().catch(error => {
-  console.error(error?.response?.data || error);
+  console.error(error);
   process.exitCode = 1;
 });
