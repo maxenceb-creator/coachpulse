@@ -351,6 +351,46 @@ async function testScopedPlayerReadFiltersInFirestore(){
   assert.equal(unscopedReads, 0, 'Un entraîneur limité ne doit jamais télécharger toute la collection players.');
 }
 
+async function testHomeDashboardTeamReadStaysScoped(){
+  teams.invalidateTeamsCache();
+  const authorizedTeamId = teams.canonicalTeamId('U13 A');
+  const forbiddenTeamId = teams.canonicalTeamId('U16 A');
+  const rows = [
+    {id:authorizedTeamId, data:{teamId:authorizedTeamId, name:'U13 A'}},
+    {id:forbiddenTeamId, data:{teamId:forbiddenTeamId, name:'U16 A'}}
+  ];
+  let globalReads = 0;
+  let allowGlobalRead = false;
+  const queriedIds = [];
+  const firebaseFns = {
+    collection(_db, name){ return {name}; },
+    documentId(){ return '__name__'; },
+    where(field, operator, value){ return {field, operator, value}; },
+    query(collection, constraint){ return {collection, constraint}; },
+    async getDocs(ref){
+      if(ref.name){
+        globalReads++;
+        if(!allowGlobalRead) throw new Error('Missing or insufficient permissions.');
+        return snapshot(rows);
+      }
+      queriedIds.push(...ref.constraint.value);
+      return snapshot(rows.filter(row => ref.constraint.value.includes(row.id)));
+    }
+  };
+  function snapshot(source){ return {forEach(callback){ source.forEach(row => callback({id:row.id, data:()=>row.data})); }}; }
+
+  const staffRows = await teams.listTeams({firebaseFns, db:{}, accessAllTeams:false, authorizedTeamIds:[authorizedTeamId]}, {includeArchived:true});
+  assert.equal(globalReads, 0, 'Le chargement normal du dashboard non-admin ne doit pas lancer la query globale teams refusée par Firestore.');
+  assert.deepEqual(queriedIds, [authorizedTeamId], 'La query teams doit garantir le périmètre autorisé dans Firestore.');
+  assert(staffRows.some(team => team.teamId === authorizedTeamId), 'L’équipe autorisée doit rester disponible.');
+
+  teams.invalidateTeamsCache();
+  allowGlobalRead = true;
+  await teams.listTeams({firebaseFns, db:{}, accessAllTeams:true}, {includeArchived:true});
+  assert.equal(globalReads, 1, 'Le compte ADMIN doit conserver la lecture globale autorisée.');
+  teams.invalidateTeamsCache();
+}
+
 async function testPresenceScopedRosterSurvivesColdReloadReconnect(){
   const u13a = teams.canonicalTeamId('U13 A');
   const u13b = teams.canonicalTeamId('U13 B');
@@ -1275,6 +1315,7 @@ testFirestorePayloadBoundary();
 Promise.resolve()
   .then(testPresenceLoadingBoundaryReturnsSameRows)
   .then(testScopedPlayerReadFiltersInFirestore)
+  .then(testHomeDashboardTeamReadStaysScoped)
   .then(testPresenceScopedRosterSurvivesColdReloadReconnect)
   .then(testMeasurementSaveWithoutSelectedInjuryPersistsAfterReload)
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)
