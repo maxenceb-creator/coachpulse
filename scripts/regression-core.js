@@ -1177,6 +1177,26 @@ function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
   assert(appSource.includes("safeLoadingCall('start', ['cloud:listen'"), 'Le premier snapshot cloud doit être observé sans remplacer onSnapshot.');
 }
 
+function testFirestorePermissionDiagnosticKeepsSafeOperationContext(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const indicatorSource = fs.readFileSync('shared/ui/global-loading-indicator.js', 'utf8');
+  const diagnosticSource = appSource.match(/function firebasePermissionDenied[\s\S]*?\nfunction recordPerfEvent/)?.[0]?.replace(/\nfunction recordPerfEvent$/, '') || '';
+  const context = vm.createContext({getCurrentUserRole:() => 'ENTRAINEUR'});
+  vm.runInContext(`${diagnosticSource}; this.decorate = attachFirestoreDiagnostic; this.context = loadingFailureContext;`, context);
+  const error = Object.assign(new Error('Missing or insufficient permissions.'), {code:'firestore/permission-denied'});
+  context.decorate(error, {type:'query', _query:{path:{segments:['players']}}}, 'query');
+  const result = context.context('dashboard:players', {diagnostic:{function:'refreshPlayers', module:'dashboard', scope:'team', teamId:'team-u13'}}, error).diagnostic;
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    task:'dashboard:players', function:'refreshPlayers', collection:'players', operation:'query', module:'dashboard',
+    scope:'team', teamId:'team-u13', role:'ENTRAINEUR', firebaseCode:'firestore/permission-denied',
+    firebaseMessage:'Missing or insufficient permissions.'
+  }, 'Le permission-denied doit conserver le contexte précis jusqu’à operation.fail().');
+  assert(!('email' in result) && !('token' in result) && !('document' in result), 'Le diagnostic ne doit contenir aucune donnée sensible ni contenu Firestore.');
+  assert(indicatorSource.includes("console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic)"), 'Le diagnostic Firestore doit avoir un préfixe console stable.');
+  assert(indicatorSource.includes('Erreur de synchronisation${lastError?.diagnosticRef'), 'L’interface doit conserver le message courant et ajouter la référence technique.');
+  assert(indicatorSource.includes('permissionDenied && diagnostic'), 'Les détails techniques ne doivent être produits que pour permission-denied.');
+}
+
 async function testPresenceLoadingBoundaryReturnsSameRows(){
   const appSource = fs.readFileSync('app.js', 'utf8');
   const trackerSource = appSource.match(/function safeLoadingCall[\s\S]*?\n}\nasync function trackLoadingTask[\s\S]*?\n}/)?.[0] || '';
@@ -1310,6 +1330,7 @@ testPerformanceCriticalPathStaysNonBlocking();
 testTechnicalHistoryCompatibilityAndScoping();
 testMatchCloudSyncIsOfflineFirstAndIdempotent();
 testLoadingIndicatorCannotReplaceFirebaseDataApi();
+testFirestorePermissionDiagnosticKeepsSafeOperationContext();
 testFirestorePayloadBoundary();
 
 Promise.resolve()
