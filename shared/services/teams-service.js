@@ -21,7 +21,7 @@
     teams:OFFICIAL_TEAMS.map(team => team.name)
   };
   const FIRESTORE_CACHE_TTL_MS = 5 * 60 * 1000;
-  const firestoreTeamsCache = {rows:null, loadedAt:0, pending:null};
+  const firestoreTeamsCache = {rows:null, loadedAt:0, pending:null, key:''};
 
   function asText(value){ return String(value ?? '').trim(); }
   function nowIso(){ return new Date().toISOString(); }
@@ -29,6 +29,7 @@
     firestoreTeamsCache.rows = null;
     firestoreTeamsCache.loadedAt = 0;
     firestoreTeamsCache.pending = null;
+    firestoreTeamsCache.key = '';
   }
 
   function stableId(){
@@ -228,6 +229,11 @@
   async function listTeams(ctx={}, options={}){
     const {firebaseFns, db} = firestoreContext(ctx);
     const now = Date.now();
+    const scoped = ctx.accessAllTeams === false;
+    const authorizedTeamIds = [...new Set((ctx.authorizedTeamIds || []).map(canonicalTeamId).filter(Boolean))];
+    const cacheKey = scoped ? authorizedTeamIds.slice().sort().join(',') : '*';
+    if(firestoreTeamsCache.key !== cacheKey) invalidateTeamsCache();
+    firestoreTeamsCache.key = cacheKey;
     if(!options.forceRefresh && firestoreTeamsCache.rows && now - firestoreTeamsCache.loadedAt < FIRESTORE_CACHE_TTL_MS){
       const cached = mergeWithOfficialTeams(firestoreTeamsCache.rows);
       return options.includeArchived ? cached : cached.filter(team => team.status !== 'archived');
@@ -237,10 +243,22 @@
       const pendingMerged = mergeWithOfficialTeams(pendingRows);
       return options.includeArchived ? pendingMerged : pendingMerged.filter(team => team.status !== 'archived');
     }
-    firestoreTeamsCache.pending = firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION))
-      .then(snap => {
+    const reads = scoped
+      ? authorizedTeamIds.reduce((queries, _teamId, index) => {
+        if(index % 10 === 0){
+          const teamChunk = authorizedTeamIds.slice(index, index + 10);
+          queries.push(firebaseFns.getDocs(firebaseFns.query(
+            firebaseFns.collection(db, COLLECTION),
+            firebaseFns.where(firebaseFns.documentId(), 'in', teamChunk)
+          )));
+        }
+        return queries;
+      }, [])
+      : [firebaseFns.getDocs(firebaseFns.collection(db, COLLECTION))];
+    firestoreTeamsCache.pending = Promise.all(reads)
+      .then(snapshots => {
         const teams = [];
-        snap.forEach(docSnap => teams.push(normalizeTeam({id:docSnap.id, teamId:docSnap.id, ...docSnap.data(), _originalId:docSnap.id})));
+        snapshots.forEach(snap => snap.forEach(docSnap => teams.push(normalizeTeam({id:docSnap.id, teamId:docSnap.id, ...docSnap.data(), _originalId:docSnap.id}))));
         firestoreTeamsCache.rows = teams;
         firestoreTeamsCache.loadedAt = Date.now();
         return teams;

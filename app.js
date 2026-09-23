@@ -4582,7 +4582,8 @@ async function listPlayers(filters={}){
 }
 async function listTeams(filters={}){
   const service = teamsService();
-  const teams = service?.listTeams && db && currentUser ? await service.listTeams(firestoreServiceContext(), filters) : (service?.officialTeamRows ? service.officialTeamRows() : []);
+  const accessAllTeams = getCurrentPermissionLevel() === 'ADMIN';
+  const teams = service?.listTeams && db && currentUser ? await service.listTeams(firestoreServiceContext({accessAllTeams, authorizedTeamIds:getAuthorizedTeamIds()}), filters) : (service?.officialTeamRows ? service.officialTeamRows() : []);
   return filterAuthorizedTeams(teams);
 }
 function seasonFromDate(date=new Date()){

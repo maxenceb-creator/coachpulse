@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {collection, doc, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
+const {collection, doc, documentId, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
 
 async function main() {
   const environment = await initializeTestEnvironment({
@@ -46,6 +46,7 @@ async function main() {
         status: 'INACTIVE', role: 'ADMIN', permissionLevel: 'ADMIN'
       });
       for (const teamId of ['U11', 'U13']) {
+        await setDoc(doc(db, 'teams', teamId), {teamId, name:teamId});
         await setDoc(doc(db, 'players', `p${teamId}`), {playerId: `p${teamId}`, teamId, status: 'ACTIVE'});
         await setDoc(doc(db, 'matches', `m${teamId}`), {matchId: `m${teamId}`, teamId});
         await setDoc(doc(db, 'sessions', `s${teamId}`), {sessionId: `s${teamId}`, teamId, teamIds: [teamId], source: 'Présences', createdFromPresenceModule: true});
@@ -91,6 +92,11 @@ async function main() {
     const limitedDb = environment.authenticatedContext('limited').firestore();
     const allPlayersDb = environment.authenticatedContext('allPlayers').firestore();
     const inactiveDb = environment.authenticatedContext('inactive').firestore();
+    process.stdout.write('Checking dashboard team synchronization scope\n');
+    await assertSucceeds(getDocs(collection(adminDb, 'teams')));
+    await assertSucceeds(getDocs(query(collection(db, 'teams'), where(documentId(), 'in', ['U11']))));
+    await assertFails(getDocs(collection(db, 'teams')));
+    await assertFails(getDocs(query(collection(db, 'teams'), where(documentId(), 'in', ['U13']))));
     process.stdout.write('Checking retired presence synchronization scope\n');
     const retiredPresenceQuery = query(collection(db, 'sessions'), where('source', '==', 'Import présence'));
     await assertSucceeds(getDocs(query(collection(adminDb, 'sessions'), where('source', '==', 'Import présence'))));
