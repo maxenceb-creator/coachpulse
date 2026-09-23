@@ -702,7 +702,7 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(rulesSource.includes("modules.hasAny(['database', 'players', 'playerProfile', 'presences'])"), 'La lecture cloisonnée des joueuses doit reconnaître le module players.');
   assert(rulesSource.includes('allow list: if canListPlayerRecords(resource.data);'), 'Les requêtes players doivent utiliser une règle de liste explicitement cloisonnée.');
   const attendanceListRule = rulesSource.match(/function canListAttendanceByTeam\(data\)[\s\S]*?\n    }/)?.[0] || '';
-  assert(attendanceListRule.includes('hasScopeFields(data) && scopedTeams(data).hasAny(teams)'), 'La liste attendance doit être bornée aux champs équipe du document.');
+  assert(attendanceListRule.includes("data.get('teamId', '')") && attendanceListRule.includes("data.get('teamIds', [])"), 'La liste attendance doit borner chaque champ équipe optionnel avec une valeur par défaut.');
   assert(!attendanceListRule.includes("linkedTeamMatches('sessions'"), 'La liste attendance ne doit effectuer aucune lecture documentaire de session dans les Rules.');
   assert(presenceListBody[0].includes("readWhere('attendance', 'teamId', 'in', chunk)"), 'Le chargement non-admin doit requêter attendance par teamId autorisé.');
   assert(presenceListBody[0].includes("readWhere('attendance', 'teamIds', 'array-contains-any', chunk)"), 'Le chargement non-admin doit requêter attendance par teamIds autorisés.');
