@@ -91,6 +91,11 @@ async function main() {
     const limitedDb = environment.authenticatedContext('limited').firestore();
     const allPlayersDb = environment.authenticatedContext('allPlayers').firestore();
     const inactiveDb = environment.authenticatedContext('inactive').firestore();
+    process.stdout.write('Checking retired presence synchronization scope\n');
+    const retiredPresenceQuery = query(collection(db, 'sessions'), where('source', '==', 'Import présence'));
+    await assertSucceeds(getDocs(query(collection(adminDb, 'sessions'), where('source', '==', 'Import présence'))));
+    await assertFails(getDocs(retiredPresenceQuery));
+    await assertFails(getDocs(query(collection(limitedDb, 'sessions'), where('source', '==', 'Import présence'))));
     process.stdout.write('Checking role and player scope reads\n');
     await assertSucceeds(getDoc(doc(readerDb, 'players', 'pU11')));
     await assertFails(getDoc(doc(readerDb, 'players', 'pU13')));

@@ -5661,7 +5661,7 @@ async function presenceListEvents(options={}){
   const authorizedTeamIds = getAuthorizedTeamIds();
   const cacheKey = [
     currentUser.uid,
-    isAdmin() ? 'admin' : 'staff',
+    presenceSettingsAdminAllowed() ? 'admin' : 'staff',
     canAccessAllPlayersForModule('presences') ? 'allPlayers' : 'teamScope',
     authorizedTeamIds.slice().sort().join(','),
     includeRetiredPresenceSeasons ? 'withRetiredPresenceSeasons' : 'activePresenceSeasons'
@@ -5713,7 +5713,7 @@ async function presenceListEvents(options={}){
   };
   const uniqueRows = rows => [...new Map(rows.map(row => [row.sessionId || row.id || JSON.stringify(row), row])).values()];
   const readRetiredPresenceImportSessions = async () => {
-    if(!includeRetiredPresenceSeasons) return [];
+    if(!includeRetiredPresenceSeasons || !presenceSettingsAdminAllowed()) return [];
     const documentIdReads = firebaseFns.documentId
       ? [readWhereSafe('sessions', [
         {field:firebaseFns.documentId(), operator:'>=', value:'xlsx-'},
@@ -5770,12 +5770,12 @@ async function presenceListEvents(options={}){
     ]);
     return uniqueRows([...legacyRows, ...modernRows, ...retiredImportRows]);
   };
-  if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return [];
+  if(!presenceSettingsAdminAllowed() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return [];
   const teamChunks = [];
   for(let i=0;i<authorizedTeamIds.length;i+=10) teamChunks.push(authorizedTeamIds.slice(i,i+10));
   const loadEvents = async () => {
     const cacheGeneration = presenceCacheGeneration;
-    const sessionRows = isAdmin()
+    const sessionRows = presenceSettingsAdminAllowed()
       ? await readPresenceSessionsForAllPlayersScope()
       : canAccessAllPlayersForModule('presences')
         ? await readPresenceSessionsForAllPlayersScope()
@@ -5846,9 +5846,9 @@ async function presenceSaveSettings(settings={}){
 function presenceSubscribeEvents(onChange){
   if(!db || !currentUser || typeof onChange !== 'function') return () => {};
   const authorizedTeamIds = getAuthorizedTeamIds();
-  if(!isAdmin() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return () => {};
+  if(!presenceSettingsAdminAllowed() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return () => {};
   const queries = [];
-  if(isAdmin() || canAccessAllPlayersForModule('presences')){
+  if(presenceSettingsAdminAllowed() || canAccessAllPlayersForModule('presences')){
     queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true)));
     queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences')));
   }else{
