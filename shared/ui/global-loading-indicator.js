@@ -175,6 +175,10 @@
         ...(diagnostic.teamId ? {teamId:String(diagnostic.teamId)} : {}), role:String(diagnostic.role || 'unknown'),
         ...(Array.isArray(diagnostic.teamIds) ? {teamIds:diagnostic.teamIds.map(value => String(value))} : {}),
         ...(diagnostic.query ? {query:String(diagnostic.query)} : {}),
+        ...(Array.isArray(diagnostic.batchDocuments) ? {batchDocuments:diagnostic.batchDocuments.map(row => ({
+          path:String(row?.path || ''), operation:String(row?.operation || ''), teamId:String(row?.teamId || ''),
+          teamIds:Array.isArray(row?.teamIds) ? row.teamIds.map(value => String(value)) : [], permission:String(row?.permission || '')
+        }))} : {}),
         firebaseCode:String(diagnostic.firebaseCode || error?.code || 'unknown'),
         firebaseMessage:String(diagnostic.firebaseMessage || error?.message || error || 'unknown')
       };

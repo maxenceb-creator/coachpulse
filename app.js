@@ -175,6 +175,7 @@ function loadingFailureContext(label, options={}, error){
     scope:String(diagnostic.scope || (teamId || teamIds.length ? 'team' : 'user')), ...(teamId ? {teamId} : {}),
     ...(teamIds.length ? {teamIds:teamIds.map(value => String(value))} : {}),
     ...(firestore.query ? {query:String(firestore.query)} : {}),
+    ...(Array.isArray(firestore.batchDocuments) ? {batchDocuments:firestore.batchDocuments} : {}),
     role:String(getCurrentUserRole?.() || 'unknown'), firebaseCode:String(error?.code || 'unknown'),
     firebaseMessage:String(error?.message || error || 'unknown')
   }};
@@ -6155,6 +6156,11 @@ async function presenceSaveEvent(event={}, options={}){
   if(!firebaseFns.writeBatch) throw new Error('Synchronisation atomique Firebase indisponible.');
   const writeCount = 1 + attendanceRows.length + staleAttendanceRefs.length;
   if(writeCount > 500) throw new Error('Cette séance contient trop de présences pour une synchronisation atomique Firestore.');
+  const batchDocuments = [
+    {path:`sessions/${sessionId}`, operation:'set-merge', teamId:primaryTeamId, teamIds:sessionTeamIds, permission:'canAccessDirectData'},
+    ...attendanceRows.map(row => ({path:`attendance/${row.attendanceId || row.id}`, operation:'set-merge', teamId:row.teamId || '', teamIds:row.teamIds || [], permission:'canWriteAttendanceData'})),
+    ...staleAttendanceRefs.map(ref => ({path:`attendance/${ref.id}`, operation:'delete', permission:'canAccessSessionScopedDataForModule'}))
+  ];
   try{
     const batch = firebaseFns.writeBatch(db);
     batch.set(sessionRef, {
@@ -6198,7 +6204,8 @@ async function presenceSaveEvent(event={}, options={}){
     syncError.cause = error;
     if(code.includes('permission-denied')) extendFirestoreDiagnostic(syncError, {
       collection:'sessions,attendance', operation:'batch-write',
-      query:`sessions/${sessionId} + attendance rows`, teamIds:authorizedSessionTeamIds
+      query:`sessions/${sessionId} + attendance rows`, teamIds:authorizedSessionTeamIds,
+      batchDocuments
     });
     throw syncError;
   }

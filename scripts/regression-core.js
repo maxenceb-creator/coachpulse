@@ -1332,6 +1332,7 @@ function testPresenceRuntimeSaveGuards(){
 
   const appSource = fs.readFileSync('app.js', 'utf8');
   const presenceSource = fs.readFileSync('pages/presences.html', 'utf8');
+  const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
   assert(appSource.includes('updatedAtIso:now'), 'La sauvegarde doit horodater la dernière modification de présence.');
   assert(appSource.includes('const eventId = String(session.eventId || session.presenceEventId || sessionId).trim();'), 'La relecture cloud doit préserver l’eventId UI distinct du sessionId.');
   assert(appSource.includes("eventId:String(event.id || event.eventId || '').trim()"), 'La séance Firestore doit conserver le lien vers son événement UI.');
@@ -1343,6 +1344,9 @@ function testPresenceRuntimeSaveGuards(){
   assert(appSource.includes("operation:'list', query:item.label, teamIds:item.teamIds"), 'Le diagnostic existant doit préciser la query attendance refusée et ses équipes.');
   assert(!appSource.includes("'[CoachPulse Presence Debug]'"), 'Les logs temporaires Presence Debug doivent être retirés après diagnostic.');
   assert(appSource.includes("collection:'sessions,attendance', operation:'batch-write'"), 'Un refus du batch Présences doit conserver son opération Firestore exacte.');
+  assert(appSource.includes("permission:'canAccessDirectData'") && appSource.includes("permission:'canWriteAttendanceData'"), 'Le diagnostic batch doit distinguer la permission attendue pour chaque document sans donnée joueuse.');
+  assert(rulesSource.includes('function canRepairOwnedLegacyPresenceSession(before, after)') && rulesSource.includes('!hasScopeFields(before)') && rulesSource.includes("valueOrEmpty(before, 'updatedBy') == request.auth.uid"), 'Une séance Présences legacy sans scope ne peut être réparée que par son auteur vers un scope autorisé.');
+  assert(rulesSource.includes('canRepairOwnedLegacyPresenceSession(resource.data, request.resource.data)') && rulesSource.includes('scopedTeams(after).hasAny(teams)'), 'La compatibilité legacy doit rester limitée aux updates vers une équipe autorisée.');
   assert(presenceSource.includes('clearTimeout(presenceCloudSaveTimers.get(eventId))'), 'Les changements rapprochés doivent être dédupliqués avant sauvegarde.');
   assert(presenceSource.includes('const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve()'), 'Deux sauvegardes du même événement ne doivent pas être concurrentes.');
   assert(appSource.includes('canEditModule(\'presences\')') && appSource.includes('canAccessAnyPresenceTeam(event)'), 'Admin et coach autorisé doivent rester contrôlés par les permissions et le scope équipe existants.');
