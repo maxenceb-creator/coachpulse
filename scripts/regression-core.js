@@ -1313,6 +1313,58 @@ function testFirestorePayloadBoundary(){
   assert(appSource.includes("collection:'coachpulse_common_base'"), 'Le diagnostic doit identifier la collection exacte.');
 }
 
+function testPresenceRuntimeSaveGuards(){
+  const context = vm.createContext({window:{}, console, Date, TextEncoder});
+  vm.runInContext(fs.readFileSync('shared/services/presence-events-service.js', 'utf8'), context);
+  const service = context.window.CoachPulsePresenceEventsService;
+  const event = {
+    id:'presence-event-1789649129080-0',
+    date:'2026-09-24',
+    teamId:'team-u15',
+    updatedAt:'2026-09-24T10:00:00.000Z',
+    attendance:{p1:{status:'present'}}
+  };
+  const session = service.sessionFromEvent(event);
+  const attendance = service.attendanceRowsFromEvent(event);
+  assert.equal(session.sessionId, 'presence-session-1789649129080-0', 'Une séance doit avoir un identifiant distinct de l’événement UI.');
+  assert(!session.sessionId.startsWith('presence-event-'), 'Un presence-event-* ne doit jamais devenir un sessionId.');
+  assert.equal(attendance[0].sessionId, session.sessionId, 'Les présences doivent utiliser le vrai sessionId.');
+
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const presenceSource = fs.readFileSync('pages/presences.html', 'utf8');
+  assert(appSource.includes("session.updatedAt || event.updatedAt"), 'La version locale doit inclure la dernière modification de présence.');
+  assert(appSource.includes('const eventId = String(session.eventId || session.presenceEventId || sessionId).trim();'), 'La relecture cloud doit préserver l’eventId UI distinct du sessionId.');
+  assert(appSource.includes("eventId:String(event.id || event.eventId || '').trim()"), 'La séance Firestore doit conserver le lien vers son événement UI.');
+  assert(appSource.includes("conflict.code = 'presence/version-conflict'"), 'Un vrai conflit cloud doit conserver un code dédié.');
+  assert(appSource.includes("'presence/resource-exhausted'"), 'HTTP 429/resource-exhausted doit être distingué d’un conflit cloud.');
+  assert(appSource.includes("'presence/permission-denied'") && appSource.includes("'presence/network'"), 'Permissions et réseau doivent être distingués du conflit cloud.');
+  assert(appSource.includes('{maxAttempts:1}'), 'Une sauvegarde ne doit lancer qu’une tentative de transaction et un seul BatchGet côté SDK.');
+  assert(presenceSource.includes('clearTimeout(presenceCloudSaveTimers.get(eventId))'), 'Les changements rapprochés doivent être dédupliqués avant sauvegarde.');
+  assert(presenceSource.includes('const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve()'), 'Deux sauvegardes du même événement ne doivent pas être concurrentes.');
+  assert(appSource.includes('canEditModule(\'presences\')') && appSource.includes('canAccessAnyPresenceTeam(event)'), 'Admin et coach autorisé doivent rester contrôlés par les permissions et le scope équipe existants.');
+
+  const backupStart = appSource.indexOf('const AUTO_BACKUP_MAX_BYTES');
+  const backupEnd = appSource.indexOf('function mergedCommonBaseItems', backupStart);
+  const sources = appSource.slice(backupStart, backupEnd);
+  const backupStorage = new Map([
+    ['coachpulse:pendingSync', '1'],
+    ['coachpulse:presenceEvents:v1', JSON.stringify([{...event}, {...event, id:'presence-event-synced', cloudSyncedAt:'2026-09-24T11:00:00.000Z'}])]
+  ]);
+  const backupContext = vm.createContext({TextEncoder, storage:{
+    get:(key, fallback='') => backupStorage.has(key) ? backupStorage.get(key) : fallback,
+    getJson:(key, fallback) => { try{ return JSON.parse(backupStorage.get(key)); }catch(_error){ return fallback; } }
+  }});
+  vm.runInContext(`${sources}\nthis.result = buildBoundedAutoBackupPayload({items:{ordinary:'x'.repeat(4096)}}, 2048);`, backupContext);
+  assert(backupContext.result.backup.maxBytes === 2048 && autoBackupTestBytes(backupContext.result) <= 2048, 'autoBackup:v6 doit rester borné.');
+  assert.equal(backupContext.result.items['coachpulse:pendingSync'], '1', 'Le marqueur pending doit être conservé en priorité.');
+  assert.match(backupContext.result.items['coachpulse:presenceEvents:pendingBackup:v1'], /1789649129080/, 'Les présences offline non synchronisées doivent être conservées.');
+  assert(!backupContext.result.items['coachpulse:presenceEvents:pendingBackup:v1'].includes('presence-event-synced'), 'Les copies de présences déjà synchronisées ne doivent pas gonfler le backup.');
+}
+
+function autoBackupTestBytes(value){
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -1351,6 +1403,7 @@ testMatchCloudSyncIsOfflineFirstAndIdempotent();
 testLoadingIndicatorCannotReplaceFirebaseDataApi();
 testFirestorePermissionDiagnosticKeepsSafeOperationContext();
 testFirestorePayloadBoundary();
+testPresenceRuntimeSaveGuards();
 
 Promise.resolve()
   .then(testPresenceLoadingBoundaryReturnsSameRows)

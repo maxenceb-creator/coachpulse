@@ -1392,6 +1392,42 @@ function buildPayload(){
     items:collectLocalStorage()
   };
 }
+const AUTO_BACKUP_MAX_BYTES = 512 * 1024;
+function autoBackupBytes(value){
+  try{ return new TextEncoder().encode(JSON.stringify(value)).length; }
+  catch(_error){ return JSON.stringify(value).length; }
+}
+function collectAutoBackupItems(payload={}){
+  const items = {...(payload.items || {})};
+  ['coachpulse:pendingSync', 'coachpulse:technicalTestsPending', 'coachpulse:technicalTestsPendingBackup'].forEach(key => {
+    const value = storage.get(key, '');
+    if(value) items[key] = value;
+  });
+  const presenceEvents = storage.getJson('coachpulse:presenceEvents:v1', []);
+  const pendingPresenceEvents = Array.isArray(presenceEvents) ? presenceEvents.filter(event => {
+    const updatedAt = Date.parse(event?.updatedAt || event?.createdAt || 0) || 0;
+    const syncedAt = Date.parse(event?.cloudSyncedAt || 0) || 0;
+    return !syncedAt || updatedAt > syncedAt;
+  }) : [];
+  if(pendingPresenceEvents.length) items['coachpulse:presenceEvents:pendingBackup:v1'] = JSON.stringify(pendingPresenceEvents);
+  return items;
+}
+function buildBoundedAutoBackupPayload(payload, maxBytes=AUTO_BACKUP_MAX_BYTES){
+  const sourceItems = collectAutoBackupItems(payload);
+  const prioritizedKeys = Object.keys(sourceItems).sort((left, right) => {
+    const pending = key => /pending|draft|offline/i.test(key) ? 0 : 1;
+    return pending(left) - pending(right) || left.localeCompare(right);
+  });
+  const bounded = {...payload, items:{}, backup:{maxBytes, omittedKeys:[]}};
+  prioritizedKeys.forEach(key => {
+    bounded.items[key] = sourceItems[key];
+    if(autoBackupBytes(bounded) > maxBytes){
+      delete bounded.items[key];
+      bounded.backup.omittedKeys.push(key);
+    }
+  });
+  return bounded;
+}
 function mergedCommonBaseItems(existingItems={}, localItems={}){
   const preserved = {};
   Object.entries(existingItems && typeof existingItems === 'object' ? existingItems : {}).forEach(([key, value]) => {
@@ -1421,8 +1457,9 @@ function updateDashboard(){
 }
 function snapshotLocalData(options={}){
   const payload = buildPayload();
+  const backupPayload = buildBoundedAutoBackupPayload(payload);
   try{
-    setLocalStorageWithQuotaRecovery('coachpulse:autoBackup:v6', JSON.stringify(payload));
+    setLocalStorageWithQuotaRecovery('coachpulse:autoBackup:v6', JSON.stringify(backupPayload));
     setLocalStorageWithQuotaRecovery('coachpulse:lastAutoSave', payload.savedAt);
   }catch(e){
     console.warn('Sauvegarde locale indisponible', e);
@@ -5688,6 +5725,7 @@ function presencePlainProcedure(value={}){
 }
 function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   const sessionId = String(session.sessionId || session.id || '').trim();
+  const eventId = String(session.eventId || session.presenceEventId || sessionId).trim();
   const dateFromId = sessionId.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
   const eventDate = session.date || session.startDate || session.day || dateFromId || '';
   const teamIds = presenceTeamIdRefs(session, session.teamSnapshot, session.sessionSnapshot);
@@ -5707,7 +5745,8 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
     };
   });
   return {
-    id:sessionId,
+    id:eventId,
+    eventId,
     sessionId,
     date:eventDate,
     startTime:session.startTime || session.start || '',
@@ -5994,7 +6033,10 @@ async function presenceSaveEvent(event={}){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = presenceEventsService();
   const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
-  const sessionId = session.sessionId || event.id;
+  const sessionId = String(session.sessionId || '').trim();
+  if(!sessionId || sessionId.startsWith('presence-event-') || sessionId.startsWith('local-attendance-')){
+    throw new Error('Identifiant de séance Présences invalide. Recharge les présences avant de réessayer.');
+  }
   const deletionLogId = sessionId;
   const sessionRef = firebaseFns.doc(db, 'sessions', sessionId);
   const [deletionLogSnap, existingAttendanceSnap] = await Promise.all([
@@ -6002,7 +6044,7 @@ async function presenceSaveEvent(event={}){
     firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)))
   ]);
   if(deletionLogSnap.exists()) throw new Error('Cette séance a été supprimée définitivement et ne peut pas être recréée depuis un ancien cache.');
-  const localVersion = Date.parse(session.updatedAtIso || event.updatedAtIso || session.createdAt || event.createdAt || session.date || event.date || 0) || 0;
+  const localVersion = Date.parse(session.updatedAtIso || event.updatedAtIso || session.updatedAt || event.updatedAt || session.createdAt || event.createdAt || session.date || event.date || 0) || 0;
   const now = new Date().toISOString();
   const sessionTeamIds = presenceTeamIdRefs(session, event, session.teamSnapshot, event.teamSnapshot);
   const primaryTeamId = presenceTeamIdRefs(session.teamId || event.teamId, session, event).find(teamId => canAccessTeamId(teamId)) || session.teamId || event.teamId || sessionTeamIds[0] || '';
@@ -6052,39 +6094,58 @@ async function presenceSaveEvent(event={}){
   if(!firebaseFns.runTransaction) throw new Error('Synchronisation atomique Firebase indisponible.');
   const writeCount = 1 + attendanceRows.length + staleAttendanceRefs.length;
   if(writeCount > 500) throw new Error('Cette séance contient trop de présences pour une synchronisation atomique Firestore.');
-  await firebaseFns.runTransaction(db, async transaction => {
-    const latestSessionSnap = await transaction.get(sessionRef);
-    const cloudSession = latestSessionSnap.exists() ? latestSessionSnap.data() : {};
-    const cloudVersion = Date.parse(cloudSession.updatedAtIso || cloudSession.createdAtIso || cloudSession.date || 0) || 0;
-    if(latestSessionSnap.exists() && cloudVersion > localVersion){
-      throw new Error('Une version cloud plus récente de cette séance a été conservée. Recharge les présences avant de réessayer.');
-    }
-    transaction.set(sessionRef, {
-      ...safeSessionPayload,
-      id:sessionId,
-      sessionId,
-      source:'Présences',
-      createdFromPresenceModule:true,
-      updatedAt:firebaseFns.serverTimestamp(),
-      updatedAtIso:now,
-      updatedBy:currentUser.uid,
-      updatedByEmail:currentUser.email || '',
-      createdAtIso:session.createdAt || event.createdAt || now
-    }, {merge:true});
-    staleAttendanceRefs.forEach(ref => transaction.delete(ref));
-    attendanceRows.forEach(row => {
-      const safeAttendancePayload = firestoreSafeData(row);
-      transaction.set(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
-        ...safeAttendancePayload,
+  try{
+    await firebaseFns.runTransaction(db, async transaction => {
+      const latestSessionSnap = await transaction.get(sessionRef);
+      const cloudSession = latestSessionSnap.exists() ? latestSessionSnap.data() : {};
+      const cloudVersion = Date.parse(cloudSession.updatedAtIso || cloudSession.updatedAt?.toDate?.() || cloudSession.createdAtIso || cloudSession.date || 0) || 0;
+      if(latestSessionSnap.exists() && cloudVersion > localVersion){
+        const conflict = new Error('Une version cloud plus récente de cette séance a été conservée. Recharge les présences avant de réessayer.');
+        conflict.code = 'presence/version-conflict';
+        throw conflict;
+      }
+      transaction.set(sessionRef, {
+        ...safeSessionPayload,
+        id:sessionId,
+        eventId:String(event.id || event.eventId || '').trim(),
+        sessionId,
         source:'Présences',
         createdFromPresenceModule:true,
         updatedAt:firebaseFns.serverTimestamp(),
         updatedAtIso:now,
         updatedBy:currentUser.uid,
-        updatedByEmail:currentUser.email || ''
+        updatedByEmail:currentUser.email || '',
+        createdAtIso:session.createdAt || event.createdAt || now
       }, {merge:true});
-    });
-  });
+      staleAttendanceRefs.forEach(ref => transaction.delete(ref));
+      attendanceRows.forEach(row => {
+        const safeAttendancePayload = firestoreSafeData(row);
+        transaction.set(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
+          ...safeAttendancePayload,
+          source:'Présences',
+          createdFromPresenceModule:true,
+          updatedAt:firebaseFns.serverTimestamp(),
+          updatedAtIso:now,
+          updatedBy:currentUser.uid,
+          updatedByEmail:currentUser.email || ''
+        }, {merge:true});
+      });
+    }, {maxAttempts:1});
+  }catch(error){
+    if(error?.code === 'presence/version-conflict') throw error;
+    const code = String(error?.code || '').toLowerCase();
+    const classified = code === '8' || code.includes('resource-exhausted')
+      ? ['presence/resource-exhausted', 'Quota Firestore temporairement dépassé (HTTP 429). La modification reste enregistrée localement et pourra être resynchronisée.']
+      : code.includes('permission-denied')
+        ? ['presence/permission-denied', 'Synchronisation refusée par les autorisations Firestore. La modification reste enregistrée localement.']
+        : (code.includes('unavailable') || code.includes('network') || code.includes('deadline-exceeded'))
+          ? ['presence/network', 'Réseau ou service Firestore indisponible. La modification reste enregistrée localement et pourra être resynchronisée.']
+          : ['presence/firestore', `Erreur Firestore pendant la synchronisation : ${cleanError(error) || 'erreur inconnue'}.`];
+    const syncError = new Error(classified[1]);
+    syncError.code = classified[0];
+    syncError.cause = error;
+    throw syncError;
+  }
   invalidateAppDataCaches('presences');
   invalidateAppDataCaches('playerProfiles');
   invalidateAppDataCaches('teamProfiles');
