@@ -53,6 +53,8 @@ const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
   'presenceSeanceV3_6_Excel',
   'coachpulse:presenceEvents:v1',
   'coachpulse:presenceSettings:v1',
+  'coachpulse:presenceEvents:deletedIds:v1',
+  'coachpulse:presenceEvents:deletedKeys:v1',
   'coachpulse:centralPlayers',
   'coachpulse:athleticTests',
   'coachpulse:medicalData',
@@ -1390,6 +1392,13 @@ function buildPayload(){
     items:collectLocalStorage()
   };
 }
+function mergedCommonBaseItems(existingItems={}, localItems={}){
+  const preserved = {};
+  Object.entries(existingItems && typeof existingItems === 'object' ? existingItems : {}).forEach(([key, value]) => {
+    if(!FIRESTORE_MANAGED_LOCAL_KEYS.has(key) && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(key)) preserved[key] = value;
+  });
+  return {...preserved, ...(localItems || {})};
+}
 function countLocalDataItems(){
   return storage.keys().filter(key => key.startsWith('coachpulse:')).length;
 }
@@ -2092,7 +2101,11 @@ async function refreshCentralPlayersFromCloud(options={}){
   centralPlayersRefreshPending = (async () => {
     let players = [];
     if(service?.readFirestorePlayers){
-      players = await service.readFirestorePlayers(firestoreServiceContext({forceRefresh:true}));
+      players = await service.readFirestorePlayers(firestoreServiceContext({
+        forceRefresh:true,
+        accessAllPlayers:isAdmin(),
+        authorizedTeamIds:getAuthorizedTeamIds()
+      }));
     }else{
       const snap = await firebaseFns.getDocs(firebaseFns.collection(db, 'players'));
       snap.forEach(docSnap => players.push({id:docSnap.id, playerId:docSnap.id, ...docSnap.data()}));
@@ -5847,9 +5860,7 @@ async function presenceListEvents(options={}){
     const cacheGeneration = presenceCacheGeneration;
     const sessionRows = presenceSettingsAdminAllowed()
       ? await readPresenceSessionsForAllPlayersScope()
-      : canAccessAllPlayersForModule('presences')
-        ? await readPresenceSessionsForAllPlayersScope()
-        : await readPresenceSessionsForTeams(teamChunks);
+      : await readPresenceSessionsForTeams(teamChunks);
     const authorizedSessions = scopedRecordsForModuleAccess(sessionRows, 'presences');
     const sessions = authorizedSessions
       .filter(row => row.sessionId || row.id)
@@ -5932,7 +5943,7 @@ function presenceSubscribeEvents(onChange){
   const authorizedTeamIds = getAuthorizedTeamIds();
   if(!presenceSettingsAdminAllowed() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return () => {};
   const queries = [];
-  if(presenceSettingsAdminAllowed() || canAccessAllPlayersForModule('presences')){
+  if(presenceSettingsAdminAllowed()){
     queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true)));
     queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences')));
   }else{
@@ -6215,22 +6226,11 @@ async function syncCloud(manual=false){
   try{
     updateSyncState('🔄 Synchronisation...');
     const ref = getCloudRef();
-    if(!legacyManagedCloudItemsCleaned){
-      try{
-        await firebaseFns.updateDoc(ref, {
-          'items.coachStatsV170':firebaseFns.deleteField(),
-          'items.presenceSeanceV3_6_Excel':firebaseFns.deleteField(),
-          'items.coachpulse:presenceEvents:v1':firebaseFns.deleteField()
-        });
-        legacyManagedCloudItemsCleaned = true;
-      }catch(cleanupError){
-        const cleanupCode = String(cleanupError?.code || cleanupError?.message || '');
-        if(cleanupCode.includes('not-found')) legacyManagedCloudItemsCleaned = true;
-        else console.warn('Nettoyage des anciennes données agrégées différé', cleanupError);
-      }
-    }
     const payload = buildPayload();
-    const safePayload = firestorePayloadService.prepare(payload, {rootPath:'$', maxBytes:950 * 1024});
+    const existingSnap = await firebaseFns.getDoc(ref);
+    const existingItems = existingSnap.exists() ? existingSnap.data()?.items : {};
+    const mergedPayload = {...payload, items:mergedCommonBaseItems(existingItems, payload.items)};
+    const safePayload = firestorePayloadService.prepare(mergedPayload, {rootPath:'$', maxBytes:900 * 1024});
     const itemsHash = hashItems(safePayload.items);
     const cloudDocument = {
       ...safePayload,
@@ -6241,9 +6241,11 @@ async function syncCloud(manual=false){
       updatedByClient:CLIENT_ID,
       itemsHash
     };
-    // La fusion conserve les champs legacy déjà présents dans le document.
-    // Les données Présences actives sont désormais fractionnées dans sessions/attendance.
-    await firebaseFns.setDoc(ref, cloudDocument, {merge:true});
+    // Remplacer la map items retire uniquement les anciennes copies désormais normalisées,
+    // tout en conservant les autres clés legacy récupérées juste au-dessus.
+    if(existingSnap.exists()) await firebaseFns.updateDoc(ref, cloudDocument);
+    else await firebaseFns.setDoc(ref, cloudDocument);
+    legacyManagedCloudItemsCleaned = true;
     lastCloudItemsHash = itemsHash;
     storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
     storage.clearPendingSync();
