@@ -82,6 +82,9 @@ async function main() {
       await setDoc(doc(db, 'sessions', 'xlsx-2026-05-old'), {sessionId: 'xlsx-2026-05-old', teamId: 'U11', source: 'Import présence'});
       await setDoc(doc(db, 'players', 'pOrphan'), {playerId: 'pOrphan', status: 'ACTIVE'});
       await setDoc(doc(db, 'sessions', 'sOrphan'), {sessionId: 'sOrphan', source: 'Présences'});
+      await setDoc(doc(db, 'sessions', 'sOwnedLegacy'), {sessionId: 'sOwnedLegacy', source: 'Présences', createdFromPresenceModule:true, updatedBy:'coach'});
+      await setDoc(doc(db, 'sessions', 'sOwnedLegacyCross'), {sessionId: 'sOwnedLegacyCross', source: 'Présences', createdFromPresenceModule:true, updatedBy:'coach'});
+      await setDoc(doc(db, 'sessions', 'sForeignLegacy'), {sessionId: 'sForeignLegacy', source: 'Présences', createdFromPresenceModule:true, updatedBy:'other-coach'});
       for (let sessionIndex = 1; sessionIndex <= 12; sessionIndex += 1) {
         const sessionId = `sVolume${sessionIndex}`;
         await setDoc(doc(db, 'sessions', sessionId), {
@@ -194,6 +197,23 @@ async function main() {
     await assertSucceeds(setDoc(doc(db, 'attendance', 'newU11'), {attendanceId: 'newU11', sessionId: 'sU11', teamId: 'U11'}));
     process.stdout.write('Checking authorized attendance update\n');
     await assertSucceeds(setDoc(doc(db, 'attendance', 'aU11'), {attendanceId: 'aU11', sessionId: 'sU11', teamId: 'U11', status: 'P'}));
+    process.stdout.write('Checking authorized atomic repair of owned legacy presence session\n');
+    const legacyRepair = writeBatch(db);
+    legacyRepair.set(doc(db, 'sessions', 'sOwnedLegacy'), {sessionId:'sOwnedLegacy', teamId:'U11', teamIds:['U11'], source:'Présences', createdFromPresenceModule:true}, {merge:true});
+    legacyRepair.set(doc(db, 'attendance', 'aOwnedLegacy'), {attendanceId:'aOwnedLegacy', sessionId:'sOwnedLegacy', teamId:'U11', teamIds:['U11']}, {merge:true});
+    await assertSucceeds(legacyRepair.commit());
+    const foreignLegacyRepair = writeBatch(db);
+    foreignLegacyRepair.set(doc(db, 'sessions', 'sForeignLegacy'), {sessionId:'sForeignLegacy', teamId:'U11', teamIds:['U11'], source:'Présences', createdFromPresenceModule:true}, {merge:true});
+    foreignLegacyRepair.set(doc(db, 'attendance', 'aForeignLegacy'), {attendanceId:'aForeignLegacy', sessionId:'sForeignLegacy', teamId:'U11', teamIds:['U11']}, {merge:true});
+    await assertFails(foreignLegacyRepair.commit());
+    const crossTeamRepair = writeBatch(db);
+    crossTeamRepair.set(doc(db, 'sessions', 'sOwnedLegacyCross'), {sessionId:'sOwnedLegacyCross', teamId:'U13', teamIds:['U13'], source:'Présences', createdFromPresenceModule:true}, {merge:true});
+    crossTeamRepair.set(doc(db, 'attendance', 'aOwnedLegacyU13'), {attendanceId:'aOwnedLegacyU13', sessionId:'sOwnedLegacyCross', teamId:'U13', teamIds:['U13']}, {merge:true});
+    await assertFails(crossTeamRepair.commit());
+    const scopedForeignRecovery = writeBatch(db);
+    scopedForeignRecovery.set(doc(db, 'sessions', 'sU13'), {sessionId:'sU13', teamId:'U11', teamIds:['U11'], source:'Présences', createdFromPresenceModule:true}, {merge:true});
+    scopedForeignRecovery.set(doc(db, 'attendance', 'aScopedForeignRecovery'), {attendanceId:'aScopedForeignRecovery', sessionId:'sU13', teamId:'U11', teamIds:['U11']}, {merge:true});
+    await assertFails(scopedForeignRecovery.commit());
     process.stdout.write('Checking authorized technical test create\n');
     await assertSucceeds(setDoc(doc(db, 'technicalTests', 'newU11'), {testId: 'newU11', playerId: 'pU11'}));
     process.stdout.write('Checking authorized technical test update\n');

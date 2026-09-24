@@ -1208,6 +1208,7 @@ function testFirestorePermissionDiagnosticKeepsSafeOperationContext(){
   }, 'Le permission-denied doit conserver le contexte précis jusqu’à operation.fail().');
   assert(!('email' in result) && !('token' in result) && !('document' in result), 'Le diagnostic ne doit contenir aucune donnée sensible ni contenu Firestore.');
   assert(indicatorSource.includes("console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic)"), 'Le diagnostic Firestore doit avoir un préfixe console stable.');
+  assert(indicatorSource.includes("fingerprint !== lastDiagnostic.fingerprint"), 'Le même diagnostic Firestore immédiat ne doit pas être journalisé plusieurs fois.');
   assert(indicatorSource.includes('coachPulseFunction:String(') && indicatorSource.includes('teamIds:diagnostic.teamIds.map'), 'Le diagnostic doit afficher directement la fonction et les teamIds sans donnée personnelle.');
   assert(indicatorSource.includes('Erreur de synchronisation${lastError?.diagnosticRef'), 'L’interface doit conserver le message courant et ajouter la référence technique.');
   assert(indicatorSource.includes('permissionDenied && diagnostic'), 'Les détails techniques ne doivent être produits que pour permission-denied.');
@@ -1331,6 +1332,7 @@ function testPresenceRuntimeSaveGuards(){
 
   const appSource = fs.readFileSync('app.js', 'utf8');
   const presenceSource = fs.readFileSync('pages/presences.html', 'utf8');
+  const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
   assert(appSource.includes('updatedAtIso:now'), 'La sauvegarde doit horodater la dernière modification de présence.');
   assert(appSource.includes('const eventId = String(session.eventId || session.presenceEventId || sessionId).trim();'), 'La relecture cloud doit préserver l’eventId UI distinct du sessionId.');
   assert(appSource.includes("eventId:String(event.id || event.eventId || '').trim()"), 'La séance Firestore doit conserver le lien vers son événement UI.');
@@ -1340,7 +1342,11 @@ function testPresenceRuntimeSaveGuards(){
   assert(!appSource.includes('transaction.get(sessionRef)'), 'La sauvegarde ne doit plus déclencher BatchGetDocuments sur la séance.');
   assert(!appSource.includes("where('sessionId', '==', sessionId)"), 'Un Coach ne doit jamais lister attendance globalement par sessionId.');
   assert(appSource.includes("operation:'list', query:item.label, teamIds:item.teamIds"), 'Le diagnostic existant doit préciser la query attendance refusée et ses équipes.');
-  assert(appSource.includes("'[CoachPulse Presence Debug]'"), 'Le diagnostic Présences ciblé doit rester disponible pour le prochain test navigateur.');
+  assert(!appSource.includes("'[CoachPulse Presence Debug]'"), 'Les logs temporaires Presence Debug doivent être retirés après diagnostic.');
+  assert(appSource.includes("collection:'sessions,attendance', operation:'batch-write'"), 'Un refus du batch Présences doit conserver son opération Firestore exacte.');
+  assert(appSource.includes("permission:'canAccessDirectData'") && appSource.includes("permission:'canWriteAttendanceData'"), 'Le diagnostic batch doit distinguer la permission attendue pour chaque document sans donnée joueuse.');
+  assert(rulesSource.includes('function canRepairOwnedLegacyPresenceSession(before, after)') && rulesSource.includes('!hasScopeFields(before)') && rulesSource.includes("valueOrEmpty(before, 'updatedBy') == request.auth.uid"), 'Une séance Présences legacy sans scope ne peut être réparée que par son auteur vers un scope autorisé.');
+  assert(rulesSource.includes('canRepairOwnedLegacyPresenceSession(resource.data, request.resource.data)') && rulesSource.includes('scopedTeams(after).hasAny(teams)'), 'La compatibilité legacy doit rester limitée aux updates vers une équipe autorisée.');
   assert(presenceSource.includes('clearTimeout(presenceCloudSaveTimers.get(eventId))'), 'Les changements rapprochés doivent être dédupliqués avant sauvegarde.');
   assert(presenceSource.includes('const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve()'), 'Deux sauvegardes du même événement ne doivent pas être concurrentes.');
   assert(appSource.includes('canEditModule(\'presences\')') && appSource.includes('canAccessAnyPresenceTeam(event)'), 'Admin et coach autorisé doivent rester contrôlés par les permissions et le scope équipe existants.');
@@ -1361,6 +1367,9 @@ function testPresenceRuntimeSaveGuards(){
   assert.equal(backupContext.result.items['coachpulse:pendingSync'], '1', 'Le marqueur pending doit être conservé en priorité.');
   assert.match(backupContext.result.items['coachpulse:presenceEvents:pendingBackup:v1'], /1789649129080/, 'Les présences offline non synchronisées doivent être conservées.');
   assert(!backupContext.result.items['coachpulse:presenceEvents:pendingBackup:v1'].includes('presence-event-synced'), 'Les copies de présences déjà synchronisées ne doivent pas gonfler le backup.');
+  assert(appSource.includes("'[CoachPulse AutoBackup Diagnostic]'"), 'Un échec quota doit mesurer le payload final, le stockage et les éléments principaux.');
+  assert(appSource.includes("storage.remove('coachpulse:technicalPlayerFootHints')"), 'La récupération quota ne doit nettoyer qu’un cache Firestore reconstructible identifié.');
+  assert(!appSource.includes("storage.remove('coachpulse:centralPlayers')"), 'Le roster hors ligne ne doit jamais être supprimé par la récupération quota.');
 }
 
 function autoBackupTestBytes(value){
