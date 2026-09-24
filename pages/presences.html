@@ -2141,7 +2141,10 @@
         const normalized = activePresenceSeasonEvents((Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id))
           .filter(event => !isDeletedPresenceEvent(event));
         presenceEventsMemoryCache = normalized;
-        setJson(PRESENCE_EVENTS_KEY, normalized);
+        const compacted = window.CoachPulsePresenceEventsService?.compactStoredEvents
+          ? window.CoachPulsePresenceEventsService.compactStoredEvents(normalized)
+          : normalized;
+        setJson(PRESENCE_EVENTS_KEY, compacted);
       }
       function queuePresenceEventsLocalSave(events){
         presenceEventsMemoryCache = Array.isArray(events) ? events : [];
@@ -2154,7 +2157,10 @@
           const activeEvents = activePresenceSeasonEvents(presenceEventsMemoryCache || [])
             .filter(event => !isDeletedPresenceEvent(event));
           presenceEventsMemoryCache = activeEvents;
-          setJson(PRESENCE_EVENTS_KEY, activeEvents);
+          const compacted = window.CoachPulsePresenceEventsService?.compactStoredEvents
+            ? window.CoachPulsePresenceEventsService.compactStoredEvents(activeEvents)
+            : activeEvents;
+          setJson(PRESENCE_EVENTS_KEY, compacted);
         };
         presenceLocalSaveTimer = typeof requestIdleCallback === "function"
           ? requestIdleCallback(persist, {timeout:3000})
@@ -2188,7 +2194,11 @@
         const cloudEvents = await api.presenceListEvents({includeRetiredPresenceSeasons:true});
         const {active:activeCloudEvents, retired:retiredCloudEvents} = splitRetiredPresenceSeasonEvents(Array.isArray(cloudEvents) ? cloudEvents : []);
         await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);
-        const merged = mergePresenceEvents(loadPresenceEvents(), activeCloudEvents.filter(event => !isDeletedPresenceEvent(event)));
+        const syncedAt = new Date().toISOString();
+        const acknowledgedCloudEvents = activeCloudEvents
+          .filter(event => !isDeletedPresenceEvent(event))
+          .map(event => ({...event, cloudSyncedAt:syncedAt}));
+        const merged = mergePresenceEvents(loadPresenceEvents(), acknowledgedCloudEvents);
         queuePresenceEventsLocalSave(merged);
         deleteRetiredPresenceEventsFromCloud(retiredCloudEvents);
         cloudReady = true;
@@ -2235,6 +2245,7 @@
             const latestEvent = loadPresenceEvents().find(item => item.id === eventId);
             if(!latestEvent || isDeletedPresenceEvent(latestEvent)) return;
             await pushPresenceEventToCloud(latestEvent);
+            markPresenceEventsSynced([eventId]);
             setSessionMessage("Feuille de présence synchronisée.", "success");
           }).catch(error => {
             setSessionMessage(`Sauvegarde cloud impossible : ${error?.message || error}.`, "error");
@@ -2259,6 +2270,7 @@
           await api.presenceSaveEvent(event);
           syncedIds.push(event.id);
         }
+        markPresenceEventsSynced(syncedIds);
         return syncedIds.length;
       }
       async function deletePresenceEventFromCloud(event){
