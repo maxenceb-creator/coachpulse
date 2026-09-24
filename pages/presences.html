@@ -2028,6 +2028,9 @@
       function normalizePresenceEventForStorage(event={}){
         const id = event.id || event.sessionId || event.eventId || "";
         if(!id) return null;
+        const sessionId = window.CoachPulsePresenceEventsService?.sessionIdFromEvent?.({...event, id})
+          || (String(event.sessionId || "").startsWith("presence-event-") ? `presence-session-${String(event.sessionId).slice(15)}` : event.sessionId)
+          || `presence-session-${id}`;
         const date = isoDate(parseDate(event.date || event.startDate || event.day || event.start) || new Date());
         const teamId = eventTeamId(event);
         const team = teamById(teamId);
@@ -2035,7 +2038,7 @@
         const normalized = {
           ...event,
           id,
-          sessionId:event.sessionId || id,
+          sessionId,
           date,
           teamId,
           teamIds,

@@ -106,6 +106,14 @@
   function eventId(event={}){
     return text(event.id || event.sessionId || event.eventId);
   }
+  function sessionIdFromEvent(event={}){
+    const declared = text(event.sessionId || event.sessionSnapshot?.sessionId);
+    if(declared && !declared.startsWith('presence-event-') && !declared.startsWith('local-attendance-')) return declared;
+    const id = eventId(event);
+    if(id.startsWith('presence-event-')) return `presence-session-${id.slice('presence-event-'.length)}`;
+    if(id && !id.startsWith('local-attendance-')) return id.startsWith('presence-session-') ? id : `presence-session-${id}`;
+    return '';
+  }
   function teamIdsFromEvent(event={}){
     return presenceTeamAliases([
       event.teamId,
@@ -148,7 +156,7 @@
     };
   }
   function sessionFromEvent(event={}){
-    const sessionId = eventId(event);
+    const sessionId = sessionIdFromEvent(event);
     const teamIds = teamIdsFromEvent(event);
     return {
       id:sessionId,
@@ -198,7 +206,7 @@
     };
   }
   function attendanceRowsFromEvent(event={}){
-    const sessionId = eventId(event);
+    const sessionId = sessionIdFromEvent(event);
     const eventTeamIds = teamIdsFromEvent(event);
     const sessionSnapshot = sessionFromEvent(event);
     const attendance = event.attendance || {};
@@ -291,7 +299,7 @@
     const attendance = events.flatMap(attendanceRowsFromEvent).filter(row => !ids.size || ids.has(row.playerId));
     const sessionIds = new Set(attendance.map(row => row.sessionId));
     return {
-      sessions:collectionsFromEvents(events.filter(event => sessionIds.has(eventId(event)))).sessions,
+      sessions:collectionsFromEvents(events.filter(event => sessionIds.has(sessionIdFromEvent(event)))).sessions,
       attendance
     };
   }
@@ -300,6 +308,7 @@
     STORAGE_KEY,
     readEvents,
     compactStoredEvents,
+    sessionIdFromEvent,
     sessionFromEvent,
     teamIdsFromEvent,
     attendanceRowsFromEvent,
