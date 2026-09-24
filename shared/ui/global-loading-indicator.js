@@ -10,6 +10,7 @@
   let showTimer = null;
   let hideTimer = null;
   let lastError = null;
+  let lastDiagnostic = {fingerprint:'', at:0};
   let expanded = false;
   let root = null;
 
@@ -177,7 +178,12 @@
         firebaseCode:String(diagnostic.firebaseCode || error?.code || 'unknown'),
         firebaseMessage:String(diagnostic.firebaseMessage || error?.message || error || 'unknown')
       };
-      console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic);
+      const fingerprint = JSON.stringify(safeDiagnostic);
+      const now = Date.now();
+      if(fingerprint !== lastDiagnostic.fingerprint || now - lastDiagnostic.at > 2000){
+        console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic);
+        lastDiagnostic = {fingerprint, at:now};
+      }
     }
     lastError = {message:raw, label:options.label || '', diagnosticRef:permissionDenied ? String(diagnostic?.task || options.label || '') : '', offline:options.offline === true, at:Date.now()};
     expanded = false;

@@ -528,20 +528,6 @@ function presenceTeamIdRefs(...sources){
 function canAccessAnyPresenceTeam(...sources){
   return presenceTeamIdRefs(...sources).some(teamId => canAccessTeamId(teamId));
 }
-function presenceDebug(action, event={}, extra={}){
-  console.info('[CoachPulse Presence Debug]', {
-    function:extra.function || '',
-    action,
-    sessionId:String(event.sessionId || event.sessionSnapshot?.sessionId || ''),
-    eventId:String(event.id || event.eventId || ''),
-    teamId:String(event.teamId || event.teamSnapshot?.teamId || event.sessionSnapshot?.teamId || ''),
-    userTeamIds:getAuthorizedTeamIds(),
-    role:getCurrentUserRole(),
-    origin:extra.origin || '',
-    transactionAttempt:Number(extra.transactionAttempt || 0),
-    timestamp:new Date().toISOString()
-  });
-}
 function profilePresenceParseDate(value){
   const raw = String(value || '').trim();
   if(!raw) return null;
@@ -1422,6 +1408,9 @@ function autoBackupBytes(value){
   try{ return new TextEncoder().encode(JSON.stringify(value)).length; }
   catch(_error){ return JSON.stringify(value).length; }
 }
+function autoBackupItemSizes(items={}){
+  return Object.entries(items).map(([key, value]) => ({key, bytes:autoBackupBytes(value)})).sort((a,b) => b.bytes - a.bytes);
+}
 function collectAutoBackupItems(payload={}){
   const items = {...(payload.items || {})};
   ['coachpulse:pendingSync', 'coachpulse:technicalTestsPending', 'coachpulse:technicalTestsPendingBackup'].forEach(key => {
@@ -1483,8 +1472,26 @@ function updateDashboard(){
 function snapshotLocalData(options={}){
   const payload = buildPayload();
   const backupPayload = buildBoundedAutoBackupPayload(payload);
+  const serializedBackup = JSON.stringify(backupPayload);
+  const backupDiagnostic = {
+    payloadBytes:autoBackupBytes(backupPayload), limitBytes:AUTO_BACKUP_MAX_BYTES,
+    storage:storage.usage?.().type || 'localStorage', storageBytes:storage.usage?.().bytes || 0,
+    largestItems:autoBackupItemSizes(backupPayload.items).slice(0, 5)
+  };
+  window.CoachPulseAutoBackupDiagnostic = backupDiagnostic;
   try{
-    setLocalStorageWithQuotaRecovery('coachpulse:autoBackup:v6', JSON.stringify(backupPayload));
+    const stored = storage.set('coachpulse:autoBackup:v6', serializedBackup, {recover:true, cleanup:() => {
+      const presenceKey = 'coachpulse:presenceEvents:v1';
+      const events = storage.getJson(presenceKey, []);
+      const pending = Array.isArray(events) ? events.filter(event => {
+        const updatedAt = Date.parse(event?.updatedAt || event?.createdAt || 0) || 0;
+        const syncedAt = Date.parse(event?.cloudSyncedAt || 0) || 0;
+        return !syncedAt || updatedAt > syncedAt;
+      }) : [];
+      if(Array.isArray(events) && pending.length < events.length) storage.setJson(presenceKey, pending);
+      storage.remove('coachpulse:technicalPlayerFootHints');
+    }});
+    if(!stored) console.warn('[CoachPulse AutoBackup Diagnostic]', backupDiagnostic);
     setLocalStorageWithQuotaRecovery('coachpulse:lastAutoSave', payload.savedAt);
   }catch(e){
     console.warn('Sauvegarde locale indisponible', e);
@@ -6037,7 +6044,6 @@ function presenceSubscribeEvents(onChange){
     if(initialized++ >= queries.length) onChange();
     }, error => {
       try{ loadingOperation?.fail?.(error, loadingFailureContext(label, {diagnostic}, error)); }catch(_error){}
-      presenceDebug('listener-error', {}, {function:'presenceSubscribeEvents', origin:`sessions:${queryDiagnostics[index] || index + 1}`});
       console.warn('[Présences] Écoute temps réel indisponible', cleanError(error));
     });
     return {loadingOperation, unsubscribe};
@@ -6056,7 +6062,6 @@ function presenceSubscribeSettings(onChange){
     if(snap.exists()) onChange(firestoreSafeData(snap.data()?.value || {}));
   }, error => {
     try{ loadingOperation?.fail?.(error, loadingFailureContext('attendance-settings:listen', {diagnostic}, error)); }catch(_error){}
-    presenceDebug('listener-error', {}, {function:'presenceSubscribeSettings', origin:'settings/presence-module'});
     console.warn('[Présences] Écoute paramètres indisponible', cleanError(error));
   });
   return () => { try{ loadingOperation?.end?.(); }catch(_error){} return unsubscribe(); };
@@ -6064,7 +6069,6 @@ function presenceSubscribeSettings(onChange){
 async function presenceSaveEvent(event={}, options={}){
   if(!canEditModule('presences')) throw new Error('Modification Présences non autorisée.');
   if(!canAccessAnyPresenceTeam(event)){
-    presenceDebug('team-rejected', event, {function:'presenceSaveEvent', origin:options.origin || 'unknown'});
     throw new Error('Accès non autorisé à cette équipe.');
   }
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
@@ -6152,7 +6156,6 @@ async function presenceSaveEvent(event={}, options={}){
   const writeCount = 1 + attendanceRows.length + staleAttendanceRefs.length;
   if(writeCount > 500) throw new Error('Cette séance contient trop de présences pour une synchronisation atomique Firestore.');
   try{
-    presenceDebug('batch-write', {...event, sessionId}, {function:'presenceSaveEvent', origin:options.origin || 'unknown', transactionAttempt:0});
     const batch = firebaseFns.writeBatch(db);
     batch.set(sessionRef, {
         ...safeSessionPayload,
@@ -6193,6 +6196,10 @@ async function presenceSaveEvent(event={}, options={}){
     const syncError = new Error(classified[1]);
     syncError.code = classified[0];
     syncError.cause = error;
+    if(code.includes('permission-denied')) extendFirestoreDiagnostic(syncError, {
+      collection:'sessions,attendance', operation:'batch-write',
+      query:`sessions/${sessionId} + attendance rows`, teamIds:authorizedSessionTeamIds
+    });
     throw syncError;
   }
   invalidateAppDataCaches('presences');
