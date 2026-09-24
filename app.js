@@ -517,6 +517,20 @@ function presenceTeamIdRefs(...sources){
 function canAccessAnyPresenceTeam(...sources){
   return presenceTeamIdRefs(...sources).some(teamId => canAccessTeamId(teamId));
 }
+function presenceDebug(action, event={}, extra={}){
+  console.info('[CoachPulse Presence Debug]', {
+    function:extra.function || '',
+    action,
+    sessionId:String(event.sessionId || event.sessionSnapshot?.sessionId || ''),
+    eventId:String(event.id || event.eventId || ''),
+    teamId:String(event.teamId || event.teamSnapshot?.teamId || event.sessionSnapshot?.teamId || ''),
+    userTeamIds:getAuthorizedTeamIds(),
+    role:getCurrentUserRole(),
+    origin:extra.origin || '',
+    transactionAttempt:Number(extra.transactionAttempt || 0),
+    timestamp:new Date().toISOString()
+  });
+}
 function profilePresenceParseDate(value){
   const raw = String(value || '').trim();
   if(!raw) return null;
@@ -5982,16 +5996,23 @@ function presenceSubscribeEvents(onChange){
   const authorizedTeamIds = getAuthorizedTeamIds();
   if(!presenceSettingsAdminAllowed() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return () => {};
   const queries = [];
+  const queryDiagnostics = [];
   if(presenceSettingsAdminAllowed()){
     queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true)));
+    queryDiagnostics.push('createdFromPresenceModule == true');
     queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences')));
+    queryDiagnostics.push('source == Présences');
   }else{
     for(let i=0;i<authorizedTeamIds.length;i+=10){
       const chunk = authorizedTeamIds.slice(i,i+10);
       queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true), firebaseFns.where('teamId', 'in', chunk)));
+      queryDiagnostics.push(`createdFromPresenceModule == true AND teamId in [${chunk.join(',')}]`);
       queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('createdFromPresenceModule', '==', true), firebaseFns.where('teamIds', 'array-contains-any', chunk)));
+      queryDiagnostics.push(`createdFromPresenceModule == true AND teamIds array-contains-any [${chunk.join(',')}]`);
       queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences'), firebaseFns.where('teamId', 'in', chunk)));
+      queryDiagnostics.push(`source == Présences AND teamId in [${chunk.join(',')}]`);
       queries.push(firebaseFns.query(firebaseFns.collection(db, 'sessions'), firebaseFns.where('source', '==', 'Présences'), firebaseFns.where('teamIds', 'array-contains-any', chunk)));
+      queryDiagnostics.push(`source == Présences AND teamIds array-contains-any [${chunk.join(',')}]`);
     }
   }
   let initialized = 0;
@@ -6005,6 +6026,7 @@ function presenceSubscribeEvents(onChange){
     if(initialized++ >= queries.length) onChange();
     }, error => {
       try{ loadingOperation?.fail?.(error, loadingFailureContext(label, {diagnostic}, error)); }catch(_error){}
+      presenceDebug('listener-error', {}, {function:'presenceSubscribeEvents', origin:`sessions:${queryDiagnostics[index] || index + 1}`});
       console.warn('[Présences] Écoute temps réel indisponible', cleanError(error));
     });
     return {loadingOperation, unsubscribe};
@@ -6023,13 +6045,17 @@ function presenceSubscribeSettings(onChange){
     if(snap.exists()) onChange(firestoreSafeData(snap.data()?.value || {}));
   }, error => {
     try{ loadingOperation?.fail?.(error, loadingFailureContext('attendance-settings:listen', {diagnostic}, error)); }catch(_error){}
+    presenceDebug('listener-error', {}, {function:'presenceSubscribeSettings', origin:'settings/presence-module'});
     console.warn('[Présences] Écoute paramètres indisponible', cleanError(error));
   });
   return () => { try{ loadingOperation?.end?.(); }catch(_error){} return unsubscribe(); };
 }
-async function presenceSaveEvent(event={}){
+async function presenceSaveEvent(event={}, options={}){
   if(!canEditModule('presences')) throw new Error('Modification Présences non autorisée.');
-  if(!canAccessAnyPresenceTeam(event)) throw new Error('Accès non autorisé à cette équipe.');
+  if(!canAccessAnyPresenceTeam(event)){
+    presenceDebug('team-rejected', event, {function:'presenceSaveEvent', origin:options.origin || 'unknown'});
+    throw new Error('Accès non autorisé à cette équipe.');
+  }
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = presenceEventsService();
   const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
@@ -6044,7 +6070,6 @@ async function presenceSaveEvent(event={}){
     firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)))
   ]);
   if(deletionLogSnap.exists()) throw new Error('Cette séance a été supprimée définitivement et ne peut pas être recréée depuis un ancien cache.');
-  const localVersion = Date.parse(session.updatedAtIso || event.updatedAtIso || session.updatedAt || event.updatedAt || session.createdAt || event.createdAt || session.date || event.date || 0) || 0;
   const now = new Date().toISOString();
   const sessionTeamIds = presenceTeamIdRefs(session, event, session.teamSnapshot, event.teamSnapshot);
   const primaryTeamId = presenceTeamIdRefs(session.teamId || event.teamId, session, event).find(teamId => canAccessTeamId(teamId)) || session.teamId || event.teamId || sessionTeamIds[0] || '';
@@ -6091,20 +6116,13 @@ async function presenceSaveEvent(event={}){
   existingAttendanceSnap.forEach(docSnap => {
     if(!nextAttendanceIds.has(docSnap.id)) staleAttendanceRefs.push(firebaseFns.doc(db, 'attendance', docSnap.id));
   });
-  if(!firebaseFns.runTransaction) throw new Error('Synchronisation atomique Firebase indisponible.');
+  if(!firebaseFns.writeBatch) throw new Error('Synchronisation atomique Firebase indisponible.');
   const writeCount = 1 + attendanceRows.length + staleAttendanceRefs.length;
   if(writeCount > 500) throw new Error('Cette séance contient trop de présences pour une synchronisation atomique Firestore.');
   try{
-    await firebaseFns.runTransaction(db, async transaction => {
-      const latestSessionSnap = await transaction.get(sessionRef);
-      const cloudSession = latestSessionSnap.exists() ? latestSessionSnap.data() : {};
-      const cloudVersion = Date.parse(cloudSession.updatedAtIso || cloudSession.updatedAt?.toDate?.() || cloudSession.createdAtIso || cloudSession.date || 0) || 0;
-      if(latestSessionSnap.exists() && cloudVersion > localVersion){
-        const conflict = new Error('Une version cloud plus récente de cette séance a été conservée. Recharge les présences avant de réessayer.');
-        conflict.code = 'presence/version-conflict';
-        throw conflict;
-      }
-      transaction.set(sessionRef, {
+    presenceDebug('batch-write', {...event, sessionId}, {function:'presenceSaveEvent', origin:options.origin || 'unknown', transactionAttempt:0});
+    const batch = firebaseFns.writeBatch(db);
+    batch.set(sessionRef, {
         ...safeSessionPayload,
         id:sessionId,
         eventId:String(event.id || event.eventId || '').trim(),
@@ -6117,10 +6135,10 @@ async function presenceSaveEvent(event={}){
         updatedByEmail:currentUser.email || '',
         createdAtIso:session.createdAt || event.createdAt || now
       }, {merge:true});
-      staleAttendanceRefs.forEach(ref => transaction.delete(ref));
+      staleAttendanceRefs.forEach(ref => batch.delete(ref));
       attendanceRows.forEach(row => {
         const safeAttendancePayload = firestoreSafeData(row);
-        transaction.set(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
+        batch.set(firebaseFns.doc(db, 'attendance', row.attendanceId || row.id), {
           ...safeAttendancePayload,
           source:'Présences',
           createdFromPresenceModule:true,
@@ -6130,9 +6148,8 @@ async function presenceSaveEvent(event={}){
           updatedByEmail:currentUser.email || ''
         }, {merge:true});
       });
-    }, {maxAttempts:1});
+    await batch.commit();
   }catch(error){
-    if(error?.code === 'presence/version-conflict') throw error;
     const code = String(error?.code || '').toLowerCase();
     const classified = code === '8' || code.includes('resource-exhausted')
       ? ['presence/resource-exhausted', 'Quota Firestore temporairement dépassé (HTTP 429). La modification reste enregistrée localement et pourra être resynchronisée.']

@@ -709,11 +709,9 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(presenceListBody[0].includes("readWhere('attendance', 'teamId', 'in', chunk)"), 'Le chargement non-admin doit requêter attendance par teamId autorisé.');
   assert(presenceListBody[0].includes("readWhere('attendance', 'teamIds', 'array-contains-any', chunk)"), 'Le chargement non-admin doit requêter attendance par teamIds autorisés.');
   assert(presenceListBody[0].includes("authorizedSessionIds.has(String(row.sessionId || ''))"), 'Les présences bornées par équipe doivent ensuite être filtrées par séances autorisées.');
-  assert(appSource.includes('const latestSessionSnap = await transaction.get(sessionRef);'), 'La version cloud de la séance doit être relue dans la transaction Firestore.');
-  assert(rulesSource.includes("allow get: if canWriteSportData()\n        && canAccessModule('presences')\n        && !exists(/databases/$(database)/documents/sessions/$(sessionId));"), 'La transaction Présences doit pouvoir constater qu’une nouvelle séance n’existe pas encore sans élargir la lecture des séances existantes.');
-  assert(appSource.includes('if(latestSessionSnap.exists() && cloudVersion > localVersion)'), 'Une ancienne copie locale ne doit jamais écraser une séance cloud plus récente.');
-  assert(appSource.includes("if(!firebaseFns.runTransaction) throw new Error('Synchronisation atomique Firebase indisponible.')"), 'La sauvegarde Présences doit exiger une transaction Firestore atomique.');
-  assert(appSource.includes('await firebaseFns.runTransaction(db, async transaction => {'), 'La séance et ses présences doivent être sauvegardées dans la même transaction Firestore.');
+  assert(!appSource.includes('transaction.get(sessionRef)'), 'La sauvegarde Présences ne doit plus déclencher BatchGetDocuments.');
+  assert(appSource.includes("if(!firebaseFns.writeBatch) throw new Error('Synchronisation atomique Firebase indisponible.')"), 'La sauvegarde Présences doit exiger un batch Firestore atomique.');
+  assert(appSource.includes('const batch = firebaseFns.writeBatch(db);'), 'La séance et ses présences doivent être sauvegardées dans le même batch Firestore.');
   assert(appSource.includes("Cette séance a été supprimée définitivement"), 'Une séance supprimée ne doit pas pouvoir être recréée depuis un cache ancien.');
   const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
   assert(presencePageSource.includes('await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);'), 'Les suppressions historiques doivent être réconciliées au chargement du calendrier.');
@@ -870,7 +868,7 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   });
   assert.deepEqual(Array.from(statusRows, row => row.status), ['P','R','ANJ','AJ','M','B','PO','D'], 'Les statuts Présences doivent survivre à la normalisation avant écriture Firestore.');
   assert(presencePageSource.includes('function normalizePresenceEventForStorage'), 'La page Présences doit normaliser les événements avant stockage.');
-  assert(presencePageSource.includes('return api.presenceSaveEvent(normalized);'), 'La synchronisation cloud doit envoyer un événement normalisé.');
+  assert(presencePageSource.includes('return api.presenceSaveEvent(normalized, {origin});'), 'La synchronisation cloud doit envoyer un événement normalisé avec son origine.');
   assert(presencePageSource.includes('athletic:procedureMinutes'), 'La procédure Présences doit enregistrer le contenu Athlétique.');
   assert(presencePageSource.includes('theoretical:procedureMinutes'), 'La procédure Présences doit enregistrer le contenu Théorique.');
   assert(presencePageSource.includes('value.athletic ?? value.athletique'), 'La procédure Présences doit relire Athlétique avec rétrocompatibilité.');
@@ -1332,13 +1330,14 @@ function testPresenceRuntimeSaveGuards(){
 
   const appSource = fs.readFileSync('app.js', 'utf8');
   const presenceSource = fs.readFileSync('pages/presences.html', 'utf8');
-  assert(appSource.includes("session.updatedAt || event.updatedAt"), 'La version locale doit inclure la dernière modification de présence.');
+  assert(appSource.includes('updatedAtIso:now'), 'La sauvegarde doit horodater la dernière modification de présence.');
   assert(appSource.includes('const eventId = String(session.eventId || session.presenceEventId || sessionId).trim();'), 'La relecture cloud doit préserver l’eventId UI distinct du sessionId.');
   assert(appSource.includes("eventId:String(event.id || event.eventId || '').trim()"), 'La séance Firestore doit conserver le lien vers son événement UI.');
-  assert(appSource.includes("conflict.code = 'presence/version-conflict'"), 'Un vrai conflit cloud doit conserver un code dédié.');
+  assert(appSource.includes("const batch = firebaseFns.writeBatch(db)"), 'La sauvegarde Présences doit utiliser un batch atomique sans lecture transactionnelle.');
   assert(appSource.includes("'presence/resource-exhausted'"), 'HTTP 429/resource-exhausted doit être distingué d’un conflit cloud.');
   assert(appSource.includes("'presence/permission-denied'") && appSource.includes("'presence/network'"), 'Permissions et réseau doivent être distingués du conflit cloud.');
-  assert(appSource.includes('{maxAttempts:1}'), 'Une sauvegarde ne doit lancer qu’une tentative de transaction et un seul BatchGet côté SDK.');
+  assert(!appSource.includes('transaction.get(sessionRef)'), 'La sauvegarde ne doit plus déclencher BatchGetDocuments sur la séance.');
+  assert(appSource.includes("'[CoachPulse Presence Debug]'"), 'Le diagnostic Présences ciblé doit rester disponible pour le prochain test navigateur.');
   assert(presenceSource.includes('clearTimeout(presenceCloudSaveTimers.get(eventId))'), 'Les changements rapprochés doivent être dédupliqués avant sauvegarde.');
   assert(presenceSource.includes('const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve()'), 'Deux sauvegardes du même événement ne doivent pas être concurrentes.');
   assert(appSource.includes('canEditModule(\'presences\')') && appSource.includes('canAccessAnyPresenceTeam(event)'), 'Admin et coach autorisé doivent rester contrôlés par les permissions et le scope équipe existants.');
