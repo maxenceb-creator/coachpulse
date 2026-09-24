@@ -252,6 +252,25 @@
     }
     return kept;
   }
+  function compactStoredEvents(events=[], options={}){
+    const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : 1536 * 1024;
+    const rows = Array.isArray(events) ? events.filter(event => eventId(event)) : [];
+    const pending = rows.filter(event => !text(event.cloudSyncedAt));
+    const synced = rows
+      .filter(event => text(event.cloudSyncedAt))
+      .sort((a,b) => (Date.parse(b.updatedAt || b.createdAt || b.cloudSyncedAt || 0) || 0) - (Date.parse(a.updatedAt || a.createdAt || a.cloudSyncedAt || 0) || 0));
+    const kept = [...pending, ...synced];
+    const bytes = value => {
+      try{ return new TextEncoder().encode(JSON.stringify(value)).length; }
+      catch(_error){ return JSON.stringify(value).length; }
+    };
+    while(synced.length && bytes(kept) > maxBytes){
+      const removed = synced.pop();
+      const index = kept.indexOf(removed);
+      if(index >= 0) kept.splice(index, 1);
+    }
+    return kept;
+  }
   function uniqueRows(rows=[], keyFn){
     return [...new Map(rows.map(row => [keyFn(row), row])).values()];
   }
@@ -280,6 +299,7 @@
   global.CoachPulsePresenceEventsService = {
     STORAGE_KEY,
     readEvents,
+    compactStoredEvents,
     sessionFromEvent,
     teamIdsFromEvent,
     attendanceRowsFromEvent,

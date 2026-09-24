@@ -351,6 +351,46 @@ async function testScopedPlayerReadFiltersInFirestore(){
   assert.equal(unscopedReads, 0, 'Un entraîneur limité ne doit jamais télécharger toute la collection players.');
 }
 
+async function testHomeDashboardTeamReadStaysScoped(){
+  teams.invalidateTeamsCache();
+  const authorizedTeamId = teams.canonicalTeamId('U13 A');
+  const forbiddenTeamId = teams.canonicalTeamId('U16 A');
+  const rows = [
+    {id:authorizedTeamId, data:{teamId:authorizedTeamId, name:'U13 A'}},
+    {id:forbiddenTeamId, data:{teamId:forbiddenTeamId, name:'U16 A'}}
+  ];
+  let globalReads = 0;
+  let allowGlobalRead = false;
+  const queriedIds = [];
+  const firebaseFns = {
+    collection(_db, name){ return {name}; },
+    documentId(){ return '__name__'; },
+    where(field, operator, value){ return {field, operator, value}; },
+    query(collection, constraint){ return {collection, constraint}; },
+    async getDocs(ref){
+      if(ref.name){
+        globalReads++;
+        if(!allowGlobalRead) throw new Error('Missing or insufficient permissions.');
+        return snapshot(rows);
+      }
+      queriedIds.push(...ref.constraint.value);
+      return snapshot(rows.filter(row => ref.constraint.value.includes(row.id)));
+    }
+  };
+  function snapshot(source){ return {forEach(callback){ source.forEach(row => callback({id:row.id, data:()=>row.data})); }}; }
+
+  const staffRows = await teams.listTeams({firebaseFns, db:{}, accessAllTeams:false, authorizedTeamIds:[authorizedTeamId]}, {includeArchived:true});
+  assert.equal(globalReads, 0, 'Le chargement normal du dashboard non-admin ne doit pas lancer la query globale teams refusée par Firestore.');
+  assert.deepEqual(queriedIds, [authorizedTeamId], 'La query teams doit garantir le périmètre autorisé dans Firestore.');
+  assert(staffRows.some(team => team.teamId === authorizedTeamId), 'L’équipe autorisée doit rester disponible.');
+
+  teams.invalidateTeamsCache();
+  allowGlobalRead = true;
+  await teams.listTeams({firebaseFns, db:{}, accessAllTeams:true}, {includeArchived:true});
+  assert.equal(globalReads, 1, 'Le compte ADMIN doit conserver la lecture globale autorisée.');
+  teams.invalidateTeamsCache();
+}
+
 async function testPresenceScopedRosterSurvivesColdReloadReconnect(){
   const u13a = teams.canonicalTeamId('U13 A');
   const u13b = teams.canonicalTeamId('U13 B');
@@ -653,6 +693,22 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes("sessionId.startsWith('xlsx-')"), 'Les anciennes séances xlsx 2025-2026 doivent être reconnues pour la purge cloud.');
   assert(appSource.includes("firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId)"), 'La suppression atomique doit écrire son journal dans Firebase.');
   assert(appSource.includes("const [deletionLogSnap, existingAttendanceSnap] = await Promise.all(["), 'La sauvegarde Présences doit lire ensemble le tombstone et les présences existantes.');
+  assert(appSource.includes("if(!includeRetiredPresenceSeasons || !presenceSettingsAdminAllowed()) return [];"), 'La purge historique globale Présences ne doit jamais être lancée pour un compte non-admin.');
+  const presenceListBody = appSource.match(/async function presenceListEvents[\s\S]*?\nfunction presenceSettingsAdminAllowed/);
+  assert(presenceListBody && !presenceListBody[0].includes('isAdmin()'), 'Le flux Présences ne doit pas confondre gestionnaire de données et ADMIN Firestore.');
+  assert(appSource.includes('if(presenceSettingsAdminAllowed()){'), 'Seul un ADMIN Firestore doit ouvrir une écoute Présences globale.');
+  assert(appSource.includes('accessAllPlayers:isAdmin()'), 'L’actualisation automatique des joueuses doit rester bornée aux teams pour un coach.');
+  assert(appSource.includes('authorizedTeamIds:getAuthorizedTeamIds()'), 'L’actualisation automatique doit transmettre les teamIds autorisés au service joueuses.');
+  assert(appSource.includes("const activeTool = storage.get('coachpulse:lastTool', 'home');"), 'Le contrôle de route après mise à jour du profil doit utiliser la route mémorisée.');
+  assert(!appSource.includes('if(currentTool && !canAccessTool(currentTool))'), 'La variable currentTool inexistante ne doit plus être référencée.');
+  assert(rulesSource.includes("modules.hasAny(['database', 'players', 'playerProfile', 'presences'])"), 'La lecture cloisonnée des joueuses doit reconnaître le module players.');
+  assert(rulesSource.includes('allow list: if canListPlayerRecords(resource.data);'), 'Les requêtes players doivent utiliser une règle de liste explicitement cloisonnée.');
+  const attendanceListRule = rulesSource.match(/function canListAttendanceByTeam\(data\)[\s\S]*?\n    }/)?.[0] || '';
+  assert(attendanceListRule.includes("data.get('teamId', '')") && attendanceListRule.includes("data.get('teamIds', [])"), 'La liste attendance doit borner chaque champ équipe optionnel avec une valeur par défaut.');
+  assert(!attendanceListRule.includes("linkedTeamMatches('sessions'"), 'La liste attendance ne doit effectuer aucune lecture documentaire de session dans les Rules.');
+  assert(presenceListBody[0].includes("readWhere('attendance', 'teamId', 'in', chunk)"), 'Le chargement non-admin doit requêter attendance par teamId autorisé.');
+  assert(presenceListBody[0].includes("readWhere('attendance', 'teamIds', 'array-contains-any', chunk)"), 'Le chargement non-admin doit requêter attendance par teamIds autorisés.');
+  assert(presenceListBody[0].includes("authorizedSessionIds.has(String(row.sessionId || ''))"), 'Les présences bornées par équipe doivent ensuite être filtrées par séances autorisées.');
   assert(appSource.includes('const latestSessionSnap = await transaction.get(sessionRef);'), 'La version cloud de la séance doit être relue dans la transaction Firestore.');
   assert(rulesSource.includes("allow get: if canWriteSportData()\n        && canAccessModule('presences')\n        && !exists(/databases/$(database)/documents/sessions/$(sessionId));"), 'La transaction Présences doit pouvoir constater qu’une nouvelle séance n’existe pas encore sans élargir la lecture des séances existantes.');
   assert(appSource.includes('if(latestSessionSnap.exists() && cloudVersion > localVersion)'), 'Une ancienne copie locale ne doit jamais écraser une séance cloud plus récente.');
@@ -800,6 +856,11 @@ function testPresenceEventsStayLinkedToPlayerAndTeamIds(){
   assert.equal(byTeam.attendance[1].status, 'AJ');
   assert.equal(byPlayer.sessions[0].teamId, 'team-u13-a');
   assert.equal(byPlayer.attendance[0].playerSnapshot.playerId, 'player-a');
+  const pendingLarge = {id:'pending', updatedAt:'2026-09-24T10:00:00Z', attendance:{p:{comment:'x'.repeat(500)}}};
+  const syncedRows = Array.from({length:6}, (_, index) => ({id:`synced-${index}`, updatedAt:`2026-09-2${index}T10:00:00Z`, cloudSyncedAt:'2026-09-24T11:00:00Z', attendance:{p:{comment:'x'.repeat(500)}}}));
+  const compacted = window.CoachPulsePresenceEventsService.compactStoredEvents([pendingLarge, ...syncedRows], {maxBytes:1800});
+  assert(compacted.some(event => event.id === 'pending'), 'Le compactage local ne doit jamais supprimer un événement pending/non synchronisé.');
+  assert(compacted.length < 7, 'Le compactage local doit purger les événements synchronisés les plus anciens sous quota.');
   const statusRows = window.CoachPulsePresenceEventsService.attendanceRowsFromEvent({
     id:'presence-status-roundtrip',
     date:'2026-09-17',
@@ -1133,6 +1194,26 @@ function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
   assert(appSource.includes("safeLoadingCall('start', ['cloud:listen'"), 'Le premier snapshot cloud doit être observé sans remplacer onSnapshot.');
 }
 
+function testFirestorePermissionDiagnosticKeepsSafeOperationContext(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const indicatorSource = fs.readFileSync('shared/ui/global-loading-indicator.js', 'utf8');
+  const diagnosticSource = appSource.match(/function firebasePermissionDenied[\s\S]*?\nfunction recordPerfEvent/)?.[0]?.replace(/\nfunction recordPerfEvent$/, '') || '';
+  const context = vm.createContext({getCurrentUserRole:() => 'ENTRAINEUR'});
+  vm.runInContext(`${diagnosticSource}; this.decorate = attachFirestoreDiagnostic; this.context = loadingFailureContext;`, context);
+  const error = Object.assign(new Error('Missing or insufficient permissions.'), {code:'firestore/permission-denied'});
+  context.decorate(error, {type:'query', _query:{path:{segments:['players']}}}, 'query');
+  const result = context.context('dashboard:players', {diagnostic:{function:'refreshPlayers', module:'dashboard', scope:'team', teamId:'team-u13'}}, error).diagnostic;
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    task:'dashboard:players', function:'refreshPlayers', collection:'players', operation:'query', module:'dashboard',
+    scope:'team', teamId:'team-u13', role:'ENTRAINEUR', firebaseCode:'firestore/permission-denied',
+    firebaseMessage:'Missing or insufficient permissions.'
+  }, 'Le permission-denied doit conserver le contexte précis jusqu’à operation.fail().');
+  assert(!('email' in result) && !('token' in result) && !('document' in result), 'Le diagnostic ne doit contenir aucune donnée sensible ni contenu Firestore.');
+  assert(indicatorSource.includes("console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic)"), 'Le diagnostic Firestore doit avoir un préfixe console stable.');
+  assert(indicatorSource.includes('Erreur de synchronisation${lastError?.diagnosticRef'), 'L’interface doit conserver le message courant et ajouter la référence technique.');
+  assert(indicatorSource.includes('permissionDenied && diagnostic'), 'Les détails techniques ne doivent être produits que pour permission-denied.');
+}
+
 async function testPresenceLoadingBoundaryReturnsSameRows(){
   const appSource = fs.readFileSync('app.js', 'utf8');
   const trackerSource = appSource.match(/function safeLoadingCall[\s\S]*?\n}\nasync function trackLoadingTask[\s\S]*?\n}/)?.[0] || '';
@@ -1202,6 +1283,7 @@ function testFirestorePayloadBoundary(){
   const managedKeysSource = appSource.match(/const FIRESTORE_MANAGED_LOCAL_KEYS = new Set\([\s\S]*?\n\]\);/)?.[0] || '';
   const localOnlyKeysSource = appSource.match(/const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set\([\s\S]*?\n\]\);/)?.[0] || '';
   const collectLocalStorageSource = appSource.match(/function collectLocalStorage\(\)[\s\S]*?\n}/)?.[0] || '';
+  const mergedCommonBaseItemsSource = appSource.match(/function mergedCommonBaseItems\([\s\S]*?\n}/)?.[0] || '';
   const commonBaseContext = vm.createContext({
     storage:{
       entries({exclude}){
@@ -1214,18 +1296,19 @@ function testFirestorePayloadBoundary(){
       }
     }
   });
-  vm.runInContext(`${managedKeysSource}\n${localOnlyKeysSource}\n${collectLocalStorageSource}\nthis.result = collectLocalStorage();`, commonBaseContext);
+  vm.runInContext(`${managedKeysSource}\n${localOnlyKeysSource}\n${collectLocalStorageSource}\n${mergedCommonBaseItemsSource}\nthis.result = collectLocalStorage();\nthis.merged = mergedCommonBaseItems({presenceSeanceV3_6_Excel:'large', 'coachpulse:presenceEvents:v1':'large', legacyPreference:'preserved'}, this.result);`, commonBaseContext);
   assert.deepEqual(Object.keys(commonBaseContext.result), ['coachpulse:ordinary-setting'], 'Les historiques Match et Présences gérés par collections ne doivent plus entrer dans common_base.');
-  assert(appSource.includes("const safePayload = firestorePayloadService.prepare(payload, {rootPath:'$', maxBytes:950 * 1024});"), 'La synchronisation globale doit nettoyer et borner le document juste avant setDoc.');
+  assert.deepEqual(Object.keys(commonBaseContext.merged).sort(), ['coachpulse:ordinary-setting', 'legacyPreference'], 'La reconstruction doit retirer les copies Présences normalisées sans perdre les autres données legacy.');
+  assert(appSource.includes("const safePayload = firestorePayloadService.prepare(mergedPayload, {rootPath:'$', maxBytes:900 * 1024});"), 'La synchronisation globale doit nettoyer et borner le document complet juste avant écriture.');
   assert(appSource.includes('...safePayload,'), 'setDoc doit recevoir le payload reconstruit, jamais le payload brut.');
   assert(appSource.includes("key.startsWith('firestore_')"), 'Les clés internes IndexedDB/Firestore ne doivent jamais être sauvegardées comme données métier.');
   assert(appSource.includes("'presenceSeanceV3_6_Excel',\n  'coachpulse:presenceEvents:v1'"), 'Le fichier Présences historique et le cache moderne doivent être gérés hors du document agrégé.');
   assert(appSource.includes("'coachStatsV170',"), 'L’état Match doit être géré par matches/matchEvents et exclu du document agrégé.');
-  assert(appSource.includes("'items.coachStatsV170':firebaseFns.deleteField()"), 'L’ancienne copie Match doit être supprimée de common_base pour libérer sa taille.');
+  assert(appSource.includes('items:mergedCommonBaseItems(existingItems, payload.items)'), 'La map common_base doit être reconstruite sans les copies déjà normalisées.');
   assert(appSource.includes('!FIRESTORE_MANAGED_LOCAL_KEYS.has(k)'), 'Une ancienne copie cloud ne doit pas réinjecter un état métier géré par collection.');
   assert(appSource.includes('|| FIRESTORE_MANAGED_LOCAL_KEYS.has(key)'), 'Les données déjà fractionnées dans les collections centrales doivent être exclues de common_base.');
   assert(!appSource.includes('PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS'), 'Aucune exception ne doit réinjecter les données Présences dans le document Firestore unique.');
-  assert(appSource.includes('firebaseFns.setDoc(ref, cloudDocument, {merge:true})'), 'La synchronisation legacy ne doit supprimer aucune clé common_base existante.');
+  assert(appSource.includes('firebaseFns.updateDoc(ref, cloudDocument)'), 'Un document existant doit remplacer sa map items afin de réellement retirer les copies normalisées volumineuses.');
   assert(appSource.includes("e?.name === 'FirestorePayloadError' && debugPerfEnabled()"), 'Le diagnostic détaillé doit rester réservé au mode debug.');
   assert(appSource.includes("collection:'coachpulse_common_base'"), 'Le diagnostic doit identifier la collection exacte.');
 }
@@ -1266,11 +1349,13 @@ testPerformanceCriticalPathStaysNonBlocking();
 testTechnicalHistoryCompatibilityAndScoping();
 testMatchCloudSyncIsOfflineFirstAndIdempotent();
 testLoadingIndicatorCannotReplaceFirebaseDataApi();
+testFirestorePermissionDiagnosticKeepsSafeOperationContext();
 testFirestorePayloadBoundary();
 
 Promise.resolve()
   .then(testPresenceLoadingBoundaryReturnsSameRows)
   .then(testScopedPlayerReadFiltersInFirestore)
+  .then(testHomeDashboardTeamReadStaysScoped)
   .then(testPresenceScopedRosterSurvivesColdReloadReconnect)
   .then(testMeasurementSaveWithoutSelectedInjuryPersistsAfterReload)
   .then(testPlayerProfileDataFallsBackToSelectedPlayerOnly)

@@ -295,7 +295,7 @@ service cloud.firestore {
         && (
           ((level == 'ADMIN' || (hasScopeFields(data) && scopedTeams(data).hasAny(teams)))
             && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0
-              || modules.hasAny(['database', 'playerProfile', 'presences'])))
+              || modules.hasAny(['database', 'players', 'playerProfile', 'presences'])))
           || level == 'ADMIN'
           || staffRole == 'ADMIN'
           || (scopes is map && (
@@ -308,6 +308,35 @@ service cloud.firestore {
             || moduleScopeHasAllPlayers(scopes, 'teamProfile')
           ))
         );
+    }
+
+    function canListPlayerRecords(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      let playerIds = profileListFrom(profile, 'playerIds');
+      let allowedPlayerIds = profileListFrom(profile, 'allowedPlayerIds');
+      let scopes = profile.get('moduleScopes', {});
+      let allPlayers = level == 'ADMIN' || staffRole == 'ADMIN'
+        || (scopes is map && (
+          moduleScopeHasAllPlayers(scopes, 'players')
+          || moduleScopeHasAllPlayers(scopes, 'database')
+          || moduleScopeHasAllPlayers(scopes, 'playerProfile')
+          || moduleScopeHasAllPlayers(scopes, 'presences')
+        ));
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && (playerIds.size() == 0 && allowedPlayerIds.size() == 0 || allPlayers)
+        && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0
+          || modules.hasAny(['database', 'players', 'playerProfile', 'presences']))
+        && (allPlayers
+          || teams.hasAny([data.get('teamId', '')])
+          || data.get('teamIds', []).hasAny(teams)
+          || data.get('rosterTeamIds', []).hasAny(teams));
     }
 
     function canWriteDirectModuleData(moduleId, before, after) {
@@ -403,8 +432,8 @@ service cloud.firestore {
         && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
         && moduleAllowedFrom(modules, level, staffRole, 'presences')
         && (level == 'ADMIN'
-          || teams.hasAny([data.teamId])
-          || data.teamIds.hasAny(teams));
+          || teams.hasAny([data.get('teamId', '')])
+          || data.get('teamIds', []).hasAny(teams));
     }
 
     function canAccessTechnicalTestScope(data, teams, allPlayers) {
@@ -529,7 +558,8 @@ service cloud.firestore {
     }
 
     match /players/{playerId} {
-      allow read: if canReadPlayerRecord(playerId, resource.data);
+      allow get: if canReadPlayerRecord(playerId, resource.data);
+      allow list: if canListPlayerRecords(resource.data);
       allow create: if canManageCoreData()
         && canAccessModule('database')
         && request.resource.data.playerId == playerId

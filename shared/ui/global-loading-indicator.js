@@ -98,7 +98,7 @@
       badge.textContent = '✓';
       root.title = 'Toutes les opérations sont terminées.';
     }else if(state === 'error'){
-      label.textContent = lastError?.offline ? 'Hors ligne · local actif' : 'Erreur de synchronisation';
+      label.textContent = lastError?.offline ? 'Hors ligne · local actif' : `Erreur de synchronisation${lastError?.diagnosticRef ? ` — diagnostic: ${lastError.diagnosticRef}` : ''}`;
       detail.textContent = lastError?.message || 'Données locales disponibles — synchronisation impossible';
       badge.textContent = '!';
       root.title = `${label.textContent} — cliquer pour les détails`;
@@ -132,7 +132,7 @@
 
   function start(label='operation', options={}){
     const id = `cp-op-${++sequence}`;
-    const row = {id, label:String(label || 'operation'), kind:options.kind === 'loading' ? 'loading' : 'sync', startedAt:Date.now()};
+    const row = {id, label:String(label || 'operation'), kind:options.kind === 'loading' ? 'loading' : 'sync', diagnostic:options.diagnostic || null, startedAt:Date.now()};
     operations.set(id, row);
     if(debugEnabled()) console.info('[CoachPulse Loading] active operations:', debugDetail(activeRows()));
     scheduleActiveDisplay();
@@ -147,7 +147,7 @@
         if(debugEnabled()) console.info('[CoachPulse Loading] active operations:', debugDetail(activeRows()) || 'none');
         finishDisplay();
       },
-      fail(error, failureOptions={}){ if(ended) return; ended = true; operations.delete(id); reportError(error, {...failureOptions, label:row.label}); }
+      fail(error, failureOptions={}){ if(ended) return; ended = true; operations.delete(id); reportError(error, {...failureOptions, diagnostic:failureOptions.diagnostic || row.diagnostic, label:row.label}); }
     };
   }
 
@@ -163,7 +163,21 @@
     clearTimer('show');
     clearTimer('hide');
     const raw = String(options.message || error?.message || error || 'Données locales disponibles — synchronisation impossible');
-    lastError = {message:raw, label:options.label || '', offline:options.offline === true, at:Date.now()};
+    const diagnostic = options.diagnostic && typeof options.diagnostic === 'object' ? options.diagnostic : null;
+    const permissionDenied = String(diagnostic?.firebaseCode || error?.code || '').toLowerCase().includes('permission-denied')
+      || String(diagnostic?.firebaseMessage || error?.message || '').toLowerCase().includes('missing or insufficient permissions');
+    if(permissionDenied && diagnostic){
+      const safeDiagnostic = {
+        task:String(diagnostic.task || options.label || 'operation'), function:String(diagnostic.function || 'unknown'),
+        collection:String(diagnostic.collection || 'unknown'), operation:String(diagnostic.operation || 'unknown'),
+        module:String(diagnostic.module || 'app'), scope:String(diagnostic.scope || 'unknown'),
+        ...(diagnostic.teamId ? {teamId:String(diagnostic.teamId)} : {}), role:String(diagnostic.role || 'unknown'),
+        firebaseCode:String(diagnostic.firebaseCode || error?.code || 'unknown'),
+        firebaseMessage:String(diagnostic.firebaseMessage || error?.message || error || 'unknown')
+      };
+      console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic);
+    }
+    lastError = {message:raw, label:options.label || '', diagnosticRef:permissionDenied ? String(diagnostic?.task || options.label || '') : '', offline:options.offline === true, at:Date.now()};
     expanded = false;
     render();
     setVisible(true);
