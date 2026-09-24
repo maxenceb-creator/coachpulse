@@ -692,7 +692,7 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes('function isRetiredPresenceImportSession'), 'Le module Présences doit pouvoir purger les anciennes séances importées 2025-2026.');
   assert(appSource.includes("sessionId.startsWith('xlsx-')"), 'Les anciennes séances xlsx 2025-2026 doivent être reconnues pour la purge cloud.');
   assert(appSource.includes("firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId)"), 'La suppression atomique doit écrire son journal dans Firebase.');
-  assert(appSource.includes("const [deletionLogSnap, existingAttendanceSnap] = await Promise.all(["), 'La sauvegarde Présences doit lire ensemble le tombstone et les présences existantes.');
+  assert(appSource.includes("const [deletionLogSnap, attendanceResults] = await Promise.all(["), 'La sauvegarde Présences doit lire ensemble le tombstone et les présences existantes bornées par équipe.');
   assert(appSource.includes("if(!includeRetiredPresenceSeasons || !presenceSettingsAdminAllowed()) return [];"), 'La purge historique globale Présences ne doit jamais être lancée pour un compte non-admin.');
   const presenceListBody = appSource.match(/async function presenceListEvents[\s\S]*?\nfunction presenceSettingsAdminAllowed/);
   assert(presenceListBody && !presenceListBody[0].includes('isAdmin()'), 'Le flux Présences ne doit pas confondre gestionnaire de données et ADMIN Firestore.');
@@ -1202,12 +1202,13 @@ function testFirestorePermissionDiagnosticKeepsSafeOperationContext(){
   context.decorate(error, {type:'query', _query:{path:{segments:['players']}}}, 'query');
   const result = context.context('dashboard:players', {diagnostic:{function:'refreshPlayers', module:'dashboard', scope:'team', teamId:'team-u13'}}, error).diagnostic;
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    task:'dashboard:players', function:'refreshPlayers', collection:'players', operation:'query', module:'dashboard',
+    task:'dashboard:players', coachPulseFunction:'refreshPlayers', collection:'players', operation:'query', module:'dashboard',
     scope:'team', teamId:'team-u13', role:'ENTRAINEUR', firebaseCode:'firestore/permission-denied',
     firebaseMessage:'Missing or insufficient permissions.'
   }, 'Le permission-denied doit conserver le contexte précis jusqu’à operation.fail().');
   assert(!('email' in result) && !('token' in result) && !('document' in result), 'Le diagnostic ne doit contenir aucune donnée sensible ni contenu Firestore.');
   assert(indicatorSource.includes("console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic)"), 'Le diagnostic Firestore doit avoir un préfixe console stable.');
+  assert(indicatorSource.includes('coachPulseFunction:String(') && indicatorSource.includes('teamIds:diagnostic.teamIds.map'), 'Le diagnostic doit afficher directement la fonction et les teamIds sans donnée personnelle.');
   assert(indicatorSource.includes('Erreur de synchronisation${lastError?.diagnosticRef'), 'L’interface doit conserver le message courant et ajouter la référence technique.');
   assert(indicatorSource.includes('permissionDenied && diagnostic'), 'Les détails techniques ne doivent être produits que pour permission-denied.');
 }
@@ -1337,6 +1338,8 @@ function testPresenceRuntimeSaveGuards(){
   assert(appSource.includes("'presence/resource-exhausted'"), 'HTTP 429/resource-exhausted doit être distingué d’un conflit cloud.');
   assert(appSource.includes("'presence/permission-denied'") && appSource.includes("'presence/network'"), 'Permissions et réseau doivent être distingués du conflit cloud.');
   assert(!appSource.includes('transaction.get(sessionRef)'), 'La sauvegarde ne doit plus déclencher BatchGetDocuments sur la séance.');
+  assert(!appSource.includes("where('sessionId', '==', sessionId)"), 'Un Coach ne doit jamais lister attendance globalement par sessionId.');
+  assert(appSource.includes("operation:'list', query:item.label, teamIds:item.teamIds"), 'Le diagnostic existant doit préciser la query attendance refusée et ses équipes.');
   assert(appSource.includes("'[CoachPulse Presence Debug]'"), 'Le diagnostic Présences ciblé doit rester disponible pour le prochain test navigateur.');
   assert(presenceSource.includes('clearTimeout(presenceCloudSaveTimers.get(eventId))'), 'Les changements rapprochés doivent être dédupliqués avant sauvegarde.');
   assert(presenceSource.includes('const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve()'), 'Deux sauvegardes du même événement ne doivent pas être concurrentes.');

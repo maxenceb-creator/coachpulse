@@ -122,6 +122,14 @@ function attachFirestoreDiagnostic(error, reference, operation){
   catch(_error){ try{ error.__coachPulseFirestoreDiagnostic = detail; }catch(_ignored){} }
   return error;
 }
+function extendFirestoreDiagnostic(error, detail={}){
+  if(!firebasePermissionDenied(error) || !error || typeof error !== 'object') return error;
+  const current = error.__coachPulseFirestoreDiagnostic || {};
+  const next = {...current, ...detail};
+  try{ Object.defineProperty(error, '__coachPulseFirestoreDiagnostic', {value:next, configurable:true}); }
+  catch(_error){ try{ error.__coachPulseFirestoreDiagnostic = next; }catch(_ignored){} }
+  return error;
+}
 function installFirestorePermissionDiagnostics(){
   if(!firebaseFns || firebaseFns.__coachpulsePermissionDiagnostics) return;
   const promiseOperations = {getDoc:'get', getDocs:reference => reference?.type === 'collection' ? 'list' : 'query', addDoc:'write', setDoc:'write', updateDoc:'write', deleteDoc:'write'};
@@ -159,11 +167,14 @@ function loadingFailureContext(label, options={}, error){
   const firestore = error?.__coachPulseFirestoreDiagnostic || {};
   const diagnostic = options.diagnostic || {};
   const teamId = String(typeof diagnostic.teamId === 'function' ? diagnostic.teamId() : (diagnostic.teamId || '')).trim();
+  const teamIds = Array.isArray(firestore.teamIds) ? firestore.teamIds : (Array.isArray(diagnostic.teamIds) ? diagnostic.teamIds : []);
   return {diagnostic:{
-    task:String(label || 'operation'), function:String(diagnostic.function || 'unknown'),
+    task:String(label || 'operation'), coachPulseFunction:String(diagnostic.function || 'unknown'),
     collection:String(firestore.collection || diagnostic.collection || 'unknown'),
     operation:String(firestore.operation || diagnostic.operation || 'unknown'), module:String(diagnostic.module || 'app'),
-    scope:String(diagnostic.scope || (teamId ? 'team' : 'user')), ...(teamId ? {teamId} : {}),
+    scope:String(diagnostic.scope || (teamId || teamIds.length ? 'team' : 'user')), ...(teamId ? {teamId} : {}),
+    ...(teamIds.length ? {teamIds:teamIds.map(value => String(value))} : {}),
+    ...(firestore.query ? {query:String(firestore.query)} : {}),
     role:String(getCurrentUserRole?.() || 'unknown'), firebaseCode:String(error?.code || 'unknown'),
     firebaseMessage:String(error?.message || error || 'unknown')
   }};
@@ -6065,13 +6076,29 @@ async function presenceSaveEvent(event={}, options={}){
   }
   const deletionLogId = sessionId;
   const sessionRef = firebaseFns.doc(db, 'sessions', sessionId);
-  const [deletionLogSnap, existingAttendanceSnap] = await Promise.all([
+  const sessionTeamIds = presenceTeamIdRefs(session, event, session.teamSnapshot, event.teamSnapshot);
+  const authorizedSessionTeamIds = [...new Set(sessionTeamIds.filter(teamId => canAccessTeamId(teamId)))];
+  const attendanceQueries = [];
+  for(let i=0;i<authorizedSessionTeamIds.length;i+=10){
+    const chunk = authorizedSessionTeamIds.slice(i, i + 10);
+    attendanceQueries.push({
+      query:firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('teamId', 'in', chunk)),
+      label:`teamId in [${chunk.join(',')}]`, teamIds:chunk
+    });
+    attendanceQueries.push({
+      query:firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('teamIds', 'array-contains-any', chunk)),
+      label:`teamIds array-contains-any [${chunk.join(',')}]`, teamIds:chunk
+    });
+  }
+  const [deletionLogSnap, attendanceResults] = await Promise.all([
     firebaseFns.getDoc(firebaseFns.doc(db, 'presenceDeletionLogs', deletionLogId)),
-    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'attendance'), firebaseFns.where('sessionId', '==', sessionId)))
+    Promise.all(attendanceQueries.map(async item => {
+      try{ return await firebaseFns.getDocs(item.query); }
+      catch(error){ throw extendFirestoreDiagnostic(error, {collection:'attendance', operation:'list', query:item.label, teamIds:item.teamIds}); }
+    }))
   ]);
   if(deletionLogSnap.exists()) throw new Error('Cette séance a été supprimée définitivement et ne peut pas être recréée depuis un ancien cache.');
   const now = new Date().toISOString();
-  const sessionTeamIds = presenceTeamIdRefs(session, event, session.teamSnapshot, event.teamSnapshot);
   const primaryTeamId = presenceTeamIdRefs(session.teamId || event.teamId, session, event).find(teamId => canAccessTeamId(teamId)) || session.teamId || event.teamId || sessionTeamIds[0] || '';
   const sessionPayload = {
     ...session,
@@ -6113,7 +6140,12 @@ async function presenceSaveEvent(event={}, options={}){
     .filter(row => canAccessAnyPresenceTeam(row, row.playerSnapshot, row.sessionSnapshot, sessionTeamIds));
   const nextAttendanceIds = new Set(attendanceRows.map(row => row.attendanceId || row.id).filter(Boolean));
   const staleAttendanceRefs = [];
-  existingAttendanceSnap.forEach(docSnap => {
+  const existingAttendanceDocs = [...new Map(attendanceResults.flatMap(snap => {
+    const docs = [];
+    snap.forEach(docSnap => { if(String(docSnap.data()?.sessionId || '') === sessionId) docs.push([docSnap.id, docSnap]); });
+    return docs;
+  })).values()];
+  existingAttendanceDocs.forEach(docSnap => {
     if(!nextAttendanceIds.has(docSnap.id)) staleAttendanceRefs.push(firebaseFns.doc(db, 'attendance', docSnap.id));
   });
   if(!firebaseFns.writeBatch) throw new Error('Synchronisation atomique Firebase indisponible.');

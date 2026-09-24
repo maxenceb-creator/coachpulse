@@ -168,10 +168,12 @@
       || String(diagnostic?.firebaseMessage || error?.message || '').toLowerCase().includes('missing or insufficient permissions');
     if(permissionDenied && diagnostic){
       const safeDiagnostic = {
-        task:String(diagnostic.task || options.label || 'operation'), function:String(diagnostic.function || 'unknown'),
+        task:String(diagnostic.task || options.label || 'operation'), coachPulseFunction:String(diagnostic.coachPulseFunction || diagnostic.function || 'unknown'),
         collection:String(diagnostic.collection || 'unknown'), operation:String(diagnostic.operation || 'unknown'),
         module:String(diagnostic.module || 'app'), scope:String(diagnostic.scope || 'unknown'),
         ...(diagnostic.teamId ? {teamId:String(diagnostic.teamId)} : {}), role:String(diagnostic.role || 'unknown'),
+        ...(Array.isArray(diagnostic.teamIds) ? {teamIds:diagnostic.teamIds.map(value => String(value))} : {}),
+        ...(diagnostic.query ? {query:String(diagnostic.query)} : {}),
         firebaseCode:String(diagnostic.firebaseCode || error?.code || 'unknown'),
         firebaseMessage:String(diagnostic.firebaseMessage || error?.message || error || 'unknown')
       };
