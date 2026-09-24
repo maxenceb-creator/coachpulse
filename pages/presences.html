@@ -2231,12 +2231,12 @@
           if(isPresenceAdmin() && api?.presenceSaveSettings) api.presenceSaveSettings(next).catch(error => console.warn("[Présences] Synchronisation des suppressions différée", error));
         }
       }
-      async function pushPresenceEventToCloud(event){
+      async function pushPresenceEventToCloud(event, origin="direct"){
         const api = centralDataApi();
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
         const normalized = normalizePresenceEventForStorage(event);
         if(!normalized.teamId) throw new Error("teamId obligatoire pour synchroniser l'événement.");
-        return api.presenceSaveEvent(normalized);
+        return api.presenceSaveEvent(normalized, {origin});
       }
       function schedulePresenceEventCloudSave(eventId, delay=650){
         clearTimeout(presenceCloudSaveTimers.get(eventId));
@@ -2247,7 +2247,7 @@
           const nextWrite = previousWrite.catch(() => {}).then(async () => {
             const latestEvent = loadPresenceEvents().find(item => item.id === eventId);
             if(!latestEvent || isDeletedPresenceEvent(latestEvent)) return;
-            await pushPresenceEventToCloud(latestEvent);
+            await pushPresenceEventToCloud(latestEvent, "attendance-debounce");
             markPresenceEventsSynced([eventId]);
             setSessionMessage("Feuille de présence synchronisée.", "success");
           }).catch(error => {
@@ -2270,7 +2270,7 @@
         });
         const syncedIds = [];
         for(const event of eventsToSync){
-          await api.presenceSaveEvent(event);
+          await api.presenceSaveEvent(event, {origin:"initial-pending-sync"});
           syncedIds.push(event.id);
         }
         markPresenceEventsSynced(syncedIds);
@@ -3639,7 +3639,7 @@
               const updatedEvent = eventPayloadFromForm(form, previousEvent);
               nextEvents = previousEvents.map(item => item.id === updatedEvent.id ? updatedEvent : item);
               savePresenceEvents(nextEvents);
-              await pushPresenceEventToCloud(updatedEvent);
+              await pushPresenceEventToCloud(updatedEvent, "session-form-update");
               markPresenceEventsSynced([updatedEvent.id]);
               selectedAttendanceEventId = updatedEvent.id;
               savedItems = [updatedEvent];
@@ -3662,7 +3662,7 @@
               nextEvents = [...previousEvents, ...savedItems];
               savePresenceEvents(nextEvents);
               selectedAttendanceEventId = savedItems[0]?.id || "";
-              await Promise.all(savedItems.map(item => pushPresenceEventToCloud(item)));
+              await Promise.all(savedItems.map(item => pushPresenceEventToCloud(item, "session-form-create")));
               markPresenceEventsSynced(savedItems.map(item => item.id));
             }
           }catch(error){
