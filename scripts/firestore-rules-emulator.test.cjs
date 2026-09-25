@@ -164,19 +164,16 @@ async function main() {
       }
     }
     if (presenceBatchResults.get(22)?.passed === false) {
-      const first = writeBatch(presenceBatchDb);
-      first.set(doc(presenceBatchDb, 'sessions', 'presence-batch-22'), {diagnosticSplit: true}, {merge: true});
-      for (let index = 1; index <= 10; index += 1) {
-        first.set(doc(presenceBatchDb, 'attendance', `presence-batch-22-attendance-${index}`), {diagnosticSplit: 1}, {merge: true});
-      }
-      const second = writeBatch(presenceBatchDb);
-      for (let index = 11; index <= 22; index += 1) {
-        second.set(doc(presenceBatchDb, 'attendance', `presence-batch-22-attendance-${index}`), {diagnosticSplit: 2}, {merge: true});
-      }
       try {
-        await first.commit();
-        await second.commit();
-        process.stdout.write('PRESENCE_BATCH_SPLIT_RESULT PASS batches=11,12\n');
+        const sessionBatch = writeBatch(presenceBatchDb);
+        sessionBatch.set(doc(presenceBatchDb, 'sessions', 'presence-batch-22'), {diagnosticSplit: true}, {merge: true});
+        await sessionBatch.commit();
+        for (let index = 1; index <= 22; index += 1) {
+          const attendanceBatch = writeBatch(presenceBatchDb);
+          attendanceBatch.set(doc(presenceBatchDb, 'attendance', `presence-batch-22-attendance-${index}`), {diagnosticSplit: index}, {merge: true});
+          await attendanceBatch.commit();
+        }
+        process.stdout.write('PRESENCE_BATCH_SPLIT_RESULT PASS batches=23x1\n');
       } catch (error) {
         process.stdout.write(`PRESENCE_BATCH_SPLIT_RESULT FAIL code=${String(error?.code || '')} message=${String(error?.message || error)}\n`);
       }
