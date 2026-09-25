@@ -49,6 +49,36 @@ async function main() {
       await setDoc(doc(db, 'staff_members', 'inactive'), {
         status: 'INACTIVE', role: 'ADMIN', permissionLevel: 'ADMIN'
       });
+      await setDoc(doc(db, 'staff_members', 'presenceBatchCoach'), {
+        status: 'ACTIVE', role: 'ENTRAINEUR', permissionLevel: 'EDITEUR',
+        allowedModules: ['presences'],
+        authorizedTeamIds: ['team-u13-a'], teamIds: ['team-u13-a'], allowedTeamIds: ['team-u13-a']
+      });
+      for (const attendanceCount of [0, 1, 5, 10, 15, 20, 22]) {
+        const sessionId = `presence-batch-${attendanceCount}`;
+        await setDoc(doc(db, 'sessions', sessionId), {
+          sessionId, teamId: 'team-u13-a', teamIds: ['team-u13-a'],
+          source: 'Présences', createdFromPresenceModule: true, updatedBy: 'presenceBatchCoach'
+        });
+        for (let index = 1; index <= attendanceCount; index += 1) {
+          const attendanceId = `presence-batch-${attendanceCount}-attendance-${index}`;
+          await setDoc(doc(db, 'attendance', attendanceId), {
+            attendanceId, sessionId, teamId: 'team-u13-a', teamIds: ['team-u13-a'], status: 'P'
+          });
+        }
+      }
+      await setDoc(doc(db, 'sessions', 'presence-batch-team-b'), {
+        sessionId: 'presence-batch-team-b', teamId: 'team-u13-b', teamIds: ['team-u13-b'],
+        source: 'Présences', createdFromPresenceModule: true
+      });
+      await setDoc(doc(db, 'sessions', 'presence-batch-legacy-owned'), {
+        sessionId: 'presence-batch-legacy-owned', source: 'Présences',
+        createdFromPresenceModule: true, updatedBy: 'presenceBatchCoach'
+      });
+      await setDoc(doc(db, 'sessions', 'presence-batch-legacy-other'), {
+        sessionId: 'presence-batch-legacy-other', source: 'Présences',
+        createdFromPresenceModule: true, updatedBy: 'otherCoach'
+      });
       for (const teamId of ['U11', 'U13']) {
         await setDoc(doc(db, 'teams', teamId), {teamId, name:teamId});
         await setDoc(doc(db, 'players', `p${teamId}`), {playerId: `p${teamId}`, teamId, status: 'ACTIVE'});
@@ -121,6 +151,36 @@ async function main() {
     const limitedDb = environment.authenticatedContext('limited').firestore();
     const allPlayersDb = environment.authenticatedContext('allPlayers').firestore();
     const inactiveDb = environment.authenticatedContext('inactive').firestore();
+    const presenceBatchDb = environment.authenticatedContext('presenceBatchCoach').firestore();
+    for (const attendanceCount of [0, 1, 5, 10, 15, 20, 22]) {
+      const sessionId = `presence-batch-${attendanceCount}`;
+      const batch = writeBatch(presenceBatchDb);
+      batch.set(doc(presenceBatchDb, 'sessions', sessionId), {
+        teamId: 'team-u13-a', teamIds: ['team-u13-a'], source: 'Présences',
+        createdFromPresenceModule: true, updatedBy: 'presenceBatchCoach', diagnosticRun: attendanceCount
+      }, {merge: true});
+      for (let index = 1; index <= attendanceCount; index += 1) {
+        batch.set(doc(presenceBatchDb, 'attendance', `presence-batch-${attendanceCount}-attendance-${index}`), {
+          teamId: 'team-u13-a', teamIds: ['team-u13-a'], status: 'P', diagnosticRun: attendanceCount
+        }, {merge: true});
+      }
+      await assertSucceeds(batch.commit());
+      process.stdout.write(`PRESENCE_BATCH_FIXED 1+${attendanceCount} PASS\n`);
+    }
+    await assertFails(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-team-b'), {diagnosticDenied: true}, {merge: true}));
+    await assertFails(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-team-b'), {
+      teamId: 'team-u13-a', teamIds: ['team-u13-a'], diagnosticRecovery: true
+    }, {merge: true}));
+    await assertFails(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-legacy-other'), {
+      teamId: 'team-u13-a', teamIds: ['team-u13-a']
+    }, {merge: true}));
+    await assertFails(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-legacy-owned'), {
+      teamId: 'team-u13-b', teamIds: ['team-u13-b']
+    }, {merge: true}));
+    await assertSucceeds(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-legacy-owned'), {
+      teamId: 'team-u13-a', teamIds: ['team-u13-a']
+    }, {merge: true}));
+    process.stdout.write('PRESENCE_BATCH_SECURITY_GUARDS PASS\n');
     process.stdout.write('Checking dashboard team synchronization scope\n');
     await assertSucceeds(getDocs(collection(adminDb, 'teams')));
     await assertSucceeds(getDocs(query(collection(db, 'teams'), where(documentId(), 'in', ['U11']))));
