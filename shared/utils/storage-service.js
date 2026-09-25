@@ -68,6 +68,26 @@
       .forEach(remove);
   }
 
+  function serializedBytes(value){
+    const text = String(value ?? '');
+    try{ return new TextEncoder().encode(text).length; }
+    catch(_e){ return text.length * 2; }
+  }
+
+  function usage(){
+    const store = localStore();
+    const rows = [];
+    if(store){
+      try{
+        for(let i = 0; i < store.length; i += 1){
+          const key = store.key(i);
+          if(key) rows.push({key, bytes:serializedBytes(key) + serializedBytes(store.getItem(key) || '')});
+        }
+      }catch(_e){}
+    }
+    return {type:store ? 'localStorage' : 'memory', bytes:rows.reduce((sum, row) => sum + row.bytes, 0), items:rows.sort((a,b) => b.bytes - a.bytes)};
+  }
+
   function set(key, value, options={}){
     const nextValue = String(value);
     memory.set(key, nextValue);
@@ -84,6 +104,16 @@
         return true;
       }catch(secondError){
         if(!isQuotaError(secondError)) throw secondError;
+        if(typeof options.cleanup === 'function'){
+          try{ options.cleanup({key, value:nextValue, usage:usage()}); }catch(_cleanupError){}
+          try{
+            store.setItem(key, nextValue);
+            return true;
+          }catch(thirdError){
+            if(!isQuotaError(thirdError)) throw thirdError;
+            secondError = thirdError;
+          }
+        }
         console.warn('CoachPulse storage quota reached, value kept in memory for', key, secondError);
         return false;
       }
@@ -147,6 +177,7 @@
     setJson,
     isQuotaError,
     clearNonEssentialBackups,
+    usage,
     isPendingSync,
     markPendingSync,
     clearPendingSync

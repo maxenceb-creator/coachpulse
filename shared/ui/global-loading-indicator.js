@@ -10,6 +10,7 @@
   let showTimer = null;
   let hideTimer = null;
   let lastError = null;
+  let lastDiagnostic = {fingerprint:'', at:0};
   let expanded = false;
   let root = null;
 
@@ -168,14 +169,25 @@
       || String(diagnostic?.firebaseMessage || error?.message || '').toLowerCase().includes('missing or insufficient permissions');
     if(permissionDenied && diagnostic){
       const safeDiagnostic = {
-        task:String(diagnostic.task || options.label || 'operation'), function:String(diagnostic.function || 'unknown'),
+        task:String(diagnostic.task || options.label || 'operation'), coachPulseFunction:String(diagnostic.coachPulseFunction || diagnostic.function || 'unknown'),
         collection:String(diagnostic.collection || 'unknown'), operation:String(diagnostic.operation || 'unknown'),
         module:String(diagnostic.module || 'app'), scope:String(diagnostic.scope || 'unknown'),
         ...(diagnostic.teamId ? {teamId:String(diagnostic.teamId)} : {}), role:String(diagnostic.role || 'unknown'),
+        ...(Array.isArray(diagnostic.teamIds) ? {teamIds:diagnostic.teamIds.map(value => String(value))} : {}),
+        ...(diagnostic.query ? {query:String(diagnostic.query)} : {}),
+        ...(Array.isArray(diagnostic.batchDocuments) ? {batchDocuments:diagnostic.batchDocuments.map(row => ({
+          path:String(row?.path || ''), operation:String(row?.operation || ''), teamId:String(row?.teamId || ''),
+          teamIds:Array.isArray(row?.teamIds) ? row.teamIds.map(value => String(value)) : [], permission:String(row?.permission || '')
+        }))} : {}),
         firebaseCode:String(diagnostic.firebaseCode || error?.code || 'unknown'),
         firebaseMessage:String(diagnostic.firebaseMessage || error?.message || error || 'unknown')
       };
-      console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic);
+      const fingerprint = JSON.stringify(safeDiagnostic);
+      const now = Date.now();
+      if(fingerprint !== lastDiagnostic.fingerprint || now - lastDiagnostic.at > 2000){
+        console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic);
+        lastDiagnostic = {fingerprint, at:now};
+      }
     }
     lastError = {message:raw, label:options.label || '', diagnosticRef:permissionDenied ? String(diagnostic?.task || options.label || '') : '', offline:options.offline === true, at:Date.now()};
     expanded = false;

@@ -17,54 +17,7 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          rules_deployed=false
-          for attempt in 1 2 3; do
-            if npx --yes firebase-tools@15.30.2 deploy --only firestore:rules --project coach-pulse-ee6b0 --non-interactive; then
-              rules_deployed=true
-              break
-            fi
-
-            if [ "$attempt" -lt 3 ]; then
-              sleep $((attempt * 20))
-            fi
-          done
-
-          if [ "$rules_deployed" = true ]; then
-            exit 0
-          fi
-
-          # A failed deploy (including HTTP 409) is accepted only when the
-          # active remote rules match the expected file byte-for-byte.
-          private_key_file="${RUNNER_TEMP}/firebase-private-key.pem"
-          remote_rules_file="${RUNNER_TEMP}/active-firestore.rules"
-          jq -r '.private_key' "$GOOGLE_APPLICATION_CREDENTIALS" > "$private_key_file"
-          chmod 600 "$private_key_file"
-
-          base64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
-          now=$(date +%s)
-          header=$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | base64url)
-          payload=$(jq -nc \
-            --arg iss "$(jq -r '.client_email' "$GOOGLE_APPLICATION_CREDENTIALS")" \
-            --argjson iat "$now" \
-            --argjson exp "$((now + 3600))" \
-            '{iss:$iss,scope:"https://www.googleapis.com/auth/firebase",aud:"https://oauth2.googleapis.com/token",iat:$iat,exp:$exp}' | base64url)
-          signature=$(printf '%s' "${header}.${payload}" | openssl dgst -sha256 -sign "$private_key_file" | base64url)
-          assertion="${header}.${payload}.${signature}"
-          access_token=$(curl --fail --silent --show-error \
-            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer' \
-            --data-urlencode "assertion=${assertion}" \
-            https://oauth2.googleapis.com/token | jq -er '.access_token')
-
-          ruleset_name=$(curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${access_token}" \
-            https://firebaserules.googleapis.com/v1/projects/coach-pulse-ee6b0/releases/cloud.firestore | jq -er '.rulesetName')
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer ${access_token}" \
-            "https://firebaserules.googleapis.com/v1/${ruleset_name}" \
-            | jq -ej '.source.files[] | select(.name == "firestore.rules") | .content' > "$remote_rules_file"
-
-          cmp --silent firestore.rules "$remote_rules_file"
-          echo "Firestore deploy failed, but the active rules were verified as an exact match."
+          npx firebase-tools@latest deploy --only firestore:rules --project coach-pulse-ee6b0 --non-interactive
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}

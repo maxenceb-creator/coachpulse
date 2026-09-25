@@ -252,6 +252,50 @@ service cloud.firestore {
         );
     }
 
+    function canRepairOwnedLegacyPresenceSession(before, after) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['SAISIE', 'EDITEUR', 'ADMIN']
+        && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0 || modules.hasAny(['presences']))
+        && !hasScopeFields(before)
+        && valueOrEmpty(before, 'updatedBy') == request.auth.uid
+        && isPresenceSession(before)
+        && isPresenceSession(after)
+        && hasScopeFields(after)
+        && (level == 'ADMIN' || scopedTeams(after).hasAny(teams));
+    }
+
+    function canUpdateSessionData(before, after) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      let scopes = profile.get('moduleScopes', {});
+      let beforeDirect = level == 'ADMIN' || (hasScopeFields(before) && scopedTeams(before).hasAny(teams));
+      let afterDirect = level == 'ADMIN' || (hasScopeFields(after) && scopedTeams(after).hasAny(teams));
+      let allPresencePlayers = level == 'ADMIN' || staffRole == 'ADMIN'
+        || (scopes is map && moduleScopeHasAllPlayers(scopes, 'presences'));
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['SAISIE', 'EDITEUR', 'ADMIN']
+        && (
+          (moduleAllowedFrom(modules, level, staffRole, 'methodologie') && beforeDirect && afterDirect)
+          || (moduleAllowedFrom(modules, level, staffRole, 'presences')
+            && isPresenceSession(before)
+            && isPresenceSession(after)
+            && (beforeDirect || allPresencePlayers)
+            && (afterDirect || allPresencePlayers))
+        );
+    }
+
     function isRetiredPresenceImportSessionId(sessionId) {
       return sessionId.matches('xlsx-2025-.*')
         || sessionId.matches('xlsx-2026-0[1-6]-.*');
@@ -633,13 +677,9 @@ service cloud.firestore {
           (canAccessModule('methodologie') && canAccessDirectData(request.resource.data))
           || (canAccessModule('presences') && isPresenceSession(request.resource.data) && (canAccessDirectData(request.resource.data) || moduleScopeAllowsAllPlayers('presences')))
         );
-      allow update: if canWriteSportData()
-        && (
-          (canAccessModule('methodologie') && canAccessDirectData(resource.data) && canAccessDirectData(request.resource.data))
-          || (canAccessModule('presences') && isPresenceSession(resource.data) && isPresenceSession(request.resource.data)
-            && (canAccessDirectData(resource.data) || moduleScopeAllowsAllPlayers('presences'))
-            && (canAccessDirectData(request.resource.data) || moduleScopeAllowsAllPlayers('presences')))
-        );
+      allow update: if (!hasScopeFields(resource.data)
+          && canRepairOwnedLegacyPresenceSession(resource.data, request.resource.data))
+        || canUpdateSessionData(resource.data, request.resource.data);
       allow delete: if canDeletePresenceSession(resource.data)
         || canDeleteRetiredPresenceImportSession(sessionId, resource.data);
     }

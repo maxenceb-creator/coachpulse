@@ -49,6 +49,36 @@ async function main() {
       await setDoc(doc(db, 'staff_members', 'inactive'), {
         status: 'INACTIVE', role: 'ADMIN', permissionLevel: 'ADMIN'
       });
+      await setDoc(doc(db, 'staff_members', 'presenceBatchCoach'), {
+        status: 'ACTIVE', role: 'ENTRAINEUR', permissionLevel: 'EDITEUR',
+        allowedModules: ['presences'],
+        authorizedTeamIds: ['team-u13-a'], teamIds: ['team-u13-a'], allowedTeamIds: ['team-u13-a']
+      });
+      for (const attendanceCount of [0, 1, 5, 10, 15, 20, 22]) {
+        const sessionId = `presence-batch-${attendanceCount}`;
+        await setDoc(doc(db, 'sessions', sessionId), {
+          sessionId, teamId: 'team-u13-a', teamIds: ['team-u13-a'],
+          source: 'Présences', createdFromPresenceModule: true, updatedBy: 'presenceBatchCoach'
+        });
+        for (let index = 1; index <= attendanceCount; index += 1) {
+          const attendanceId = `presence-batch-${attendanceCount}-attendance-${index}`;
+          await setDoc(doc(db, 'attendance', attendanceId), {
+            attendanceId, sessionId, teamId: 'team-u13-a', teamIds: ['team-u13-a'], status: 'P'
+          });
+        }
+      }
+      await setDoc(doc(db, 'sessions', 'presence-batch-team-b'), {
+        sessionId: 'presence-batch-team-b', teamId: 'team-u13-b', teamIds: ['team-u13-b'],
+        source: 'Présences', createdFromPresenceModule: true
+      });
+      await setDoc(doc(db, 'sessions', 'presence-batch-legacy-owned'), {
+        sessionId: 'presence-batch-legacy-owned', source: 'Présences',
+        createdFromPresenceModule: true, updatedBy: 'presenceBatchCoach'
+      });
+      await setDoc(doc(db, 'sessions', 'presence-batch-legacy-other'), {
+        sessionId: 'presence-batch-legacy-other', source: 'Présences',
+        createdFromPresenceModule: true, updatedBy: 'otherCoach'
+      });
       for (const teamId of ['U11', 'U13']) {
         await setDoc(doc(db, 'teams', teamId), {teamId, name:teamId});
         await setDoc(doc(db, 'players', `p${teamId}`), {playerId: `p${teamId}`, teamId, status: 'ACTIVE'});
@@ -82,6 +112,9 @@ async function main() {
       await setDoc(doc(db, 'sessions', 'xlsx-2026-05-old'), {sessionId: 'xlsx-2026-05-old', teamId: 'U11', source: 'Import présence'});
       await setDoc(doc(db, 'players', 'pOrphan'), {playerId: 'pOrphan', status: 'ACTIVE'});
       await setDoc(doc(db, 'sessions', 'sOrphan'), {sessionId: 'sOrphan', source: 'Présences'});
+      await setDoc(doc(db, 'sessions', 'sOwnedLegacy'), {sessionId: 'sOwnedLegacy', source: 'Présences', createdFromPresenceModule:true, updatedBy:'coach'});
+      await setDoc(doc(db, 'sessions', 'sOwnedLegacyCross'), {sessionId: 'sOwnedLegacyCross', source: 'Présences', createdFromPresenceModule:true, updatedBy:'coach'});
+      await setDoc(doc(db, 'sessions', 'sForeignLegacy'), {sessionId: 'sForeignLegacy', source: 'Présences', createdFromPresenceModule:true, updatedBy:'other-coach'});
       for (let sessionIndex = 1; sessionIndex <= 12; sessionIndex += 1) {
         const sessionId = `sVolume${sessionIndex}`;
         await setDoc(doc(db, 'sessions', sessionId), {
@@ -118,6 +151,36 @@ async function main() {
     const limitedDb = environment.authenticatedContext('limited').firestore();
     const allPlayersDb = environment.authenticatedContext('allPlayers').firestore();
     const inactiveDb = environment.authenticatedContext('inactive').firestore();
+    const presenceBatchDb = environment.authenticatedContext('presenceBatchCoach').firestore();
+    for (const attendanceCount of [0, 1, 5, 10, 15, 20, 22]) {
+      const sessionId = `presence-batch-${attendanceCount}`;
+      const batch = writeBatch(presenceBatchDb);
+      batch.set(doc(presenceBatchDb, 'sessions', sessionId), {
+        teamId: 'team-u13-a', teamIds: ['team-u13-a'], source: 'Présences',
+        createdFromPresenceModule: true, updatedBy: 'presenceBatchCoach', diagnosticRun: attendanceCount
+      }, {merge: true});
+      for (let index = 1; index <= attendanceCount; index += 1) {
+        batch.set(doc(presenceBatchDb, 'attendance', `presence-batch-${attendanceCount}-attendance-${index}`), {
+          teamId: 'team-u13-a', teamIds: ['team-u13-a'], status: 'P', diagnosticRun: attendanceCount
+        }, {merge: true});
+      }
+      await assertSucceeds(batch.commit());
+      process.stdout.write(`PRESENCE_BATCH_FIXED 1+${attendanceCount} PASS\n`);
+    }
+    await assertFails(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-team-b'), {diagnosticDenied: true}, {merge: true}));
+    await assertFails(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-team-b'), {
+      teamId: 'team-u13-a', teamIds: ['team-u13-a'], diagnosticRecovery: true
+    }, {merge: true}));
+    await assertFails(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-legacy-other'), {
+      teamId: 'team-u13-a', teamIds: ['team-u13-a']
+    }, {merge: true}));
+    await assertFails(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-legacy-owned'), {
+      teamId: 'team-u13-b', teamIds: ['team-u13-b']
+    }, {merge: true}));
+    await assertSucceeds(setDoc(doc(presenceBatchDb, 'sessions', 'presence-batch-legacy-owned'), {
+      teamId: 'team-u13-a', teamIds: ['team-u13-a']
+    }, {merge: true}));
+    process.stdout.write('PRESENCE_BATCH_SECURITY_GUARDS PASS\n');
     process.stdout.write('Checking dashboard team synchronization scope\n');
     await assertSucceeds(getDocs(collection(adminDb, 'teams')));
     await assertSucceeds(getDocs(query(collection(db, 'teams'), where(documentId(), 'in', ['U11']))));
@@ -194,6 +257,23 @@ async function main() {
     await assertSucceeds(setDoc(doc(db, 'attendance', 'newU11'), {attendanceId: 'newU11', sessionId: 'sU11', teamId: 'U11'}));
     process.stdout.write('Checking authorized attendance update\n');
     await assertSucceeds(setDoc(doc(db, 'attendance', 'aU11'), {attendanceId: 'aU11', sessionId: 'sU11', teamId: 'U11', status: 'P'}));
+    process.stdout.write('Checking authorized atomic repair of owned legacy presence session\n');
+    const legacyRepair = writeBatch(db);
+    legacyRepair.set(doc(db, 'sessions', 'sOwnedLegacy'), {sessionId:'sOwnedLegacy', teamId:'U11', teamIds:['U11'], source:'Présences', createdFromPresenceModule:true}, {merge:true});
+    legacyRepair.set(doc(db, 'attendance', 'aOwnedLegacy'), {attendanceId:'aOwnedLegacy', sessionId:'sOwnedLegacy', teamId:'U11', teamIds:['U11']}, {merge:true});
+    await assertSucceeds(legacyRepair.commit());
+    const foreignLegacyRepair = writeBatch(db);
+    foreignLegacyRepair.set(doc(db, 'sessions', 'sForeignLegacy'), {sessionId:'sForeignLegacy', teamId:'U11', teamIds:['U11'], source:'Présences', createdFromPresenceModule:true}, {merge:true});
+    foreignLegacyRepair.set(doc(db, 'attendance', 'aForeignLegacy'), {attendanceId:'aForeignLegacy', sessionId:'sForeignLegacy', teamId:'U11', teamIds:['U11']}, {merge:true});
+    await assertFails(foreignLegacyRepair.commit());
+    const crossTeamRepair = writeBatch(db);
+    crossTeamRepair.set(doc(db, 'sessions', 'sOwnedLegacyCross'), {sessionId:'sOwnedLegacyCross', teamId:'U13', teamIds:['U13'], source:'Présences', createdFromPresenceModule:true}, {merge:true});
+    crossTeamRepair.set(doc(db, 'attendance', 'aOwnedLegacyU13'), {attendanceId:'aOwnedLegacyU13', sessionId:'sOwnedLegacyCross', teamId:'U13', teamIds:['U13']}, {merge:true});
+    await assertFails(crossTeamRepair.commit());
+    const scopedForeignRecovery = writeBatch(db);
+    scopedForeignRecovery.set(doc(db, 'sessions', 'sU13'), {sessionId:'sU13', teamId:'U11', teamIds:['U11'], source:'Présences', createdFromPresenceModule:true}, {merge:true});
+    scopedForeignRecovery.set(doc(db, 'attendance', 'aScopedForeignRecovery'), {attendanceId:'aScopedForeignRecovery', sessionId:'sU13', teamId:'U11', teamIds:['U11']}, {merge:true});
+    await assertFails(scopedForeignRecovery.commit());
     process.stdout.write('Checking authorized technical test create\n');
     await assertSucceeds(setDoc(doc(db, 'technicalTests', 'newU11'), {testId: 'newU11', playerId: 'pU11'}));
     process.stdout.write('Checking authorized technical test update\n');
