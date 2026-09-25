@@ -49,6 +49,24 @@ async function main() {
       await setDoc(doc(db, 'staff_members', 'inactive'), {
         status: 'INACTIVE', role: 'ADMIN', permissionLevel: 'ADMIN'
       });
+      await setDoc(doc(db, 'staff_members', 'presenceBatchCoach'), {
+        status: 'ACTIVE', role: 'ENTRAINEUR', permissionLevel: 'EDITEUR',
+        allowedModules: ['presences'],
+        authorizedTeamIds: ['team-u13-a'], teamIds: ['team-u13-a'], allowedTeamIds: ['team-u13-a']
+      });
+      for (const attendanceCount of [1, 5, 10, 15, 20, 22]) {
+        const sessionId = `presence-batch-${attendanceCount}`;
+        await setDoc(doc(db, 'sessions', sessionId), {
+          sessionId, teamId: 'team-u13-a', teamIds: ['team-u13-a'],
+          source: 'Présences', createdFromPresenceModule: true, updatedBy: 'presenceBatchCoach'
+        });
+        for (let index = 1; index <= attendanceCount; index += 1) {
+          const attendanceId = `presence-batch-${attendanceCount}-attendance-${index}`;
+          await setDoc(doc(db, 'attendance', attendanceId), {
+            attendanceId, sessionId, teamId: 'team-u13-a', teamIds: ['team-u13-a'], status: 'P'
+          });
+        }
+      }
       for (const teamId of ['U11', 'U13']) {
         await setDoc(doc(db, 'teams', teamId), {teamId, name:teamId});
         await setDoc(doc(db, 'players', `p${teamId}`), {playerId: `p${teamId}`, teamId, status: 'ACTIVE'});
@@ -121,6 +139,50 @@ async function main() {
     const limitedDb = environment.authenticatedContext('limited').firestore();
     const allPlayersDb = environment.authenticatedContext('allPlayers').firestore();
     const inactiveDb = environment.authenticatedContext('inactive').firestore();
+    const presenceBatchDb = environment.authenticatedContext('presenceBatchCoach').firestore();
+    const presenceBatchResults = new Map();
+    for (const attendanceCount of [1, 5, 10, 15, 20, 22]) {
+      const sessionId = `presence-batch-${attendanceCount}`;
+      const batch = writeBatch(presenceBatchDb);
+      batch.set(doc(presenceBatchDb, 'sessions', sessionId), {
+        teamId: 'team-u13-a', teamIds: ['team-u13-a'], source: 'Présences',
+        createdFromPresenceModule: true, updatedBy: 'presenceBatchCoach', diagnosticRun: attendanceCount
+      }, {merge: true});
+      for (let index = 1; index <= attendanceCount; index += 1) {
+        batch.set(doc(presenceBatchDb, 'attendance', `presence-batch-${attendanceCount}-attendance-${index}`), {
+          teamId: 'team-u13-a', teamIds: ['team-u13-a'], status: 'P', diagnosticRun: attendanceCount
+        }, {merge: true});
+      }
+      try {
+        await batch.commit();
+        presenceBatchResults.set(attendanceCount, {passed: true});
+        process.stdout.write(`PRESENCE_BATCH_RESULT 1+${attendanceCount} PASS\n`);
+      } catch (error) {
+        const result = {passed: false, code: String(error?.code || ''), message: String(error?.message || error)};
+        presenceBatchResults.set(attendanceCount, result);
+        process.stdout.write(`PRESENCE_BATCH_RESULT 1+${attendanceCount} FAIL code=${result.code} message=${result.message}\n`);
+      }
+    }
+    if (presenceBatchResults.get(22)?.passed === false) {
+      const first = writeBatch(presenceBatchDb);
+      first.set(doc(presenceBatchDb, 'sessions', 'presence-batch-22'), {diagnosticSplit: true}, {merge: true});
+      for (let index = 1; index <= 10; index += 1) {
+        first.set(doc(presenceBatchDb, 'attendance', `presence-batch-22-attendance-${index}`), {diagnosticSplit: 1}, {merge: true});
+      }
+      const second = writeBatch(presenceBatchDb);
+      for (let index = 11; index <= 22; index += 1) {
+        second.set(doc(presenceBatchDb, 'attendance', `presence-batch-22-attendance-${index}`), {diagnosticSplit: 2}, {merge: true});
+      }
+      try {
+        await first.commit();
+        await second.commit();
+        process.stdout.write('PRESENCE_BATCH_SPLIT_RESULT PASS batches=11,12\n');
+      } catch (error) {
+        process.stdout.write(`PRESENCE_BATCH_SPLIT_RESULT FAIL code=${String(error?.code || '')} message=${String(error?.message || error)}\n`);
+      }
+    } else {
+      process.stdout.write('PRESENCE_BATCH_SPLIT_RESULT NOT_RUN reason=1+22-passed\n');
+    }
     process.stdout.write('Checking dashboard team synchronization scope\n');
     await assertSucceeds(getDocs(collection(adminDb, 'teams')));
     await assertSucceeds(getDocs(query(collection(db, 'teams'), where(documentId(), 'in', ['U11']))));
@@ -270,6 +332,8 @@ async function main() {
     assert.equal((await getDoc(doc(adminDb, 'sessions', 'sU13'))).exists(), true);
     assert.equal((await getDoc(doc(db, 'matches', 'mU11'))).data().teamId, 'U11');
     process.stdout.write('Firestore rules emulator guards OK\n');
+    process.stderr.write('DIAGNOSTIC_ONLY_STOP: preventing Firebase preview deployment\n');
+    process.exitCode = 1;
   } finally {
     await environment.cleanup();
   }
