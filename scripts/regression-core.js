@@ -762,7 +762,11 @@ function testAccessRegressionSurfaceStaysComplete(){
 
   assert(teamsSource.includes("name:'U19', category:'U19', subCategories:['U16','U17','U18','U19']"), 'U16 doit rester rattachable à U19 pour les surclassements.');
   assert(rulesSource.includes('function canAccessScopedData(data)'), 'Les règles Firestore doivent conserver le verrou teamId/playerId central.');
-  assert((rulesSource.match(/canAccess(?:Direct|Scoped|MatchScoped|SessionScoped)Data\(resource\.data\) && canAccess(?:Direct|Scoped|MatchScoped|SessionScoped)Data\(request\.resource\.data\)/g) || []).length >= 10, 'Les updates Firestore doivent contrôler ancien et nouveau périmètre sur les collections sensibles.');
+  const pairedScopeGuards = (rulesSource.match(/canAccess(?:Direct|Scoped|MatchScoped|SessionScoped)Data\(resource\.data\) && canAccess(?:Direct|Scoped|MatchScoped|SessionScoped)Data\(request\.resource\.data\)/g) || []).length;
+  const optimizedSessionScopeGuard = rulesSource.includes('function canUpdateSessionData(before, after)')
+    && rulesSource.includes("let beforeDirect = level == 'ADMIN' || (hasScopeFields(before) && scopedTeams(before).hasAny(teams));")
+    && rulesSource.includes("let afterDirect = level == 'ADMIN' || (hasScopeFields(after) && scopedTeams(after).hasAny(teams));");
+  assert(pairedScopeGuards >= 9 && optimizedSessionScopeGuard, 'Les updates Firestore doivent contrôler ancien et nouveau périmètre sur les collections sensibles.');
 }
 
 function testMatchDataStayLinkedToPlayerAndTeamIds(){
