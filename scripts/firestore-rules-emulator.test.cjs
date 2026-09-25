@@ -330,8 +330,6 @@ async function main() {
     assert.equal((await getDoc(doc(adminDb, 'sessions', 'sU13'))).exists(), true);
     assert.equal((await getDoc(doc(db, 'matches', 'mU11'))).data().teamId, 'U11');
     process.stdout.write('Firestore rules emulator guards OK\n');
-    process.stderr.write('DIAGNOSTIC_ONLY_STOP: preventing Firebase preview deployment\n');
-    process.exitCode = 1;
   } finally {
     await environment.cleanup();
   }
