@@ -31,11 +31,13 @@ jobs:
           ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COACH_PULSE_EE6B0 }}
           SERVICE_ACCOUNT
       - name: Verify active Firestore Rules fingerprint
+        id: rules_fingerprint
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /home/runner/firebase-service-account.json
           GOOGLE_CLOUD_PROJECT: coach-pulse-ee6b0
         run: node scripts/verify-active-firestore-rules.cjs firestore.rules
       - name: Build public assets
+        id: build_public
         run: npm run build:public
       - name: Deploy PR preview channel
         id: deploy_preview
@@ -67,6 +69,12 @@ jobs:
       - name: Publish preview summary
         if: always()
         env:
+          RULES_MATCH: ${{ steps.rules_fingerprint.outputs.match }}
+          EXPECTED_RULES_SHA256: ${{ steps.rules_fingerprint.outputs.expected_sha256 }}
+          ACTIVE_RULES_SHA256: ${{ steps.rules_fingerprint.outputs.active_sha256 }}
+          ACTIVE_RULESET: ${{ steps.rules_fingerprint.outputs.ruleset }}
+          BUILD_OUTCOME: ${{ steps.build_public.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy_preview.outcome }}
           PREVIEW_URL: ${{ steps.deploy_preview.outputs.preview_url }}
           PREVIEW_CHANNEL: ${{ steps.deploy_preview.outputs.channel }}
           DEPLOY_NOTE: ${{ steps.deploy_preview.outputs.deploy_note }}
@@ -77,16 +85,28 @@ jobs:
             if [ -n "$PREVIEW_URL" ]; then
               echo "- Channel: \`$PREVIEW_CHANNEL\`"
               echo "- Lien de test: $PREVIEW_URL"
-            else
-              echo "- Channel: \`$PREVIEW_CHANNEL\`"
-              echo "- Aucun lien preview disponible."
+            elif [ "$RULES_MATCH" != "true" ]; then
+              echo "⚠️ Preview non publiée : les validations ont réussi, mais les Rules actives ne correspondent pas aux Rules attendues par cette PR. Build et Hosting Preview non exécutés."
+              echo "- Empreinte attendue: \`$EXPECTED_RULES_SHA256\`"
+              echo "- Empreinte active: \`$ACTIVE_RULES_SHA256\`"
+              echo "- Ruleset actif: \`$ACTIVE_RULESET\`"
+            elif [ "$BUILD_OUTCOME" = "success" ]; then
+              echo "⚠️ Build réussi, mais Preview Firebase non publiée."
+              echo "- État du déploiement: \`$DEPLOY_OUTCOME\`"
               echo "- Note: ${DEPLOY_NOTE:-le déploiement preview n'a pas renvoyé d'URL.}"
+            else
+              echo "⚠️ Preview Firebase non publiée : les validations ou le build ont échoué."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Comment PR with preview link
         if: always()
         uses: actions/github-script@v7
         env:
+          RULES_MATCH: ${{ steps.rules_fingerprint.outputs.match }}
+          EXPECTED_RULES_SHA256: ${{ steps.rules_fingerprint.outputs.expected_sha256 }}
+          ACTIVE_RULES_SHA256: ${{ steps.rules_fingerprint.outputs.active_sha256 }}
+          ACTIVE_RULESET: ${{ steps.rules_fingerprint.outputs.ruleset }}
+          BUILD_OUTCOME: ${{ steps.build_public.outcome }}
           PREVIEW_URL: ${{ steps.deploy_preview.outputs.preview_url }}
           PREVIEW_CHANNEL: ${{ steps.deploy_preview.outputs.channel }}
           DEPLOY_NOTE: ${{ steps.deploy_preview.outputs.deploy_note }}
@@ -96,9 +116,16 @@ jobs:
             const channel = process.env.PREVIEW_CHANNEL || `pr-${context.payload.pull_request.number}`;
             const previewUrl = process.env.PREVIEW_URL || '';
             const note = process.env.DEPLOY_NOTE || "Le deploiement preview n'a pas renvoye d'URL.";
-            const body = previewUrl
-              ? `${marker}\n✅ **Lien de test CoachPulse**\n\n[Ouvrir la preview Firebase](${previewUrl})\n\nChannel: \`${channel}\`\n\nCe lien est mis a jour automatiquement a chaque push sur cette PR.`
-              : `${marker}\n⚠️ **Preview Firebase non disponible**\n\nChannel: \`${channel}\`\n\n${note}\n\nLes validations et le build ont tout de meme ete executes dans le check.`;
+            let body;
+            if (previewUrl) {
+              body = `${marker}\n${previewUrl}`;
+            } else if (process.env.RULES_MATCH !== 'true') {
+              body = `${marker}\n⚠️ Preview non publiée : les validations ont réussi, mais les Rules actives ne correspondent pas aux Rules attendues par cette PR. Build et Hosting Preview non exécutés.\n\n- Empreinte attendue: \`${process.env.EXPECTED_RULES_SHA256}\`\n- Empreinte active: \`${process.env.ACTIVE_RULES_SHA256}\`\n- Ruleset actif: \`${process.env.ACTIVE_RULESET}\``;
+            } else if (process.env.BUILD_OUTCOME === 'success') {
+              body = `${marker}\n⚠️ Build réussi, mais Preview Firebase non publiée.\n\n${note}`;
+            } else {
+              body = `${marker}\n⚠️ Preview Firebase non publiée : les validations ou le build ont échoué.`;
+            }
             const { owner, repo } = context.repo;
             const issue_number = context.payload.pull_request.number;
             const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });

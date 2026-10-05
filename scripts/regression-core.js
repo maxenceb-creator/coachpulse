@@ -1396,6 +1396,22 @@ function autoBackupTestBytes(value){
   return new TextEncoder().encode(JSON.stringify(value)).length;
 }
 
+function testFirebasePreviewWorkflowReportsExactStage(){
+  const workflow = fs.readFileSync('.github/workflows/firebase-hosting-pull-request.yml', 'utf8');
+  const fingerprintIndex = workflow.indexOf('- name: Verify active Firestore Rules fingerprint');
+  const buildIndex = workflow.indexOf('- name: Build public assets');
+  const deployIndex = workflow.indexOf('- name: Deploy PR preview channel');
+
+  assert(fingerprintIndex >= 0 && fingerprintIndex < buildIndex && buildIndex < deployIndex, "Le controle d'empreinte doit rester avant le build et Hosting.");
+  assert(workflow.includes('id: rules_fingerprint'), "L'etat du controle d'empreinte doit etre exploitable par le commentaire.");
+  assert(workflow.includes('id: build_public'), "L'etat du build doit etre exploitable par le commentaire.");
+  assert(workflow.includes('Preview non publiée : les validations ont réussi, mais les Rules actives ne correspondent pas aux Rules attendues par cette PR. Build et Hosting Preview non exécutés.'), "Le commentaire doit distinguer l'ecart de Rules.");
+  assert(workflow.includes('Build réussi, mais Preview Firebase non publiée.'), "Le commentaire doit distinguer un echec Hosting apres un build reussi.");
+  assert(!workflow.includes('Les validations et le build ont tout de meme ete executes'), "Le commentaire ne doit jamais annoncer un build ignore comme execute.");
+  assert(workflow.includes('body = `${marker}\\n${previewUrl}`;'), 'Le succes doit publier uniquement la vraie Channel URL Firebase.');
+  assert(workflow.includes('echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"'), "L'extraction de la vraie Channel URL doit rester conservee.");
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -1435,6 +1451,7 @@ testLoadingIndicatorCannotReplaceFirebaseDataApi();
 testFirestorePermissionDiagnosticKeepsSafeOperationContext();
 testFirestorePayloadBoundary();
 testPresenceRuntimeSaveGuards();
+testFirebasePreviewWorkflowReportsExactStage();
 
 Promise.resolve()
   .then(testPresenceLoadingBoundaryReturnsSameRows)
