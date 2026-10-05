@@ -4707,7 +4707,9 @@ async function moduleListPlayers(filters={}){
   const service = playersService();
   if(service?.readFirestorePlayers && db && currentUser){
     const moduleId = filters.moduleId || filters.module || '';
-    const accessAllPlayers = isAdmin() || (moduleId && canAccessAllPlayersForModule(moduleId));
+    const playerListAllScopeModules = new Set(['players','database','stats','teamProfile','playerProfile','tests','tests-athletiques','medical','presences']);
+    const accessAllPlayers = getCurrentPermissionLevel() === 'ADMIN'
+      || (playerListAllScopeModules.has(moduleId) && canAccessAllPlayersForModule(moduleId));
     return service.readFirestorePlayers({firebaseFns, db, accessAllPlayers, authorizedTeamIds:getAuthorizedTeamIds()});
   }
   if(service?.readCachedPlayers) return service.readCachedPlayers();
@@ -4837,13 +4839,15 @@ async function matchSaveToFirestore(raw={}){
 }
 async function matchListFromFirestore(filters={}){
   if(!db || !currentUser || !canViewModule('stats')) return [];
+  const accessAllMatches = getCurrentPermissionLevel() === 'ADMIN' || getCurrentUserRole() === 'ADMIN';
   const teamIds = [...new Set((filters.teamIds || (filters.teamId ? [filters.teamId] : getAuthorizedTeamIds())).filter(Boolean))];
-  const queries = teamIds.length
-    ? teamIds.flatMap(teamId => [
+  if(!accessAllMatches && !teamIds.length) return [];
+  const queries = accessAllMatches
+    ? [firebaseFns.getDocs(firebaseFns.collection(db, 'matches'))]
+    : teamIds.flatMap(teamId => [
         firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamId', '==', teamId))),
         firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamIds', 'array-contains', teamId)))
-      ])
-    : [firebaseFns.getDocs(firebaseFns.collection(db, 'matches'))];
+      ]);
   const snapshots = await Promise.all(queries);
   const byId = new Map();
   snapshots.forEach(snapshot => snapshot.forEach(docSnap => {
@@ -4852,11 +4856,31 @@ async function matchListFromFirestore(filters={}){
     byId.set(docSnap.id, row);
   }));
   const matches = [...byId.values()];
-  await Promise.all(matches.map(async match => {
+  const eventsByMatch = new Map();
+  const addEventSnapshot = eventSnapshot => eventSnapshot.forEach(docSnap => {
+    const event = {id:docSnap.id, eventId:docSnap.id, ...docSnap.data()};
+    const matchId = String(event.matchId || '');
+    if(!matchId) return;
+    const events = eventsByMatch.get(matchId) || [];
+    events.push(event);
+    eventsByMatch.set(matchId, events);
+  });
+  if(accessAllMatches){
+    await Promise.all(matches.map(async match => {
+      const matchId = match.matchId || match.id;
+      const eventSnapshot = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('matchId', '==', matchId)));
+      addEventSnapshot(eventSnapshot);
+    }));
+  }else{
+    const eventSnapshots = await Promise.all(teamIds.flatMap(teamId => [
+      firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('teamId', '==', teamId))),
+      firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('teamIds', 'array-contains', teamId)))
+    ]));
+    eventSnapshots.forEach(addEventSnapshot);
+  }
+  matches.forEach(match => {
     const matchId = match.matchId || match.id;
-    const eventSnapshot = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('matchId', '==', matchId)));
-    const events = [];
-    eventSnapshot.forEach(docSnap => events.push({id:docSnap.id, eventId:docSnap.id, ...docSnap.data(), matchId}));
+    const events = [...new Map((eventsByMatch.get(String(matchId)) || []).map(event => [event.eventId || event.id, {...event, matchId}])).values()];
     if(events.length){
       events.sort((a,b) => (Number(a.ts || a.t || a.minute) || 0) - (Number(b.ts || b.t || b.minute) || 0));
       match.log = events;
@@ -4864,7 +4888,7 @@ async function matchListFromFirestore(filters={}){
     }else{
       match.log = Array.isArray(match.log) ? match.log : (Array.isArray(match.events) ? match.events : []);
     }
-  }));
+  });
   return matches.sort((a,b) => String(b.createdAt || b.date || '').localeCompare(String(a.createdAt || a.date || '')));
 }
 function playerForSeason(player={}, season=currentSeason()){

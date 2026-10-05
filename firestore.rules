@@ -365,10 +365,15 @@ service cloud.firestore {
       let scopes = profile.get('moduleScopes', {});
       let allPlayers = level == 'ADMIN' || staffRole == 'ADMIN'
         || (scopes is map && (
-          moduleScopeHasAllPlayers(scopes, 'players')
-          || moduleScopeHasAllPlayers(scopes, 'database')
-          || moduleScopeHasAllPlayers(scopes, 'playerProfile')
-          || moduleScopeHasAllPlayers(scopes, 'presences')
+          (modules.hasAny(['players']) && moduleScopeHasAllPlayers(scopes, 'players'))
+          || (modules.hasAny(['database']) && moduleScopeHasAllPlayers(scopes, 'database'))
+          || (modules.hasAny(['stats']) && moduleScopeHasAllPlayers(scopes, 'stats'))
+          || (modules.hasAny(['teamProfile']) && moduleScopeHasAllPlayers(scopes, 'teamProfile'))
+          || (modules.hasAny(['playerProfile']) && moduleScopeHasAllPlayers(scopes, 'playerProfile'))
+          || (modules.hasAny(['tests']) && moduleScopeHasAllPlayers(scopes, 'tests'))
+          || (modules.hasAny(['tests-athletiques']) && moduleScopeHasAllPlayers(scopes, 'tests-athletiques'))
+          || (modules.hasAny(['medical']) && moduleScopeHasAllPlayers(scopes, 'medical'))
+          || (modules.hasAny(['presences']) && moduleScopeHasAllPlayers(scopes, 'presences'))
         ));
       return signedIn()
         && exists(staffPath(request.auth.uid))
@@ -376,11 +381,31 @@ service cloud.firestore {
         && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
         && (playerIds.size() == 0 && allowedPlayerIds.size() == 0 || allPlayers)
         && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0
-          || modules.hasAny(['database', 'players', 'playerProfile', 'presences']))
+          || modules.hasAny(['players', 'database', 'stats', 'teamProfile', 'playerProfile', 'tests', 'tests-athletiques', 'medical', 'presences']))
         && (allPlayers
           || teams.hasAny([data.get('teamId', '')])
           || data.get('teamIds', []).hasAny(teams)
           || data.get('rosterTeamIds', []).hasAny(teams));
+    }
+
+    function canListMatchRecords(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0 || modules.hasAny(['stats', 'playerProfile']))
+        && (level == 'ADMIN' || staffRole == 'ADMIN'
+          || teams.hasAny([data.get('teamId', '')])
+          || data.get('teamIds', []).hasAny(teams));
+    }
+
+    function canListMatchEventRecords(data) {
+      return canListMatchRecords(data);
     }
 
     function canWriteDirectModuleData(moduleId, before, after) {
@@ -649,17 +674,19 @@ service cloud.firestore {
     }
 
     match /matches/{matchId} {
-      allow read: if canReadData()
+      allow get: if canReadData()
         && (canAccessModule('stats') || canAccessModule('playerProfile'))
         && canAccessDirectData(resource.data);
+      allow list: if canListMatchRecords(resource.data);
       allow create: if canWriteDirectModuleData('stats', request.resource.data, request.resource.data);
       allow update: if canWriteDirectModuleData('stats', resource.data, request.resource.data);
       allow delete: if noDelete();
     }
 
     match /matchEvents/{eventId} {
-      allow read: if (canReadData() && canAccessModule('stats') && canAccessMatchScopedData(resource.data))
+      allow get: if (canReadData() && canAccessModule('stats') && canAccessMatchScopedData(resource.data))
         || (canReadData() && canAccessModule('playerProfile') && canAccessMatchScopedData(resource.data));
+      allow list: if canListMatchEventRecords(resource.data);
       allow create: if canWriteMatchEventData(request.resource.data, request.resource.data);
       allow update: if canWriteMatchEventData(resource.data, request.resource.data);
       allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessMatchScopedDataForModule(resource.data, 'stats');

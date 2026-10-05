@@ -703,6 +703,13 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(!appSource.includes('if(currentTool && !canAccessTool(currentTool))'), 'La variable currentTool inexistante ne doit plus être référencée.');
   assert(rulesSource.includes("modules.hasAny(['database', 'players', 'playerProfile', 'presences'])"), 'La lecture cloisonnée des joueuses doit reconnaître le module players.');
   assert(rulesSource.includes('allow list: if canListPlayerRecords(resource.data);'), 'Les requêtes players doivent utiliser une règle de liste explicitement cloisonnée.');
+  assert(appSource.includes("const playerListAllScopeModules = new Set(['players','database','stats','teamProfile','playerProfile','tests','tests-athletiques','medical','presences']);"), 'La lecture globale players doit utiliser la même matrice allPlayers que les Rules.');
+  assert(appSource.includes('if(!accessAllMatches && !teamIds.length) return [];'), 'Un compte non-admin sans équipe ne doit jamais lancer une lecture globale matches.');
+  assert(rulesSource.includes('allow list: if canListMatchRecords(resource.data);'), 'Les listes matches doivent être prouvées directement par leur scope équipe.');
+  assert(rulesSource.includes('allow list: if canListMatchEventRecords(resource.data);'), 'Les listes matchEvents doivent être prouvées directement par leur scope équipe.');
+  const matchListBody = appSource.match(/async function matchListFromFirestore[\s\S]*?\nfunction playerForSeason/)?.[0] || '';
+  assert(matchListBody.includes("collection(db, 'matchEvents'), firebaseFns.where('teamId', '==', teamId)"), 'Les événements Match non-admin doivent être chargés par teamId.');
+  assert(matchListBody.includes("collection(db, 'matchEvents'), firebaseFns.where('teamIds', 'array-contains', teamId)"), 'Les événements Match non-admin doivent être chargés par teamIds.');
   const attendanceListRule = rulesSource.match(/function canListAttendanceByTeam\(data\)[\s\S]*?\n    }/)?.[0] || '';
   assert(attendanceListRule.includes("data.get('teamId', '')") && attendanceListRule.includes("data.get('teamIds', [])"), 'La liste attendance doit borner chaque champ équipe optionnel avec une valeur par défaut.');
   assert(!attendanceListRule.includes("linkedTeamMatches('sessions'"), 'La liste attendance ne doit effectuer aucune lecture documentaire de session dans les Rules.');
