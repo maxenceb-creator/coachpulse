@@ -25,13 +25,18 @@ jobs:
         run: npm run check
       - name: Validate Firestore access rules
         run: npm run test:rules
-      - name: Build public assets
-        run: npm run build:public
       - name: Prepare Firebase credentials
         run: |
           cat > "$HOME/firebase-service-account.json" <<'SERVICE_ACCOUNT'
           ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COACH_PULSE_EE6B0 }}
           SERVICE_ACCOUNT
+      - name: Verify active Firestore Rules fingerprint
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /home/runner/firebase-service-account.json
+          GOOGLE_CLOUD_PROJECT: coach-pulse-ee6b0
+        run: node scripts/verify-active-firestore-rules.cjs firestore.rules
+      - name: Build public assets
+        run: npm run build:public
       - name: Deploy PR preview channel
         id: deploy_preview
         env:
@@ -42,7 +47,7 @@ jobs:
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           npx firebase-tools@latest hosting:channel:deploy "$channel" --project coach-pulse-ee6b0 --non-interactive --expires 7d 2>&1 | tee "$RUNNER_TEMP/firebase-pr-deploy.log"
           status=${PIPESTATUS[0]}
-          preview_url="$(grep -Eo 'https://[^[:space:]()]+' "$RUNNER_TEMP/firebase-pr-deploy.log" | grep -E 'web\.app|firebaseapp\.com' | head -n 1 | sed 's/[),.]$//')"
+          preview_url="$(sed -nE 's/.*Channel URL[^:]*: (https:\/\/[^[:space:]()]+).*/\1/p' "$RUNNER_TEMP/firebase-pr-deploy.log" | tail -n 1 | sed 's/[),.]$//')"
           echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"
           if [ "$status" -eq 0 ]; then
             echo "deploy_note=Firebase Hosting preview channel deployed." >> "$GITHUB_OUTPUT"

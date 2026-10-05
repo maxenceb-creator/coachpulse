@@ -2247,6 +2247,7 @@ async function playerProfileLoadData(options={}){
     return [...new Map(rows.map(row => [row.id, row])).values()];
   }
   async function readPlayerLinkedCollection(collectionName){
+    if(!hasGlobalDataAccess() && collectionName === 'matchEvents') return [];
     const primary = await readWhereIn(collectionName, 'playerId', playerIdChunks);
     if(options.includeLegacyFallback !== true) return primary;
     const fallbackCollections = new Set(['attendance','matchEvents','technicalTests','physicalTests','injuries','medicalFollowUps']);
@@ -2284,7 +2285,7 @@ async function playerProfileLoadData(options={}){
   const [authorizedPlayers, playersById, playerRows] = await Promise.all([
     listPlayers({season:'all', includeArchived:true}),
     readDocsByIds('players', aliases),
-    readWhereIn('players')
+    hasGlobalDataAccess() ? readWhereIn('players') : Promise.resolve([])
   ]);
   const technicalHints = await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints());
   payload.collections.players = rowsMatchingProfileAliases(authorizedPlayers, aliases);
@@ -2360,6 +2361,19 @@ async function playerProfileLoadData(options={}){
     ...playerMatches,
     ...await readDocsByIdsOrField('matches', matchIds, 'matchId')
   ], row => row.matchId || row.id);
+  if(!hasGlobalDataAccess() && selectedTeamIds.length){
+    const eventResults = await Promise.allSettled(teamChunks.flatMap(chunk => [
+      firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('teamId', 'in', chunk))),
+      firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('teamIds', 'array-contains-any', chunk)))
+    ]));
+    const selectedMatchIds = new Set(matches.map(match => match.matchId || match.id).filter(Boolean));
+    payload.collections.matchEvents = mergeRows(eventResults.flatMap(result => {
+      if(result.status !== 'fulfilled') return [];
+      const rows = [];
+      result.value.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
+      return rows;
+    }).filter(event => selectedMatchIds.has(event.matchId) || aliases.includes(String(event.playerId || '').trim())), row => row.eventId || row.id);
+  }
   payload.collections.sessions = mergeRows(sourcePresence.sessions || [], row => row.id || row.sessionId);
   const sessionsById = new Map((payload.collections.sessions || [])
     .map(row => [profilePresenceSessionId(row), row])
@@ -2544,7 +2558,7 @@ async function teamProfileLoadData(options={}){
 	  ] = await Promise.all([
 	    readWhere('matchEvents', 'teamId', '==', teamId),
 	    readWhere('matchEvents', 'teamIds', 'array-contains', teamId),
-	    readWhereIn('matchEvents', 'matchId', matchIds),
+	    hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds) : Promise.resolve([]),
 	    readWhere('attendance', 'teamId', '==', teamId),
 	    readWhere('attendance', 'teamIds', 'array-contains', teamId),
 	    readWhereIn('attendance', 'sessionId', sessionIds),

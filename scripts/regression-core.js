@@ -705,6 +705,9 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(rulesSource.includes('allow list: if canListPlayerRecords(resource.data);'), 'Les requêtes players doivent utiliser une règle de liste explicitement cloisonnée.');
   assert(appSource.includes("const playerListAllScopeModules = new Set(['players','database','stats','teamProfile','playerProfile','tests','tests-athletiques','medical','presences']);"), 'La lecture globale players doit utiliser la même matrice allPlayers que les Rules.');
   assert(appSource.includes('if(!accessAllMatches && !teamIds.length) return [];'), 'Un compte non-admin sans équipe ne doit jamais lancer une lecture globale matches.');
+  assert(appSource.includes("hasGlobalDataAccess() ? readWhereIn('players') : Promise.resolve([])"), 'La fiche joueuse non-admin ne doit pas lancer une liste players sans contrainte d’équipe.');
+  assert(appSource.includes("if(!hasGlobalDataAccess() && collectionName === 'matchEvents') return [];"), 'La fiche joueuse non-admin doit charger matchEvents par ses queries bornées par équipe.');
+  assert(appSource.includes("hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds) : Promise.resolve([])"), 'La fiche équipe non-admin ne doit pas lister matchEvents uniquement par matchId.');
   assert(rulesSource.includes('allow list: if canListMatchRecords(resource.data);'), 'Les listes matches doivent être prouvées directement par leur scope équipe.');
   assert(rulesSource.includes('allow list: if canListMatchEventRecords(resource.data);'), 'Les listes matchEvents doivent être prouvées directement par leur scope équipe.');
   const matchListBody = appSource.match(/async function matchListFromFirestore[\s\S]*?\nfunction playerForSeason/)?.[0] || '';
@@ -725,6 +728,12 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(presencePageSource.indexOf('await deletePresenceEventFromCloud(event);') < presencePageSource.indexOf('await markPresenceEventDeleted(eventId, {event, syncCloud:true});'), 'Le calendrier ne doit masquer une séance qu’après confirmation de Firebase.');
   const mergeWorkflowSource = fs.readFileSync('.github/workflows/firebase-hosting-merge.yml', 'utf8');
   assert(mergeWorkflowSource.includes('deploy --only firestore:rules'), 'Le merge sur main doit publier les règles Firestore avant le site.');
+  assert(mergeWorkflowSource.includes('max_attempts=3'), 'Le déploiement Rules doit limiter les nouvelles tentatives.');
+  assert(mergeWorkflowSource.includes("HTTP Error: (429|500|502|503|504)"), 'Seules les erreurs HTTP transitoires prévues doivent relancer le déploiement Rules.');
+  const previewWorkflowSource = fs.readFileSync('.github/workflows/firebase-hosting-pull-request.yml', 'utf8');
+  assert(previewWorkflowSource.includes('verify-active-firestore-rules.cjs firestore.rules'), 'La preview doit comparer les Rules attendues aux Rules actives avant Hosting.');
+  assert(previewWorkflowSource.includes("Channel URL[^:]*:"), 'La preview doit extraire explicitement la Channel URL Firebase.');
+  assert(!previewWorkflowSource.includes("grep -E 'web\\.app|firebaseapp\\.com' | head -n 1"), 'La preview ne doit jamais prendre la première URL Hosting, qui peut être le site live.');
   assert(appSource.includes("moduleId:'tests-athletiques'"), 'Les Tests athlétiques doivent demander les joueuses dans leur scope module.');
   assert(fs.readFileSync('pages/tests-techniques.html', 'utf8').includes('moduleId:"tests"'), 'Les Tests techniques doivent demander les joueuses dans leur scope module.');
   assert(appSource.includes('async function athleticDeleteTest'), 'Les Tests athlétiques doivent exposer une suppression centralisée.');

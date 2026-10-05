@@ -17,7 +17,27 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
         run: |
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
-          npx firebase-tools@latest deploy --only firestore:rules --project coach-pulse-ee6b0 --non-interactive
+          max_attempts=3
+          attempt=1
+          while true; do
+            set +e
+            npx firebase-tools@latest deploy --only firestore:rules --project coach-pulse-ee6b0 --non-interactive 2>&1 | tee "${RUNNER_TEMP}/firebase-rules-${attempt}.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if ! grep -Eq 'HTTP Error: (429|500|502|503|504)([^0-9]|$)' "${RUNNER_TEMP}/firebase-rules-${attempt}.log"; then
+              exit "$status"
+            fi
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              exit "$status"
+            fi
+            sleep_seconds=$((attempt * 10))
+            echo "Firebase Rules indisponible temporairement. Nouvelle tentative dans ${sleep_seconds}s (${attempt}/${max_attempts})."
+            sleep "$sleep_seconds"
+            attempt=$((attempt + 1))
+          done
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
