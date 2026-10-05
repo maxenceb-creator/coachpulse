@@ -85,11 +85,13 @@ function matchHarness() {
 function firestoreHarness() {
   const documents = new Map();
   const writes = [];
+  const reads = [];
   const sandbox = {
     Date, JSON, Math, Set, Map, Promise,
     db: {}, currentUser: {uid: 'fixture-coach', email: 'coach@example.test'},
     navigator: {onLine: true},
     canEditModule: () => true, canViewModule: () => true,
+    getCurrentPermissionLevel: () => 'SAISIE', getCurrentUserRole: () => 'ENTRAINEUR_ADJOINT',
     getAuthorizedTeamIds: () => ['team-u13-a'],
     teamsService: () => ({canonicalTeamId: () => 'team-u13-a'}),
     seasonFromDate: () => '2026-2027',
@@ -107,6 +109,7 @@ function firestoreHarness() {
       where: (field, operator, value) => ({field, operator, value}),
       query: (collection, filter) => ({collection, filter}),
       getDocs: async query => {
+        reads.push(query);
         const collection = typeof query === 'string' ? query : query.collection;
         const filter = typeof query === 'string' ? null : query.filter;
         const rows = [...documents.entries()].filter(([ref, value]) =>
@@ -119,7 +122,7 @@ function firestoreHarness() {
   };
   vm.createContext(sandbox);
   vm.runInContext(between(read('app.js'), 'function matchDocumentId(', 'function playerForSeason('), sandbox);
-  return {sandbox, documents, writes};
+  return {sandbox, documents, writes, reads};
 }
 
 let checks = 0;
@@ -444,6 +447,18 @@ async function main() {
     assert.equal(remote.length, 1);
     assert.equal(remote[0].log[0].eventId, h.state().log[0].eventId);
     assert.equal((await cloud.sandbox.matchListFromFirestore({teamId: 'team-u16-a'})).length, 0);
+    const readsBeforeMissingScope = cloud.reads.length;
+    cloud.sandbox.getAuthorizedTeamIds = () => [];
+    assert.equal((await cloud.sandbox.matchListFromFirestore({})).length, 0);
+    assert.equal(cloud.reads.length, readsBeforeMissingScope);
+    cloud.sandbox.getAuthorizedTeamIds = () => ['team-u13-a'];
+
+    const adminCloud = firestoreHarness();
+    adminCloud.documents.set('matches/admin-match', {matchId:'admin-match', teamId:'team-u16-a'});
+    adminCloud.sandbox.getCurrentPermissionLevel = () => 'ADMIN';
+    adminCloud.sandbox.getCurrentUserRole = () => 'ADMIN';
+    assert.equal((await adminCloud.sandbox.matchListFromFirestore({})).length, 1);
+    assert(adminCloud.reads.some(readRef => readRef === 'matches'));
 
     const otherDevice = matchHarness();
     otherDevice.sandbox.parent.CoachPulseCentralData = {

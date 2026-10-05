@@ -46,6 +46,18 @@ async function main() {
         allowedModules: ['tests'], authorizedTeamIds: ['U11'],
         moduleScopes: {tests: {allPlayers: true}}
       });
+      for (const moduleId of ['players', 'stats', 'teamProfile', 'playerProfile', 'tests', 'presences']) {
+        await setDoc(doc(db, 'staff_members', `assistantAllPlayers-${moduleId}`), {
+          status: 'ACTIVE', role: 'ENTRAINEUR_ADJOINT', permissionLevel: 'SAISIE',
+          allowedModules: [moduleId], authorizedTeamIds: ['U11'],
+          moduleScopes: {[moduleId]: {allPlayers: true}}
+        });
+      }
+      await setDoc(doc(db, 'staff_members', 'assistantUnsupportedAllPlayers'), {
+        status: 'ACTIVE', role: 'ENTRAINEUR_ADJOINT', permissionLevel: 'SAISIE',
+        allowedModules: ['workload'], authorizedTeamIds: ['U11'],
+        moduleScopes: {workload: {allPlayers: true}}
+      });
       await setDoc(doc(db, 'staff_members', 'inactive'), {
         status: 'INACTIVE', role: 'ADMIN', permissionLevel: 'ADMIN'
       });
@@ -84,11 +96,15 @@ async function main() {
         await setDoc(doc(db, 'players', `p${teamId}`), {playerId: `p${teamId}`, teamId, status: 'ACTIVE'});
         await setDoc(doc(db, 'matches', `m${teamId}`), {matchId: `m${teamId}`, teamId});
         await setDoc(doc(db, 'sessions', `s${teamId}`), {sessionId: `s${teamId}`, teamId, teamIds: [teamId], source: 'Présences', createdFromPresenceModule: true});
-        await setDoc(doc(db, 'matchEvents', `e${teamId}`), {eventId: `e${teamId}`, matchId: `m${teamId}`});
+        await setDoc(doc(db, 'matchEvents', `e${teamId}`), {eventId: `e${teamId}`, matchId: `m${teamId}`, teamId, teamIds: [teamId]});
         await setDoc(doc(db, 'attendance', `a${teamId}`), {attendanceId: `a${teamId}`, sessionId: `s${teamId}`, teamId});
         await setDoc(doc(db, 'technicalTests', `t${teamId}`), {testId: `t${teamId}`, playerId: `p${teamId}`});
         await setDoc(doc(db, 'injuries', `i${teamId}`), {injuryId: `i${teamId}`, playerId: `p${teamId}`});
       }
+      await setDoc(doc(db, 'matches', 'mTeamIdsOnly'), {matchId: 'mTeamIdsOnly', teamIds: ['U11']});
+      await setDoc(doc(db, 'matchEvents', 'eTeamIdsOnly'), {
+        eventId: 'eTeamIdsOnly', matchId: 'mTeamIdsOnly', teamIds: ['U11']
+      });
       await setDoc(doc(db, 'players', 'pDual'), {
         playerId: 'pDual', teamId: 'U13', teamIds: ['U13', 'U11'], status: 'ACTIVE'
       });
@@ -150,6 +166,7 @@ async function main() {
     const adminDb = environment.authenticatedContext('admin').firestore();
     const limitedDb = environment.authenticatedContext('limited').firestore();
     const allPlayersDb = environment.authenticatedContext('allPlayers').firestore();
+    const unsupportedAllPlayersDb = environment.authenticatedContext('assistantUnsupportedAllPlayers').firestore();
     const inactiveDb = environment.authenticatedContext('inactive').firestore();
     const presenceBatchDb = environment.authenticatedContext('presenceBatchCoach').firestore();
     for (const attendanceCount of [0, 1, 5, 10, 15, 20, 22]) {
@@ -220,6 +237,27 @@ async function main() {
     await assertFails(getDocs(query(collection(assistantDb, 'players'), where('rosterTeamIds', 'array-contains-any', ['U11', 'U13']))));
     await assertSucceeds(getDocs(collection(adminDb, 'attendance')));
     await assertSucceeds(getDocs(collection(adminDb, 'players')));
+    process.stdout.write('Checking module all-player list scope matrix\n');
+    for (const moduleId of ['players', 'stats', 'teamProfile', 'playerProfile', 'tests', 'presences']) {
+      const moduleDb = environment.authenticatedContext(`assistantAllPlayers-${moduleId}`).firestore();
+      await assertSucceeds(getDocs(collection(moduleDb, 'players')));
+    }
+    await assertFails(getDocs(collection(unsupportedAllPlayersDb, 'players')));
+    process.stdout.write('Checking team-scoped match and event queries\n');
+    const matchesByTeamId = await assertSucceeds(getDocs(query(collection(db, 'matches'), where('teamId', '==', 'U11'))));
+    assert.deepEqual(matchesByTeamId.docs.map(snapshot => snapshot.id), ['mU11']);
+    const matchesByTeamIds = await assertSucceeds(getDocs(query(collection(db, 'matches'), where('teamIds', 'array-contains', 'U11'))));
+    assert.deepEqual(matchesByTeamIds.docs.map(snapshot => snapshot.id), ['mTeamIdsOnly']);
+    await assertFails(getDocs(query(collection(db, 'matches'), where('teamId', 'in', ['U11', 'U13']))));
+    await assertFails(getDocs(collection(db, 'matches')));
+    const eventsByTeamId = await assertSucceeds(getDocs(query(collection(db, 'matchEvents'), where('teamId', '==', 'U11'))));
+    assert.deepEqual(eventsByTeamId.docs.map(snapshot => snapshot.id), ['eU11']);
+    const eventsByTeamIds = await assertSucceeds(getDocs(query(collection(db, 'matchEvents'), where('teamIds', 'array-contains', 'U11'))));
+    assert.deepEqual(eventsByTeamIds.docs.map(snapshot => snapshot.id).sort(), ['eTeamIdsOnly', 'eU11']);
+    await assertFails(getDocs(query(collection(db, 'matchEvents'), where('teamId', 'in', ['U11', 'U13']))));
+    await assertFails(getDocs(collection(db, 'matchEvents')));
+    await assertSucceeds(getDocs(collection(adminDb, 'matches')));
+    await assertSucceeds(getDocs(collection(adminDb, 'matchEvents')));
     process.stdout.write('Checking retired presence synchronization scope\n');
     const retiredPresenceQuery = query(collection(db, 'sessions'), where('source', '==', 'Import présence'));
     await assertSucceeds(getDocs(query(collection(adminDb, 'sessions'), where('source', '==', 'Import présence'))));
