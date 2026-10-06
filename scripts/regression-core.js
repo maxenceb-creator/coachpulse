@@ -1412,6 +1412,20 @@ function testFirebasePreviewWorkflowReportsExactStage(){
   assert(workflow.includes('echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"'), "L'extraction de la vraie Channel URL doit rester conservee.");
 }
 
+function testProfileFirestoreDiagnosticsStayScoped(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const teamDataSource = fs.readFileSync('pages/team-profile/teamProfileData.js', 'utf8');
+  const teamsServiceSource = fs.readFileSync('shared/services/teams-service.js', 'utf8');
+
+  assert(appSource.includes("page:'playerProfile', function:'readPlayerLinkedCollection'"), 'Les LIST de fiche joueuse doivent identifier readPlayerLinkedCollection.');
+  assert(appSource.includes("page:'playerProfile', function:'readDocsByIds', collection:'players', operation:'GET'"), 'Le GET players doit identifier alias et playerId.');
+  assert(appSource.includes("page:'teamProfile', function:'readTeamPlayers'"), 'Les lectures joueuses de fiche équipe doivent identifier readTeamPlayers.');
+  assert(teamDataSource.includes("diagnosticPage:'teamProfile'"), 'La fiche équipe doit activer explicitement le diagnostic listTeams.');
+  assert(teamsServiceSource.includes("page:'teamProfile', function:'listTeams', collection:COLLECTION, operation:'LIST'"), 'La LIST teams doit être identifiable sans instrumenter les autres pages.');
+  assert(teamsServiceSource.includes('throw error;'), 'Une erreur fatale listTeams doit rester fatale après diagnostic.');
+  assert(appSource.includes("firebaseMessage:error?.message || String(error)\n      });\n      return [];"), 'readTeamPlayers doit continuer à absorber ses erreurs après diagnostic.');
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -1452,6 +1466,7 @@ testFirestorePermissionDiagnosticKeepsSafeOperationContext();
 testFirestorePayloadBoundary();
 testPresenceRuntimeSaveGuards();
 testFirebasePreviewWorkflowReportsExactStage();
+testProfileFirestoreDiagnosticsStayScoped();
 
 Promise.resolve()
   .then(testPresenceLoadingBoundaryReturnsSameRows)

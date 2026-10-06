@@ -2231,7 +2231,14 @@ async function playerProfileLoadData(options={}){
   async function readWhereIn(collectionName, field='playerId', queryChunks=chunks){
     const snaps = await Promise.all(queryChunks.filter(chunk => chunk.length).map(chunk => {
       const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
-      return firebaseFns.getDocs(q);
+      return firebaseFns.getDocs(q).catch(error => {
+        console.error('[CoachPulse Firestore diagnostic]', {
+          page:'playerProfile', function:'readPlayerLinkedCollection', collection:collectionName, operation:'LIST',
+          playerId, query:`where(${field}, in, ${JSON.stringify(chunk)})`,
+          firebaseCode:error?.code || 'unknown', firebaseMessage:error?.message || String(error)
+        });
+        throw error;
+      });
     }));
     const rows = [];
     snaps.forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
@@ -2240,7 +2247,14 @@ async function playerProfileLoadData(options={}){
   async function readArrayContainsAny(collectionName, field){
     const snaps = await Promise.all(chunks.filter(chunk => chunk.length).map(chunk => {
       const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'array-contains-any', chunk));
-      return firebaseFns.getDocs(q);
+      return firebaseFns.getDocs(q).catch(error => {
+        console.error('[CoachPulse Firestore diagnostic]', {
+          page:'playerProfile', function:'readPlayerLinkedCollection', collection:collectionName, operation:'LIST',
+          playerId, query:`where(${field}, array-contains-any, ${JSON.stringify(chunk)})`,
+          firebaseCode:error?.code || 'unknown', firebaseMessage:error?.message || String(error)
+        });
+        throw error;
+      });
     }));
     const rows = [];
     snaps.forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
@@ -2261,9 +2275,24 @@ async function playerProfileLoadData(options={}){
     const rows = [...primary, ...results.flatMap(result => result.status === 'fulfilled' ? result.value : [])];
     return [...new Map(rows.map(row => [row.id, row])).values()];
   }
-  async function readDocsByIds(collectionName, ids){
+  async function readDocsByIds(collectionName, ids, diagnosticPlayerGet=false){
     const uniqueIds = [...new Set([...ids].filter(Boolean))];
-    const snaps = await Promise.all(uniqueIds.map(id => firebaseFns.getDoc(firebaseFns.doc(db, collectionName, id))));
+    const snaps = await Promise.all(uniqueIds.map(alias => firebaseFns.getDoc(firebaseFns.doc(db, collectionName, alias))
+      .then(snap => {
+        if(diagnosticPlayerGet) console.info('[CoachPulse Firestore diagnostic]', {
+          page:'playerProfile', function:'readDocsByIds', collection:'players', operation:'GET',
+          alias, playerId, success:true
+        });
+        return snap;
+      })
+      .catch(error => {
+        if(diagnosticPlayerGet) console.error('[CoachPulse Firestore diagnostic]', {
+          page:'playerProfile', function:'readDocsByIds', collection:'players', operation:'GET',
+          alias, playerId, success:false, firebaseCode:error?.code || 'unknown',
+          firebaseMessage:error?.message || String(error)
+        });
+        throw error;
+      })));
     return snaps.filter(snap => snap.exists()).map(snap => ({id:snap.id, ...snap.data()}));
   }
   async function readDocsByIdsOrField(collectionName, ids, field){
@@ -2284,7 +2313,7 @@ async function playerProfileLoadData(options={}){
   }
   const [authorizedPlayers, playersById, playerRows] = await Promise.all([
     listPlayers({season:'all', includeArchived:true}),
-    readDocsByIds('players', aliases),
+    readDocsByIds('players', aliases, true),
     hasGlobalDataAccess() ? readWhereIn('players') : Promise.resolve([])
   ]);
   const technicalHints = await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints());
@@ -2482,7 +2511,14 @@ async function teamProfileLoadData(options={}){
     try{
       const q = firebaseFns.query(firebaseFns.collection(db, name), firebaseFns.where(field, operator, value));
       return docsFromSnap(await firebaseFns.getDocs(q));
-    }catch(_e){ return []; }
+    }catch(error){
+      console.error('[CoachPulse Firestore diagnostic]', {
+        page:'teamProfile', function:'readTeamPlayers', collection:name, operation:'LIST',
+        teamId, teamIds:[teamId], query:`where(${field}, ${operator}, ${JSON.stringify(value)})`,
+        firebaseCode:error?.code || 'unknown', firebaseMessage:error?.message || String(error)
+      });
+      return [];
+    }
   }
   async function readWhereIn(name, field, values=[]){
     const unique = [...new Set(values.filter(Boolean))];
@@ -2526,7 +2562,7 @@ async function teamProfileLoadData(options={}){
     return filterAuthorizedPlayers(rows).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) || rowMatchesTeamId(player, teamId));
   }
 
-	  const [teams, teamPlayers] = await Promise.all([listTeams({includeArchived:true}), readTeamPlayers(teamId)]);
+	  const [teams, teamPlayers] = await Promise.all([listTeams({includeArchived:true, diagnosticPage:'teamProfile'}), readTeamPlayers(teamId)]);
 	  payload.collections.teams = teams.filter(team => !teamId || (team.teamId || team.id) === teamId);
 	  payload.collections.players = teamPlayers;
 	  if(summaryOnly){

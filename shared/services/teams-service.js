@@ -247,10 +247,18 @@
       ? authorizedTeamIds.reduce((queries, _teamId, index) => {
         if(index % 10 === 0){
           const teamChunk = authorizedTeamIds.slice(index, index + 10);
-          queries.push(firebaseFns.getDocs(firebaseFns.query(
+          const teamQuery = firebaseFns.query(
             firebaseFns.collection(db, COLLECTION),
             firebaseFns.where(firebaseFns.documentId(), 'in', teamChunk)
-          )));
+          );
+          queries.push(firebaseFns.getDocs(teamQuery).catch(error => {
+            if(options.diagnosticPage === 'teamProfile') console.error('[CoachPulse Firestore diagnostic]', {
+              page:'teamProfile', function:'listTeams', collection:COLLECTION, operation:'LIST',
+              teamIds:teamChunk, query:`where(documentId(), in, ${JSON.stringify(teamChunk)})`,
+              firebaseCode:error?.code || 'unknown', firebaseMessage:error?.message || String(error)
+            });
+            throw error;
+          }));
         }
         return queries;
       }, [])
