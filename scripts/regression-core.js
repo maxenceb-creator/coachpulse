@@ -606,6 +606,12 @@ function testProfileReadsStayCanonicalAndTeamScoped(){
   assert(medicalTeamBlock.includes("readWhere(name, 'teamId', '==', teamId)"), 'La fiche équipe doit lire les données médicales par teamId.');
   assert(medicalTeamBlock.includes("readWhere(name, 'teamIds', 'array-contains', teamId)"), 'La fiche équipe doit lire les données médicales par teamIds.');
   assert(!medicalTeamBlock.includes("readWhereIn(name, 'playerId', playerIds)"), 'La fiche équipe ne doit pas lancer de LIST médicale playerId-in non démontrable par les Rules.');
+  assert(appSource.includes('Promise.allSettled(directCollections.map(name => readPlayerLinkedCollection(name)))'), 'Les collections secondaires playerProfile doivent être isolées des données critiques.');
+  assert(appSource.includes('payload.readErrors.push({'), 'Les sections playerProfile refusées doivent rester explicitement diagnostiquées.');
+  assert(!appSource.includes("readWhere('players', 'teamSnapshot.teamIds'"), 'La fiche équipe ne doit pas interroger le snapshot joueuse quand teamId/teamIds sont canoniques.');
+  assert(!appSource.includes("readWhere(name, 'teamSnapshot.teamIds'"), 'La fiche équipe ne doit pas interroger les snapshots équipe redondants des collections secondaires.');
+  assert(!appSource.includes("readWhereIn(name, 'playerId', playerIds)"), 'La fiche équipe ne doit pas lancer de fallback playerId-in redondant.');
+  assert(!appSource.includes("readDocsByIdsOrField('matches'"), 'La fiche joueuse ne doit pas relancer une LIST matches par matchId sans scope équipe.');
 }
 
 function testGlobalExportsStayScoped(){

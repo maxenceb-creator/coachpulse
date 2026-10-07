@@ -44,6 +44,12 @@ async function main() {
         allowedModules: ['medical', 'teamProfile'],
         authorizedTeamIds: ['team-u13-b'], teamIds: ['team-u13-b'], allowedTeamIds: ['team-u13-b']
       });
+      await setDoc(doc(db, 'staff_members', 'profileCoach'), {
+        status:'ACTIVE', role:'ENTRAINEUR', permissionLevel:'EDITEUR',
+        allowedModules:['playerProfile', 'teamProfile', 'medical', 'stats', 'tests', 'presences'],
+        authorizedTeamIds:['team-u13-a', 'team-u13-b'],
+        teamIds:['team-u13-a', 'team-u13-b'], allowedTeamIds:['team-u13-a', 'team-u13-b']
+      });
       await setDoc(doc(db, 'staff_members', 'editor'), {
         status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
         allowedModules: ['stats', 'presences', 'tests'], authorizedTeamIds: ['U11']
@@ -218,6 +224,19 @@ async function main() {
           playerId:'player-team-u16-a-1', teamId:'team-u16-a', teamIds:['team-u16-a']
         });
       }
+      await setDoc(doc(db, 'players', 'player-lila-ouadah-19-09-2014'), {
+        playerId:'player-lila-ouadah-19-09-2014', teamId:'team-u13-a', teamIds:['team-u13-a', 'team-u13-b'], status:'ACTIVE'
+      });
+      await setDoc(doc(db, 'players', 'player-outside-u16'), {
+        playerId:'player-outside-u16', teamId:'team-u16-a', teamIds:['team-u16-a'], status:'ACTIVE'
+      });
+      for (const collectionName of ['workloads', 'individualReports', 'convocations']) {
+        await setDoc(doc(db, collectionName, `${collectionName}-lila`), {playerId:'player-lila-ouadah-19-09-2014'});
+        await setDoc(doc(db, collectionName, `${collectionName}-outside`), {playerId:'player-outside-u16'});
+      }
+      await setDoc(doc(db, 'matches', 'match-team-u13-a-profile'), {matchId:'match-team-u13-a-profile', teamId:'team-u13-a', teamIds:['team-u13-a']});
+      await setDoc(doc(db, 'matches', 'match-team-u13-b-profile'), {matchId:'match-team-u13-b-profile', teamId:'team-u13-b', teamIds:['team-u13-b']});
+      await setDoc(doc(db, 'matches', 'match-team-u16-profile'), {matchId:'match-team-u16-profile', teamId:'team-u16-a', teamIds:['team-u16-a']});
       await setDoc(doc(db, 'technicalTests', 'tLegacy'), {testId: 'tLegacy', playerId: 'pLegacy'});
       await setDoc(doc(db, 'sessions', 'xlsx-2026-05-old'), {sessionId: 'xlsx-2026-05-old', teamId: 'U11', source: 'Import présence'});
       await setDoc(doc(db, 'players', 'pOrphan'), {playerId: 'pOrphan', status: 'ACTIVE'});
@@ -392,6 +411,19 @@ async function main() {
       await assertFails(getDocs(query(collection(teamMedicalDb, collectionName), where('teamId', '==', 'team-u16-a'))));
       await assertFails(getDocs(query(collection(teamMedicalDb, collectionName), where('playerId', 'in', Array.from({length:10}, (_value, index) => `player-team-u13-b-${index + 1}`)))));
     }
+    const profileCoachDb = environment.authenticatedContext('profileCoach').firestore();
+    process.stdout.write('Checking real coach profile query model\n');
+    await assertSucceeds(getDoc(doc(profileCoachDb, 'players', 'player-lila-ouadah-19-09-2014')));
+    await assertFails(getDoc(doc(profileCoachDb, 'players', 'OUADAH')));
+    await assertFails(getDoc(doc(profileCoachDb, 'players', 'player-outside-u16')));
+    await assertFails(getDocs(collection(profileCoachDb, 'players')));
+    for (const collectionName of ['workloads', 'individualReports', 'convocations']) {
+      await assertSucceeds(getDocs(query(collection(profileCoachDb, collectionName), where('playerId', 'in', ['player-lila-ouadah-19-09-2014']))));
+      await assertFails(getDocs(query(collection(profileCoachDb, collectionName), where('playerId', 'in', ['player-outside-u16']))));
+    }
+    await assertSucceeds(getDocs(query(collection(profileCoachDb, 'matches'), where('teamId', '==', 'team-u13-a'))));
+    await assertSucceeds(getDocs(query(collection(profileCoachDb, 'matches'), where('teamId', '==', 'team-u13-b'))));
+    await assertFails(getDocs(query(collection(profileCoachDb, 'matches'), where('teamId', '==', 'team-u16-a'))));
     await assertFails(getDocs(collection(realAssistantDb, 'players')));
     await assertFails(getDocs(collection(realAssistantDb, 'matches')));
     await assertFails(getDocs(query(collection(realAssistantDb, 'matches'), where('teamId', '==', 'team-u13-a'))));

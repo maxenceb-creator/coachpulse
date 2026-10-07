@@ -2216,7 +2216,7 @@ async function playerProfileLoadData(options={}){
   }
   recordPerfEvent('cache:miss', {cache:'playerProfile', key:cacheKey});
   const directCollections = ['attendance','matchEvents','technicalTests','physicalTests','playerMeasurements','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','medicalFollowUps','convocations','individualReports'];
-  const payload = {app:'CoachPulse', module:'playerProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), collections:{players:[],sessions:[],matches:[]}};
+  const payload = {app:'CoachPulse', module:'playerProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), readErrors:[], collections:{players:[],sessions:[],matches:[]}};
   directCollections.forEach(name => { payload.collections[name] = []; });
   function chunksForValues(values=[]){
     const out = [];
@@ -2297,18 +2297,6 @@ async function playerProfileLoadData(options={}){
       })));
     return snaps.filter(snap => snap.exists()).map(snap => ({id:snap.id, ...snap.data()}));
   }
-  async function readDocsByIdsOrField(collectionName, ids, field){
-    const rows = await readDocsByIds(collectionName, ids);
-    const values = [...new Set([...ids].filter(Boolean))];
-    const valueChunks = [];
-    for(let i = 0; i < values.length; i += 10) valueChunks.push(values.slice(i, i + 10));
-    const snaps = await Promise.all(valueChunks.filter(chunk => chunk.length).map(chunk => {
-      const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
-      return firebaseFns.getDocs(q);
-    }));
-    snaps.forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
-    return [...new Map(rows.map(row => [row.id, row])).values()];
-  }
   if(!aliases.length){
     payload.collections.players = await listPlayers({season:'all', includeArchived:true});
     return payload;
@@ -2328,7 +2316,21 @@ async function playerProfileLoadData(options={}){
   });
   payload.collections.players = enrichPlayersWithTechnicalFootHints(payload.collections.players, technicalHints);
   if(playerId && !payload.collections.players.some(player => (player.playerId || player.id) === playerId)) throw new Error('Accès non autorisé à cette joueuse.');
-  await Promise.all(directCollections.map(async name => { payload.collections[name] = await readPlayerLinkedCollection(name); }));
+  const secondaryResults = await Promise.allSettled(directCollections.map(name => readPlayerLinkedCollection(name)));
+  secondaryResults.forEach((result, index) => {
+    const collectionName = directCollections[index];
+    if(result.status === 'fulfilled'){
+      payload.collections[collectionName] = result.value;
+      return;
+    }
+    payload.readErrors.push({
+      collection:collectionName,
+      operation:'LIST',
+      code:result.reason?.code || 'unknown',
+      message:result.reason?.message || String(result.reason)
+    });
+    console.error(`[CoachPulse playerProfile] optionalCollection=${collectionName} status=unavailable code=${result.reason?.code || 'unknown'}`);
+  });
   const selectedPlayer = payload.collections.players.find(player => aliases.includes(String(player.playerId || player.id || '').trim())) || payload.collections.players[0] || {};
   const [presenceEvents, presenceSettings] = await Promise.all([
     presenceListEvents({forceRefresh:options.forceRefresh === true}),
@@ -2390,7 +2392,7 @@ async function playerProfileLoadData(options={}){
   playerMatches.forEach(match => matchIds.add(match.matchId || match.id));
   const matches = mergeRows([
     ...playerMatches,
-    ...await readDocsByIdsOrField('matches', matchIds, 'matchId')
+    ...teamMatches.filter(match => matchIds.has(match.matchId || match.id))
   ], row => row.matchId || row.id);
   if(!hasGlobalDataAccess() && selectedTeamIds.length){
     const eventResults = await Promise.allSettled(teamChunks.flatMap(chunk => [
@@ -2545,20 +2547,8 @@ async function teamProfileLoadData(options={}){
       ...parseStoredJson('coachpulse:customPlayers', [])
     ]).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) && canAccessPlayerRecord(player));
     if(cachedPlayers.length) return cachedPlayers;
-    const seasons = [...new Set([
-      currentSeason(),
-      String(Number(currentSeason().slice(0, 4)) - 1) + '-' + currentSeason().slice(0, 4),
-      '2026-2027',
-      '2025-2026'
-    ].filter(Boolean))];
-    const fieldNames = [
-      'teamId',
-      'teamSnapshot.teamId',
-      ...seasons.flatMap(season => [`seasonHistory.${season}.teamId`, `seasons.${season}.teamId`])
-    ];
-    const fieldReads = fieldNames.map(field => readWhere('players', field, '==', teamId));
+    const fieldReads = [readWhere('players', 'teamId', '==', teamId)];
     fieldReads.push(readWhere('players', 'teamIds', 'array-contains', teamId));
-    fieldReads.push(readWhere('players', 'teamSnapshot.teamIds', 'array-contains', teamId));
     const settled = await Promise.allSettled(fieldReads);
     const rows = uniquePlayers(settled.flatMap(result => result.status === 'fulfilled' ? result.value : []));
     return filterAuthorizedPlayers(rows).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) || rowMatchesTeamId(player, teamId));
@@ -2571,17 +2561,13 @@ async function teamProfileLoadData(options={}){
 	    if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
 	    return payload;
 	  }
-	  const playerIds = payload.collections.players.map(player => player.playerId || player.id).filter(Boolean);
 	  const directNames = ['matches','sessions','technicalTests','physicalTests','injuries','workloads','convocations','individualReports'];
 	  const directRows = await Promise.all(directNames.map(async name => uniqueRows([
 	    ...(await readWhere(name, 'teamId', '==', teamId)),
-	    ...(await readWhere(name, 'teamIds', 'array-contains', teamId)),
-	    ...(await readWhere(name, 'teamSnapshot.teamIds', 'array-contains', teamId))
+	    ...(await readWhere(name, 'teamIds', 'array-contains', teamId))
 	  ])));
 	  directNames.forEach((name, idx) => { payload.collections[name] = directRows[idx]; });
 	  const matchIds = payload.collections.matches.map(row => row.matchId || row.id).filter(Boolean);
-	  const sessionIds = payload.collections.sessions.map(row => row.sessionId || row.id).filter(Boolean);
-	  const playerLinkedNames = ['technicalTests','physicalTests','injuries','workloads','convocations','individualReports'];
 	  const medicalLinkedNames = ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps'];
 	  const [
 	    matchEventsByTeam,
@@ -2589,9 +2575,6 @@ async function teamProfileLoadData(options={}){
 	    matchEventsByMatch,
 	    attendanceByTeam,
 	    attendanceByTeamIds,
-	    attendanceBySession,
-	    attendanceByPlayer,
-	    playerLinkedRows,
 	    medicalLinkedRows
 	  ] = await Promise.all([
 	    readWhere('matchEvents', 'teamId', '==', teamId),
@@ -2599,16 +2582,6 @@ async function teamProfileLoadData(options={}){
 	    hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds) : Promise.resolve([]),
 	    readWhere('attendance', 'teamId', '==', teamId),
 	    readWhere('attendance', 'teamIds', 'array-contains', teamId),
-	    readWhereIn('attendance', 'sessionId', sessionIds),
-	    readWhereIn('attendance', 'playerId', playerIds),
-	    Promise.all(playerLinkedNames.map(async name => {
-	      const [byPlayer, bySnapshotTeam, bySnapshotTeamIds] = await Promise.all([
-        readWhereIn(name, 'playerId', playerIds),
-        readWhere(name, 'playerSnapshot.teamId', '==', teamId),
-        readWhere(name, 'playerSnapshot.teamIds', 'array-contains', teamId)
-      ]);
-      return {name, rows:uniqueRows([...(payload.collections[name] || []), ...byPlayer, ...bySnapshotTeam, ...bySnapshotTeamIds])};
-    })),
     Promise.all(medicalLinkedNames.map(async name => {
       const [byTeam, byTeamIds, bySnapshotTeam, bySnapshotTeamIds] = await Promise.all([
         readWhere(name, 'teamId', '==', teamId),
@@ -2622,8 +2595,7 @@ async function teamProfileLoadData(options={}){
 	  payload.collections.matchEvents = uniqueRows([...matchEventsByTeam, ...matchEventsByTeamIds, ...matchEventsByMatch]);
 	  const localPresence = presenceEventsService()?.collectionsForTeam(teamId) || {sessions:[], attendance:[]};
 	  payload.collections.sessions = uniqueRows([...(payload.collections.sessions || []), ...(localPresence.sessions || [])]);
-	  payload.collections.attendance = uniqueRows([...attendanceByTeam, ...attendanceByTeamIds, ...attendanceBySession, ...attendanceByPlayer, ...(localPresence.attendance || [])]);
-	  playerLinkedRows.forEach(item => { payload.collections[item.name] = item.rows; });
+	  payload.collections.attendance = uniqueRows([...attendanceByTeam, ...attendanceByTeamIds, ...(localPresence.attendance || [])]);
 	  medicalLinkedRows.forEach(item => { payload.collections[item.name] = item.rows; });
   if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
   return payload;
