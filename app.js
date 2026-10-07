@@ -2232,6 +2232,7 @@ async function playerProfileLoadData(options={}){
     const snaps = await Promise.all(queryChunks.filter(chunk => chunk.length).map(chunk => {
       const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'in', chunk));
       return firebaseFns.getDocs(q).catch(error => {
+        console.error(`[CoachPulse playerProfile] collection=${collectionName} operation=LIST playerId=${playerId} code=${error?.code || 'unknown'}`);
         console.error('[CoachPulse Firestore diagnostic]', {
           page:'playerProfile', function:'readPlayerLinkedCollection', collection:collectionName, operation:'LIST',
           playerId, query:`where(${field}, in, ${JSON.stringify(chunk)})`,
@@ -2248,6 +2249,7 @@ async function playerProfileLoadData(options={}){
     const snaps = await Promise.all(chunks.filter(chunk => chunk.length).map(chunk => {
       const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, 'array-contains-any', chunk));
       return firebaseFns.getDocs(q).catch(error => {
+        console.error(`[CoachPulse playerProfile] collection=${collectionName} operation=LIST playerId=${playerId} code=${error?.code || 'unknown'}`);
         console.error('[CoachPulse Firestore diagnostic]', {
           page:'playerProfile', function:'readPlayerLinkedCollection', collection:collectionName, operation:'LIST',
           playerId, query:`where(${field}, array-contains-any, ${JSON.stringify(chunk)})`,

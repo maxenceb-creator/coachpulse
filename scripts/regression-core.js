@@ -1418,6 +1418,7 @@ function testProfileFirestoreDiagnosticsStayScoped(){
   const teamsServiceSource = fs.readFileSync('shared/services/teams-service.js', 'utf8');
 
   assert(appSource.includes("page:'playerProfile', function:'readPlayerLinkedCollection'"), 'Les LIST de fiche joueuse doivent identifier readPlayerLinkedCollection.');
+  assert(appSource.includes('`[CoachPulse playerProfile] collection=${collectionName} operation=LIST playerId=${playerId} code=${error?.code'), 'Le diagnostic playerProfile doit exposer la collection sur une ligne texte filtrable.');
   assert(appSource.includes("page:'playerProfile', function:'readDocsByIds', collection:'players', operation:'GET'"), 'Le GET players doit identifier alias et playerId.');
   assert(appSource.includes("page:'teamProfile', function:'readTeamPlayers'"), 'Les lectures joueuses de fiche équipe doivent identifier readTeamPlayers.');
   assert(teamDataSource.includes("diagnosticPage:'teamProfile'"), 'La fiche équipe doit activer explicitement le diagnostic listTeams.');

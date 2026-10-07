@@ -5,6 +5,9 @@ const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@fireb
 const {collection, doc, documentId, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
 
 async function main() {
+  const playerSnapshotScopedCollections = [
+    'injuries', 'injuryUpdates', 'medicalAppointments', 'rehabRoutines', 'medicalFollowUps'
+  ];
   const environment = await initializeTestEnvironment({
     projectId: 'demo-coachpulse-rules',
     firestore: {rules: fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8')}
@@ -179,6 +182,20 @@ async function main() {
       await setDoc(doc(db, 'injuries', 'real-injury'), {
         injuryId: 'real-injury', playerId: 'real-team-id', teamId: 'team-u11-a', teamIds: ['team-u11-a']
       });
+      for (const collectionName of playerSnapshotScopedCollections) {
+        await setDoc(doc(db, collectionName, `${collectionName}-snapshot-team-allowed`), {
+          playerSnapshot: {teamId: 'team-u11-a'}
+        });
+        await setDoc(doc(db, collectionName, `${collectionName}-snapshot-team-denied`), {
+          playerSnapshot: {teamId: 'team-u13-a'}
+        });
+        await setDoc(doc(db, collectionName, `${collectionName}-snapshot-teams-allowed`), {
+          playerSnapshot: {teamIds: ['team-u11-a', 'team-u19']}
+        });
+        await setDoc(doc(db, collectionName, `${collectionName}-snapshot-teams-denied`), {
+          playerSnapshot: {teamIds: ['team-u13-a']}
+        });
+      }
       await setDoc(doc(db, 'technicalTests', 'tLegacy'), {testId: 'tLegacy', playerId: 'pLegacy'});
       await setDoc(doc(db, 'sessions', 'xlsx-2026-05-old'), {sessionId: 'xlsx-2026-05-old', teamId: 'U11', source: 'Import présence'});
       await setDoc(doc(db, 'players', 'pOrphan'), {playerId: 'pOrphan', status: 'ACTIVE'});
@@ -338,6 +355,13 @@ async function main() {
     await assertSucceeds(getDocs(query(collection(realAssistantDb, 'technicalTests'), where('playerId', 'in', ['real-team-id']))));
     await assertSucceeds(getDocs(query(collection(realAssistantDb, 'physicalTests'), where('playerId', 'in', ['real-team-id']))));
     await assertSucceeds(getDocs(query(collection(realAssistantDb, 'injuries'), where('playerId', 'in', ['real-team-id']))));
+    process.stdout.write('Checking playerSnapshot team scopes across profile collections\n');
+    for (const collectionName of playerSnapshotScopedCollections) {
+      await assertSucceeds(getDocs(query(collection(realAssistantDb, collectionName), where('playerSnapshot.teamId', '==', 'team-u11-a'))));
+      await assertFails(getDocs(query(collection(realAssistantDb, collectionName), where('playerSnapshot.teamId', '==', 'team-u13-a'))));
+      await assertSucceeds(getDocs(query(collection(realAssistantDb, collectionName), where('playerSnapshot.teamIds', 'array-contains', 'team-u11-a'))));
+      await assertFails(getDocs(query(collection(realAssistantDb, collectionName), where('playerSnapshot.teamIds', 'array-contains', 'team-u13-a'))));
+    }
     await assertFails(getDocs(collection(realAssistantDb, 'players')));
     await assertFails(getDocs(collection(realAssistantDb, 'matches')));
     await assertFails(getDocs(query(collection(realAssistantDb, 'matches'), where('teamId', '==', 'team-u13-a'))));
