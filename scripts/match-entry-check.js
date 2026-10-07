@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const firestoreQueries = require('../shared/services/firestore-query-service.js');
 
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -94,6 +95,7 @@ function firestoreHarness() {
     getCurrentPermissionLevel: () => 'SAISIE', getCurrentUserRole: () => 'ENTRAINEUR_ADJOINT',
     getAuthorizedTeamIds: () => ['team-u13-a'],
     teamsService: () => ({canonicalTeamId: () => 'team-u13-a'}),
+    firestoreQueryService: () => firestoreQueries,
     seasonFromDate: () => '2026-2027',
     stableFirestoreId: (...parts) => parts.filter(Boolean).join('-'),
     firestoreSafeData: value => JSON.parse(JSON.stringify(value)),
@@ -115,7 +117,11 @@ function firestoreHarness() {
         const rows = [...documents.entries()].filter(([ref, value]) =>
           ref.startsWith(`${collection}/`) && (!filter || (filter.operator === 'array-contains'
             ? Array.isArray(value[filter.field]) && value[filter.field].includes(filter.value)
-            : value[filter.field] === filter.value)));
+            : filter.operator === 'array-contains-any'
+              ? Array.isArray(value[filter.field]) && filter.value.some(item => value[filter.field].includes(item))
+              : filter.operator === 'in'
+                ? filter.value.includes(value[filter.field])
+                : value[filter.field] === filter.value)));
         return {forEach: callback => rows.forEach(([ref, value]) => callback({id: ref.split('/')[1], data: () => value}))};
       }
     }

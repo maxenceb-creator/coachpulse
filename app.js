@@ -483,6 +483,9 @@ function escapeHtml(v){
 function playersService(){
   return window.CoachPulsePlayersService || null;
 }
+function firestoreQueryService(){
+  return window.CoachPulseFirestoreQueryService || null;
+}
 function teamsService(){
   return window.CoachPulseTeamsService || null;
 }
@@ -2375,14 +2378,10 @@ async function playerProfileLoadData(options={}){
     ...Object.values(selectedHistory).flatMap(row => rowTeamIds(row)),
     ...(Array.isArray(selectedPlayer.teamAssignments) ? selectedPlayer.teamAssignments.flatMap(row => rowTeamIds(row)) : [])
   ])].filter(canAccessTeamId);
-  const teamChunks = chunksForValues(selectedTeamIds);
-  const teamMatchResults = await Promise.allSettled(teamChunks.flatMap(chunk => [
-    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamId', 'in', chunk))),
-    firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamIds', 'array-contains-any', chunk)))
-  ]));
-  const teamMatches = [];
-  teamMatchResults.forEach(result => {
-    if(result.status === 'fulfilled') result.value.forEach(docSnap => teamMatches.push({id:docSnap.id, ...docSnap.data()}));
+  const scopedQueries = firestoreQueryService();
+  const teamMatches = await scopedQueries.readMatchesByTeams(selectedTeamIds, {
+    firebaseFns, db, ignoreErrors:true,
+    diagnostic:{module:'playerProfile', page:'playerProfile', function:'playerProfileLoadData'}
   });
   const playerMatches = teamMatches.filter(match => {
     if((match.playerIds || []).some(id => aliases.includes(String(id || '').trim()))) return true;
@@ -2395,17 +2394,13 @@ async function playerProfileLoadData(options={}){
     ...teamMatches.filter(match => matchIds.has(match.matchId || match.id))
   ], row => row.matchId || row.id);
   if(!hasGlobalDataAccess() && selectedTeamIds.length){
-    const eventResults = await Promise.allSettled(teamChunks.flatMap(chunk => [
-      firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('teamId', 'in', chunk))),
-      firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('teamIds', 'array-contains-any', chunk)))
-    ]));
+    const teamEvents = await scopedQueries.readMatchEventsByTeams(selectedTeamIds, {
+      firebaseFns, db, ignoreErrors:true,
+      diagnostic:{module:'playerProfile', page:'playerProfile', function:'playerProfileLoadData'}
+    });
     const selectedMatchIds = new Set(matches.map(match => match.matchId || match.id).filter(Boolean));
-    payload.collections.matchEvents = mergeRows(eventResults.flatMap(result => {
-      if(result.status !== 'fulfilled') return [];
-      const rows = [];
-      result.value.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
-      return rows;
-    }).filter(event => selectedMatchIds.has(event.matchId) || aliases.includes(String(event.playerId || '').trim())), row => row.eventId || row.id);
+    payload.collections.matchEvents = mergeRows(teamEvents
+      .filter(event => selectedMatchIds.has(event.matchId) || aliases.includes(String(event.playerId || '').trim())), row => row.eventId || row.id);
   }
   payload.collections.sessions = mergeRows(sourcePresence.sessions || [], row => row.id || row.sessionId);
   const sessionsById = new Map((payload.collections.sessions || [])
@@ -2547,10 +2542,13 @@ async function teamProfileLoadData(options={}){
       ...parseStoredJson('coachpulse:customPlayers', [])
     ]).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) && canAccessPlayerRecord(player));
     if(cachedPlayers.length) return cachedPlayers;
-    const fieldReads = [readWhere('players', 'teamId', '==', teamId)];
-    fieldReads.push(readWhere('players', 'teamIds', 'array-contains', teamId));
-    const settled = await Promise.allSettled(fieldReads);
-    const rows = uniquePlayers(settled.flatMap(result => result.status === 'fulfilled' ? result.value : []));
+    const rows = uniquePlayers(await firestoreQueryService().readPlayerRosterByTeams([teamId], {
+      firebaseFns, db, ignoreErrors:true,
+      diagnostic:{module:'teamProfile', page:'teamProfile', function:'readTeamPlayers'},
+      onError:(error, diagnostic) => console.error('[CoachPulse Firestore diagnostic]', {
+        ...diagnostic, firebaseCode:error?.code || 'unknown', firebaseMessage:error?.message || String(error)
+      })
+    }));
     return filterAuthorizedPlayers(rows).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) || rowMatchesTeamId(player, teamId));
   }
 
@@ -2562,26 +2560,22 @@ async function teamProfileLoadData(options={}){
 	    return payload;
 	  }
 	  const directNames = ['matches','sessions','technicalTests','physicalTests','injuries','workloads','convocations','individualReports'];
-	  const directRows = await Promise.all(directNames.map(async name => uniqueRows([
-	    ...(await readWhere(name, 'teamId', '==', teamId)),
-	    ...(await readWhere(name, 'teamIds', 'array-contains', teamId))
-	  ])));
+	  const directRows = await Promise.all(directNames.map(name => firestoreQueryService().readTeamScopedByIdOrIds(name, [teamId], {
+      firebaseFns, db, ignoreErrors:true,
+      diagnostic:{module:'teamProfile', page:'teamProfile', function:'teamProfileLoadData'}
+    })));
 	  directNames.forEach((name, idx) => { payload.collections[name] = directRows[idx]; });
 	  const matchIds = payload.collections.matches.map(row => row.matchId || row.id).filter(Boolean);
 	  const medicalLinkedNames = ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps'];
 	  const [
-	    matchEventsByTeam,
-	    matchEventsByTeamIds,
+	    teamMatchEvents,
 	    matchEventsByMatch,
-	    attendanceByTeam,
-	    attendanceByTeamIds,
+	    teamAttendance,
 	    medicalLinkedRows
 	  ] = await Promise.all([
-	    readWhere('matchEvents', 'teamId', '==', teamId),
-	    readWhere('matchEvents', 'teamIds', 'array-contains', teamId),
+	    firestoreQueryService().readMatchEventsByTeams([teamId], {firebaseFns, db, ignoreErrors:true, diagnostic:{module:'teamProfile', page:'teamProfile', function:'teamProfileLoadData'}}),
 	    hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds) : Promise.resolve([]),
-	    readWhere('attendance', 'teamId', '==', teamId),
-	    readWhere('attendance', 'teamIds', 'array-contains', teamId),
+	    firestoreQueryService().readAttendanceByTeams([teamId], {firebaseFns, db, ignoreErrors:true, diagnostic:{module:'teamProfile', page:'teamProfile', function:'teamProfileLoadData'}}),
     Promise.all(medicalLinkedNames.map(async name => {
       const [byTeam, byTeamIds, bySnapshotTeam, bySnapshotTeamIds] = await Promise.all([
         readWhere(name, 'teamId', '==', teamId),
@@ -2590,12 +2584,12 @@ async function teamProfileLoadData(options={}){
         readWhere(name, 'playerSnapshot.teamIds', 'array-contains', teamId)
       ]);
       return {name, rows:uniqueRows([...byTeam, ...byTeamIds, ...bySnapshotTeam, ...bySnapshotTeamIds])};
-    }))
+	    }))
 	  ]);
-	  payload.collections.matchEvents = uniqueRows([...matchEventsByTeam, ...matchEventsByTeamIds, ...matchEventsByMatch]);
+	  payload.collections.matchEvents = uniqueRows([...teamMatchEvents, ...matchEventsByMatch]);
 	  const localPresence = presenceEventsService()?.collectionsForTeam(teamId) || {sessions:[], attendance:[]};
 	  payload.collections.sessions = uniqueRows([...(payload.collections.sessions || []), ...(localPresence.sessions || [])]);
-	  payload.collections.attendance = uniqueRows([...attendanceByTeam, ...attendanceByTeamIds, ...(localPresence.attendance || [])]);
+	  payload.collections.attendance = uniqueRows([...teamAttendance, ...(localPresence.attendance || [])]);
 	  medicalLinkedRows.forEach(item => { payload.collections[item.name] = item.rows; });
   if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
   return payload;
@@ -4865,19 +4859,21 @@ async function matchListFromFirestore(filters={}){
   const accessAllMatches = getCurrentPermissionLevel() === 'ADMIN' || getCurrentUserRole() === 'ADMIN';
   const teamIds = [...new Set((filters.teamIds || (filters.teamId ? [filters.teamId] : getAuthorizedTeamIds())).filter(Boolean))];
   if(!accessAllMatches && !teamIds.length) return [];
-  const queries = accessAllMatches
-    ? [firebaseFns.getDocs(firebaseFns.collection(db, 'matches'))]
-    : teamIds.flatMap(teamId => [
-        firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamId', '==', teamId))),
-        firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matches'), firebaseFns.where('teamIds', 'array-contains', teamId)))
-      ]);
-  const snapshots = await Promise.all(queries);
   const byId = new Map();
-  snapshots.forEach(snapshot => snapshot.forEach(docSnap => {
-    const row = {id:docSnap.id, matchId:docSnap.id, ...docSnap.data()};
+  const matchRows = accessAllMatches
+    ? await firebaseFns.getDocs(firebaseFns.collection(db, 'matches')).then(snapshot => {
+        const rows = [];
+        snapshot.forEach(docSnap => rows.push({id:docSnap.id, matchId:docSnap.id, ...docSnap.data()}));
+        return rows;
+      })
+    : await firestoreQueryService().readMatchesByTeams(teamIds, {
+        firebaseFns, db, diagnostic:{module:'stats', page:'match', function:'matchListFromFirestore'}
+      });
+  matchRows.forEach(item => {
+    const row = {matchId:item.matchId || item.id, ...item};
     if(filters.season && row.season && row.season !== filters.season) return;
-    byId.set(docSnap.id, row);
-  }));
+    byId.set(row.id, row);
+  });
   const matches = [...byId.values()];
   const eventsByMatch = new Map();
   const addEventSnapshot = eventSnapshot => eventSnapshot.forEach(docSnap => {
@@ -4895,11 +4891,16 @@ async function matchListFromFirestore(filters={}){
       addEventSnapshot(eventSnapshot);
     }));
   }else{
-    const eventSnapshots = await Promise.all(teamIds.flatMap(teamId => [
-      firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('teamId', '==', teamId))),
-      firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, 'matchEvents'), firebaseFns.where('teamIds', 'array-contains', teamId)))
-    ]));
-    eventSnapshots.forEach(addEventSnapshot);
+    const eventRows = await firestoreQueryService().readMatchEventsByTeams(teamIds, {
+      firebaseFns, db, diagnostic:{module:'stats', page:'match', function:'matchListFromFirestore'}
+    });
+    eventRows.forEach(event => {
+      const matchId = String(event.matchId || '');
+      if(!matchId) return;
+      const events = eventsByMatch.get(matchId) || [];
+      events.push(event);
+      eventsByMatch.set(matchId, events);
+    });
   }
   matches.forEach(match => {
     const matchId = match.matchId || match.id;
