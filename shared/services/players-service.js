@@ -584,7 +584,7 @@
   async function readScopedPlayerRows(firebaseFns, db, authorizedTeamIds=[]){
     const canonicalIds = [...new Set(authorizedTeamIds.map(canonicalTeamId).filter(Boolean))];
     return firestoreQueryService().readPlayerRosterByTeams(canonicalIds, {
-      firebaseFns, db, diagnostic:{module:'players', function:'readScopedPlayerRows'},
+      firebaseFns, db, diagnostic:{task:'players:load', module:'players', page:'players', function:'readScopedPlayerRows', critical:true},
       mapDocument:docSnap => normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()})
     });
   }

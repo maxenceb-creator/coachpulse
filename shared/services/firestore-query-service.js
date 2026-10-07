@@ -18,9 +18,30 @@
 
   function documentRow(snapshot){ return {id:snapshot.id, ...snapshot.data()}; }
 
+  function firestoreDiagnostic(error, context={}){
+    const fields = ['task','module','page','function','collection','operation','field','operator','values','teamIds','playerId','matchId','query','critical'];
+    const diagnostic = {};
+    fields.forEach(field => {
+      const value = context[field];
+      if(value !== undefined && value !== null && value !== '') diagnostic[field] = Array.isArray(value) ? [...value] : value;
+    });
+    diagnostic.firebaseCode = String(error?.code || context.firebaseCode || 'unknown');
+    diagnostic.firebaseMessage = String(error?.message || context.firebaseMessage || error || 'unknown');
+    diagnostic.critical = context.critical === true;
+    return diagnostic;
+  }
+
+  function reportFirestoreError(error, context={}, logger){
+    const diagnostic = firestoreDiagnostic(error, context);
+    const output = typeof logger === 'function' ? logger : console.error;
+    output('[CoachPulse Firestore Diagnostic]', diagnostic);
+    return diagnostic;
+  }
+
   function diagnosticContext(options, collectionName, teamIds, field, operator, values){
     return {
       ...(options.diagnostic || {}), collection:collectionName, operation:'LIST', teamIds,
+      field, operator, values,
       query:`where(${field}, ${operator}, ${JSON.stringify(values)})`
     };
   }
@@ -38,7 +59,8 @@
         const queryRef = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, operator, teamChunk));
         reads.push(firebaseFns.getDocs(queryRef).catch(error => {
           const diagnostic = diagnosticContext(options, collectionName, ids, field, operator, teamChunk);
-          if(typeof options.onError === 'function') options.onError(error, diagnostic);
+          if(typeof options.onError === 'function') options.onError(error, firestoreDiagnostic(error, diagnostic));
+          else reportFirestoreError(error, diagnostic);
           if(options.ignoreErrors === true) return null;
           error.coachPulseDiagnostic = diagnostic;
           throw error;
@@ -63,7 +85,7 @@
   function readAttendanceByTeams(teamIds, options={}){ return scopedReader('attendance', teamIds, options); }
 
   const service = {
-    cleanTeamIds, chunks, readTeamScopedByIdOrIds, readPlayerRosterByTeams,
+    cleanTeamIds, chunks, firestoreDiagnostic, reportFirestoreError, readTeamScopedByIdOrIds, readPlayerRosterByTeams,
     readMatchesByTeams, readMatchEventsByTeams, readSessionsByTeams, readAttendanceByTeams
   };
   global.CoachPulseFirestoreQueryService = service;

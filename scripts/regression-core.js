@@ -608,7 +608,7 @@ function testProfileReadsStayCanonicalAndTeamScoped(){
   assert(medicalTeamBlock.includes("readWhere(name, 'teamIds', 'array-contains', teamId)"), 'La fiche équipe doit lire les données médicales par teamIds.');
   assert(!medicalTeamBlock.includes("readWhereIn(name, 'playerId', playerIds)"), 'La fiche équipe ne doit pas lancer de LIST médicale playerId-in non démontrable par les Rules.');
   assert(appSource.includes('Promise.allSettled(directCollections.map(name => readPlayerLinkedCollection(name)))'), 'Les collections secondaires playerProfile doivent être isolées des données critiques.');
-  assert(appSource.includes('payload.readErrors.push({'), 'Les sections playerProfile refusées doivent rester explicitement diagnostiquées.');
+  assert(appSource.includes('payload.readErrors.push(reportFirestoreReadError'), 'Les sections playerProfile refusées doivent conserver un diagnostic structuré dans readErrors.');
   assert(!appSource.includes("readWhere('players', 'teamSnapshot.teamIds'"), 'La fiche équipe ne doit pas interroger le snapshot joueuse quand teamId/teamIds sont canoniques.');
   assert(!appSource.includes("readWhere(name, 'teamSnapshot.teamIds'"), 'La fiche équipe ne doit pas interroger les snapshots équipe redondants des collections secondaires.');
   assert(!appSource.includes("readWhereIn(name, 'playerId', playerIds)"), 'La fiche équipe ne doit pas lancer de fallback playerId-in redondant.');
@@ -1248,14 +1248,14 @@ function testFirestorePermissionDiagnosticKeepsSafeOperationContext(){
   context.decorate(error, {type:'query', _query:{path:{segments:['players']}}}, 'query');
   const result = context.context('dashboard:players', {diagnostic:{function:'refreshPlayers', module:'dashboard', scope:'team', teamId:'team-u13'}}, error).diagnostic;
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    task:'dashboard:players', coachPulseFunction:'refreshPlayers', collection:'players', operation:'query', module:'dashboard',
+    task:'dashboard:players', function:'refreshPlayers', collection:'players', operation:'query', module:'dashboard', page:'', critical:false,
     scope:'team', teamId:'team-u13', role:'ENTRAINEUR', firebaseCode:'firestore/permission-denied',
     firebaseMessage:'Missing or insufficient permissions.'
   }, 'Le permission-denied doit conserver le contexte précis jusqu’à operation.fail().');
   assert(!('email' in result) && !('token' in result) && !('document' in result), 'Le diagnostic ne doit contenir aucune donnée sensible ni contenu Firestore.');
   assert(indicatorSource.includes("console.error('[CoachPulse Firestore Diagnostic]', safeDiagnostic)"), 'Le diagnostic Firestore doit avoir un préfixe console stable.');
   assert(indicatorSource.includes("fingerprint !== lastDiagnostic.fingerprint"), 'Le même diagnostic Firestore immédiat ne doit pas être journalisé plusieurs fois.');
-  assert(indicatorSource.includes('coachPulseFunction:String(') && indicatorSource.includes('teamIds:diagnostic.teamIds.map'), 'Le diagnostic doit afficher directement la fonction et les teamIds sans donnée personnelle.');
+  assert(indicatorSource.includes('function:String(') && indicatorSource.includes('teamIds:diagnostic.teamIds.map'), 'Le diagnostic doit afficher directement la fonction et les teamIds sans donnée personnelle.');
   assert(indicatorSource.includes('Erreur de synchronisation${lastError?.diagnosticRef'), 'L’interface doit conserver le message courant et ajouter la référence technique.');
   assert(indicatorSource.includes('permissionDenied && diagnostic'), 'Les détails techniques ne doivent être produits que pour permission-denied.');
 }
@@ -1443,14 +1443,16 @@ function testProfileFirestoreDiagnosticsStayScoped(){
   const teamDataSource = fs.readFileSync('pages/team-profile/teamProfileData.js', 'utf8');
   const teamsServiceSource = fs.readFileSync('shared/services/teams-service.js', 'utf8');
 
-  assert(appSource.includes("page:'playerProfile', function:'readPlayerLinkedCollection'"), 'Les LIST de fiche joueuse doivent identifier readPlayerLinkedCollection.');
-  assert(appSource.includes('`[CoachPulse playerProfile] collection=${collectionName} operation=LIST playerId=${playerId} code=${error?.code'), 'Le diagnostic playerProfile doit exposer la collection sur une ligne texte filtrable.');
-  assert(appSource.includes("page:'playerProfile', function:'readDocsByIds', collection:'players', operation:'GET'"), 'Le GET players doit identifier alias et playerId.');
+  assert(appSource.includes("module:'playerProfile', page:'playerProfile', function:'readPlayerLinkedCollection'"), 'Les LIST de fiche joueuse doivent identifier readPlayerLinkedCollection.');
+  assert(appSource.includes("task:'player-profile:player'") && appSource.includes("operation:'GET', playerId, critical:true"), 'Le GET players doit identifier son label, son playerId et sa criticité.');
   assert(appSource.includes("function:'readTeamPlayers'"), 'Les lectures joueuses de fiche équipe doivent identifier readTeamPlayers.');
   assert(teamDataSource.includes("diagnosticPage:'teamProfile'"), 'La fiche équipe doit activer explicitement le diagnostic listTeams.');
-  assert(teamsServiceSource.includes("page:'teamProfile', function:'listTeams', collection:COLLECTION, operation:'LIST'"), 'La LIST teams doit être identifiable sans instrumenter les autres pages.');
+  assert(teamsServiceSource.includes("task:'team-profile:teams'") && teamsServiceSource.includes("function:'listTeams'") && teamsServiceSource.includes("collection:COLLECTION, operation:'LIST'"), 'La LIST teams doit être identifiable sans instrumenter les autres pages.');
   assert(teamsServiceSource.includes('throw error;'), 'Une erreur fatale listTeams doit rester fatale après diagnostic.');
   assert(appSource.includes('readPlayerRosterByTeams([teamId]') && appSource.includes('ignoreErrors:true'), 'readTeamPlayers doit continuer à absorber ses erreurs après diagnostic.');
+  ['players:load','matches:load','match-events:load','team-profile:attendance','team-profile:medical','player-profile:medical'].forEach(label => {
+    assert(appSource.includes(`'${label}'`) || fs.readFileSync('shared/services/players-service.js', 'utf8').includes(`'${label}'`), `Le label ${label} doit être standardisé.`);
+  });
 }
 
 async function testTeamScopedFirestoreQueryContract(){
@@ -1499,6 +1501,27 @@ async function testTeamScopedFirestoreQueryContract(){
   assert(appSource.includes("getDocs(firebaseFns.collection(db, 'matches'))"), 'La lecture globale matches doit rester disponible pour ADMIN.');
   assert(playersSource.includes("ctx.accessAllPlayers === false"), 'PlayersService doit conserver la séparation ADMIN/non-admin.');
   assert(playersSource.includes('readPlayerRosterByTeams(canonicalIds'), 'Le roster non-admin doit utiliser le contrat centralisé.');
+
+  const diagnostics = [];
+  const failingFns = {...firebaseFns, async getDocs(){
+    throw Object.assign(new Error('Missing or insufficient permissions.'), {code:'firestore/permission-denied', token:'secret'});
+  }};
+  const failedRows = await firestoreQueries.readAttendanceByTeams(['team-u13-a'], {
+    firebaseFns:failingFns, db:{}, ignoreErrors:true,
+    diagnostic:{task:'team-profile:attendance', module:'teamProfile', page:'teamProfile', function:'teamProfileLoadData', critical:false},
+    onError:(_error, diagnostic) => diagnostics.push(diagnostic)
+  });
+  assert.deepEqual(failedRows, []);
+  assert.equal(diagnostics.length, 2);
+  assert.deepEqual(diagnostics.map(row => [row.field, row.operator]), [
+    ['teamId','in'], ['teamIds','array-contains-any']
+  ]);
+  diagnostics.forEach(diagnostic => {
+    assert.deepEqual(diagnostic.teamIds, ['team-u13-a']);
+    assert.equal(diagnostic.task, 'team-profile:attendance');
+    assert.equal(diagnostic.critical, false);
+    assert(!('token' in diagnostic) && !('password' in diagnostic) && !('credentials' in diagnostic));
+  });
 }
 
 testPlayerIdsAndSeasons();
