@@ -589,6 +589,25 @@ function testMedicalDataStayLinkedToPlayerAndTeamIds(){
   assert(medicalSource.includes('teamId:injury.teamId||injury.playerSnapshot?.teamId'), 'Les évolutions médicales doivent reprendre le teamId de la blessure.');
 }
 
+function testProfileReadsStayCanonicalAndTeamScoped(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const playerId = 'player-lila-ouadah-19-09-2014';
+  const aliases = [playerId, 'OUADAH', 'lila-ouadah'];
+  const firestorePlayerDocIds = playerId ? [playerId] : [];
+
+  assert.deepEqual(firestorePlayerDocIds, ['player-lila-ouadah-19-09-2014']);
+  assert(!firestorePlayerDocIds.includes(aliases[1]) && !firestorePlayerDocIds.includes(aliases[2]), 'Les aliases legacy de Lila ne doivent pas devenir des GET players/{alias}.');
+  assert(appSource.includes("readDocsByIds('players', playerId ? [playerId] : [], true)"), 'La fiche joueuse doit limiter le GET players à l’ID canonique sélectionné.');
+  assert(!appSource.includes("readDocsByIds('players', aliases, true)"), 'La fiche joueuse ne doit jamais traiter les aliases texte comme des IDs de documents players.');
+  const medicalTeamBlock = appSource.slice(
+    appSource.indexOf("Promise.all(medicalLinkedNames.map"),
+    appSource.indexOf('medicalLinkedRows.forEach')
+  );
+  assert(medicalTeamBlock.includes("readWhere(name, 'teamId', '==', teamId)"), 'La fiche équipe doit lire les données médicales par teamId.');
+  assert(medicalTeamBlock.includes("readWhere(name, 'teamIds', 'array-contains', teamId)"), 'La fiche équipe doit lire les données médicales par teamIds.');
+  assert(!medicalTeamBlock.includes("readWhereIn(name, 'playerId', playerIds)"), 'La fiche équipe ne doit pas lancer de LIST médicale playerId-in non démontrable par les Rules.');
+}
+
 function testGlobalExportsStayScoped(){
   const appSource = fs.readFileSync('app.js', 'utf8');
 
@@ -1444,6 +1463,7 @@ testModuleAllPlayersScopeStaysModuleSpecific();
 testModuleRegistry();
 testAthleticTestsStayLinkedToPlayerAndTeamIds();
 testMedicalDataStayLinkedToPlayerAndTeamIds();
+testProfileReadsStayCanonicalAndTeamScoped();
 testGlobalExportsStayScoped();
 testDataHubImportsStayScoped();
 testFirestoreRulesProtectExistingAndIncomingScope();

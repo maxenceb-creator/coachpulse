@@ -2315,7 +2315,7 @@ async function playerProfileLoadData(options={}){
   }
   const [authorizedPlayers, playersById, playerRows] = await Promise.all([
     listPlayers({season:'all', includeArchived:true}),
-    readDocsByIds('players', aliases, true),
+    readDocsByIds('players', playerId ? [playerId] : [], true),
     hasGlobalDataAccess() ? readWhereIn('players') : Promise.resolve([])
   ]);
   const technicalHints = await technicalPlayerFootHints().catch(() => readTechnicalPlayerFootHints());
@@ -2610,14 +2610,13 @@ async function teamProfileLoadData(options={}){
       return {name, rows:uniqueRows([...(payload.collections[name] || []), ...byPlayer, ...bySnapshotTeam, ...bySnapshotTeamIds])};
     })),
     Promise.all(medicalLinkedNames.map(async name => {
-      const [byTeam, byTeamIds, byPlayer, bySnapshotTeam, bySnapshotTeamIds] = await Promise.all([
+      const [byTeam, byTeamIds, bySnapshotTeam, bySnapshotTeamIds] = await Promise.all([
         readWhere(name, 'teamId', '==', teamId),
         readWhere(name, 'teamIds', 'array-contains', teamId),
-        readWhereIn(name, 'playerId', playerIds),
         readWhere(name, 'playerSnapshot.teamId', '==', teamId),
         readWhere(name, 'playerSnapshot.teamIds', 'array-contains', teamId)
       ]);
-      return {name, rows:uniqueRows([...byTeam, ...byTeamIds, ...byPlayer, ...bySnapshotTeam, ...bySnapshotTeamIds])};
+      return {name, rows:uniqueRows([...byTeam, ...byTeamIds, ...bySnapshotTeam, ...bySnapshotTeamIds])};
     }))
 	  ]);
 	  payload.collections.matchEvents = uniqueRows([...matchEventsByTeam, ...matchEventsByTeamIds, ...matchEventsByMatch]);
