@@ -204,10 +204,22 @@ service cloud.firestore {
     }
 
     function playerSnapshotTeamIdMatches(data, teams) {
-      return teams.hasAny([data.playerSnapshot.teamId]);
+      return data.get('playerSnapshot', {}) is map
+        && data.get('playerSnapshot', {}).get('teamId', '') != ''
+        && teams.hasAny([data.get('playerSnapshot', {}).get('teamId', '')]);
     }
 
     function playerSnapshotTeamIdsMatch(data, teams) {
+      return data.get('playerSnapshot', {}) is map
+        && data.get('playerSnapshot', {}).get('teamIds', []) is list
+        && data.get('playerSnapshot', {}).get('teamIds', []).hasAny(teams);
+    }
+
+    function playerSnapshotTeamIdQueryMatches(data, teams) {
+      return teams.hasAny([data.playerSnapshot.teamId]);
+    }
+
+    function playerSnapshotTeamIdsQueryMatch(data, teams) {
       return data.playerSnapshot.teamIds.hasAny(teams);
     }
 
@@ -229,6 +241,32 @@ service cloud.firestore {
           level == 'ADMIN'
           || playerSnapshotTeamIdMatches(data, teams)
           || playerSnapshotTeamIdsMatch(data, teams)
+          || (hasScopeFields(data) && scopedTeams(data).hasAny(teams))
+          || (
+            data.keys().hasAny(['playerId'])
+            && linkedTeamMatches('players', data.playerId, teams)
+          )
+        );
+    }
+
+    function canListMedicalProfileData(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && (
+          moduleAllowedFrom(modules, level, staffRole, 'medical')
+          || moduleAllowedFrom(modules, level, staffRole, 'playerProfile')
+        )
+        && (
+          level == 'ADMIN'
+          || playerSnapshotTeamIdQueryMatches(data, teams)
+          || playerSnapshotTeamIdsQueryMatch(data, teams)
           || (hasScopeFields(data) && scopedTeams(data).hasAny(teams))
           || (
             data.keys().hasAny(['playerId'])
@@ -829,35 +867,40 @@ service cloud.firestore {
     }
 
     match /injuries/{recordId} {
-      allow read: if canReadMedicalProfileData(resource.data);
+      allow get: if canReadMedicalProfileData(resource.data);
+      allow list: if canListMedicalProfileData(resource.data);
       allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
       allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /injuryUpdates/{recordId} {
-      allow read: if canReadMedicalProfileData(resource.data);
+      allow get: if canReadMedicalProfileData(resource.data);
+      allow list: if canListMedicalProfileData(resource.data);
       allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
       allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /medicalAppointments/{recordId} {
-      allow read: if canReadMedicalProfileData(resource.data);
+      allow get: if canReadMedicalProfileData(resource.data);
+      allow list: if canListMedicalProfileData(resource.data);
       allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
       allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /rehabRoutines/{recordId} {
-      allow read: if canReadMedicalProfileData(resource.data);
+      allow get: if canReadMedicalProfileData(resource.data);
+      allow list: if canListMedicalProfileData(resource.data);
       allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
       allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /medicalFollowUps/{recordId} {
-      allow read: if canReadMedicalProfileData(resource.data);
+      allow get: if canReadMedicalProfileData(resource.data);
+      allow list: if canListMedicalProfileData(resource.data);
       allow create: if canWriteMedicalData() && canAccessScopedData(request.resource.data);
       allow update: if canWriteMedicalData() && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);

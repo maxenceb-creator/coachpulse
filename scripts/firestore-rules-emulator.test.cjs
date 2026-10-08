@@ -207,6 +207,27 @@ async function main() {
           playerSnapshot: {teamIds: ['team-u13-a']}
         });
       }
+      await setDoc(doc(db, 'injuries', 'snapshot-guard-no-snapshot'), {
+        teamId: 'team-u11-a'
+      });
+      await setDoc(doc(db, 'injuries', 'snapshot-guard-empty-snapshot'), {
+        teamId: 'team-u11-a', playerSnapshot: {}
+      });
+      await setDoc(doc(db, 'injuries', 'snapshot-guard-no-team-id'), {
+        playerSnapshot: {teamIds: ['team-u11-a']}
+      });
+      await setDoc(doc(db, 'injuries', 'snapshot-guard-no-team-ids'), {
+        playerSnapshot: {teamId: 'team-u11-a'}
+      });
+      await setDoc(doc(db, 'injuries', 'snapshot-guard-team-ids-wrong-type'), {
+        teamId: 'team-u11-a', playerSnapshot: {teamIds: 'team-u11-a'}
+      });
+      await setDoc(doc(db, 'injuries', 'snapshot-guard-snapshot-wrong-type'), {
+        teamId: 'team-u11-a', playerSnapshot: 'team-u11-a'
+      });
+      await setDoc(doc(db, 'injuries', 'snapshot-guard-foreign-team'), {
+        teamId: 'team-u13-a', playerSnapshot: {}
+      });
       for (const playerId of Array.from({length:10}, (_value, index) => `player-team-u13-b-${index + 1}`)) {
         await setDoc(doc(db, 'players', playerId), {playerId, teamId:'team-u13-b', teamIds:['team-u13-b'], status:'ACTIVE'});
       }
@@ -403,6 +424,18 @@ async function main() {
       await assertSucceeds(getDocs(query(collection(realAssistantDb, collectionName), where('playerSnapshot.teamIds', 'array-contains', 'team-u11-a'))));
       await assertFails(getDocs(query(collection(realAssistantDb, collectionName), where('playerSnapshot.teamIds', 'array-contains', 'team-u13-a'))));
     }
+    process.stdout.write('Checking incomplete playerSnapshot guards\n');
+    for (const documentId of [
+      'snapshot-guard-no-snapshot',
+      'snapshot-guard-empty-snapshot',
+      'snapshot-guard-no-team-id',
+      'snapshot-guard-no-team-ids',
+      'snapshot-guard-team-ids-wrong-type',
+      'snapshot-guard-snapshot-wrong-type'
+    ]) {
+      await assertSucceeds(getDoc(doc(realAssistantDb, 'injuries', documentId)));
+    }
+    await assertFails(getDoc(doc(realAssistantDb, 'injuries', 'snapshot-guard-foreign-team')));
     const teamMedicalDb = environment.authenticatedContext('teamMedicalCoach').firestore();
     process.stdout.write('Checking team-scoped medical profile queries\n');
     for (const collectionName of ['medicalFollowUps', 'rehabRoutines']) {
