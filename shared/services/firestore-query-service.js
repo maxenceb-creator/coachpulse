@@ -38,6 +38,32 @@
     return diagnostic;
   }
 
+  async function settleProfileReads(reads=[], options={}){
+    const results = await Promise.allSettled(reads.map(item => item.read()));
+    const values = {};
+    const readErrors = Array.isArray(options.readErrors) ? options.readErrors : [];
+    let criticalError = null;
+    results.forEach((result, index) => {
+      const item = reads[index] || {};
+      if(result.status === 'fulfilled'){
+        values[item.name] = result.value;
+        return;
+      }
+      const diagnostic = result.reason?.coachPulseDiagnostic?.firebaseCode
+        ? result.reason.coachPulseDiagnostic
+        : reportFirestoreError(result.reason, {...(item.diagnostic || {}), critical:item.critical === true}, options.logger);
+      try{ result.reason.coachPulseDiagnostic = diagnostic; }catch(_error){}
+      if(item.critical === true){
+        if(!criticalError) criticalError = result.reason;
+        return;
+      }
+      readErrors.push(diagnostic);
+      values[item.name] = item.fallback === undefined ? [] : item.fallback;
+    });
+    if(criticalError) throw criticalError;
+    return {values, readErrors};
+  }
+
   function diagnosticContext(options, collectionName, teamIds, field, operator, values){
     return {
       ...(options.diagnostic || {}), collection:collectionName, operation:'LIST', teamIds,
@@ -85,7 +111,7 @@
   function readAttendanceByTeams(teamIds, options={}){ return scopedReader('attendance', teamIds, options); }
 
   const service = {
-    cleanTeamIds, chunks, firestoreDiagnostic, reportFirestoreError, readTeamScopedByIdOrIds, readPlayerRosterByTeams,
+    cleanTeamIds, chunks, firestoreDiagnostic, reportFirestoreError, settleProfileReads, readTeamScopedByIdOrIds, readPlayerRosterByTeams,
     readMatchesByTeams, readMatchEventsByTeams, readSessionsByTeams, readAttendanceByTeams
   };
   global.CoachPulseFirestoreQueryService = service;
