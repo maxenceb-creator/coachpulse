@@ -15,7 +15,8 @@
     filters:{periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', competition:'', matchType:'', venue:'', result:'', opponent:''},
     renderToken:0,
     loadingTeamId:'',
-    detailLoadingTeamId:''
+    detailLoadingTeamId:'',
+    criticalError:null
   };
   function debugPerf(){ try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; } }
   function logPerf(label, start){ if(debugPerf()) console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
@@ -54,6 +55,7 @@
       return;
     }
     state.selectedTeamId = teamId;
+    state.criticalError = null;
     const alreadyLoaded = !!state.teamCache[teamId];
     const hasCompleteData = !!state.teamCache[teamId]?.complete;
     state.loadingTeamId = alreadyLoaded ? '' : teamId;
@@ -95,6 +97,7 @@
         state.seasons = Filters.seasonsFromCollections(state.collections);
       }
     }catch(error){
+      if(state.selectedTeamId === teamId) state.criticalError = error;
       if(debugPerf()) console.warn('[CoachPulse perf] full team load failed', teamId, error);
     }finally{
       if(state.detailLoadingTeamId === teamId) state.detailLoadingTeamId = '';
@@ -144,10 +147,18 @@
       logPerf('teamProfile.render.loading', start);
       return;
     }
+    if(state.criticalError){
+      root.innerHTML = UI.renderControls(state) + `<section class="panel"><div class="empty-state">Chargement impossible : ${UI.esc(state.criticalError.message || state.criticalError)}</div></section>`;
+      bind();
+      return;
+    }
     const summary = Metrics.summarize(team, state.collections || {}, state);
     if(renderToken !== state.renderToken) return;
     summary.collections = state.collections || {};
-    root.innerHTML = UI.renderControls(state) + UI.renderHeader(summary) + UI.renderTabs(state) + UI.renderKpis(summary.kpis) + UI.renderBody(summary, state);
+    const optionalNotice = state.payload?.readErrors?.length
+      ? `<div class="notice">Certaines sections secondaires sont temporairement indisponibles (${state.payload.readErrors.length}).</div>`
+      : '';
+    root.innerHTML = UI.renderControls(state) + optionalNotice + UI.renderHeader(summary) + UI.renderTabs(state) + UI.renderKpis(summary.kpis) + UI.renderBody(summary, state);
     bind();
     logPerf('teamProfile.render', start);
   }

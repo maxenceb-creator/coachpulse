@@ -226,6 +226,14 @@
     return {firebaseFns, db};
   }
 
+  function reportFirestoreError(error, diagnostic){
+    const service = global.CoachPulseFirestoreQueryService
+      || (typeof require === 'function' ? require('./firestore-query-service.js') : null);
+    return service?.reportFirestoreError
+      ? service.reportFirestoreError(error, diagnostic)
+      : console.error('[CoachPulse Firestore Diagnostic]', diagnostic);
+  }
+
   async function listTeams(ctx={}, options={}){
     const {firebaseFns, db} = firestoreContext(ctx);
     const now = Date.now();
@@ -247,10 +255,18 @@
       ? authorizedTeamIds.reduce((queries, _teamId, index) => {
         if(index % 10 === 0){
           const teamChunk = authorizedTeamIds.slice(index, index + 10);
-          queries.push(firebaseFns.getDocs(firebaseFns.query(
+          const teamQuery = firebaseFns.query(
             firebaseFns.collection(db, COLLECTION),
             firebaseFns.where(firebaseFns.documentId(), 'in', teamChunk)
-          )));
+          );
+          queries.push(firebaseFns.getDocs(teamQuery).catch(error => {
+            if(options.diagnosticPage === 'teamProfile') reportFirestoreError(error, {
+              task:'team-profile:teams', module:'teamProfile', page:'teamProfile', function:'listTeams',
+              collection:COLLECTION, operation:'LIST', field:'documentId()', operator:'in', values:teamChunk,
+              teamIds:teamChunk, query:`where(documentId(), in, ${JSON.stringify(teamChunk)})`, critical:true
+            });
+            throw error;
+          }));
         }
         return queries;
       }, [])

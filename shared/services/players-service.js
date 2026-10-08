@@ -575,26 +575,18 @@
     return {firebaseFns, db};
   }
 
-  function chunks(values=[], size=10){
-    const unique = [...new Set(values.map(asText).filter(Boolean))];
-    const out = [];
-    for(let index=0;index<unique.length;index+=size) out.push(unique.slice(index,index+size));
-    return out;
+  function firestoreQueryService(){
+    if(global.CoachPulseFirestoreQueryService) return global.CoachPulseFirestoreQueryService;
+    if(typeof require === 'function') return require('./firestore-query-service.js');
+    return null;
   }
 
   async function readScopedPlayerRows(firebaseFns, db, authorizedTeamIds=[]){
     const canonicalIds = [...new Set(authorizedTeamIds.map(canonicalTeamId).filter(Boolean))];
-    if(!canonicalIds.length) return [];
-    const reads = [];
-    chunks(canonicalIds).forEach(teamChunk => {
-      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('rosterTeamIds', 'array-contains-any', teamChunk))));
-      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamId', 'in', teamChunk))));
-      reads.push(firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db, COLLECTION), firebaseFns.where('teamIds', 'array-contains-any', teamChunk))));
+    return firestoreQueryService().readPlayerRosterByTeams(canonicalIds, {
+      firebaseFns, db, diagnostic:{task:'players:load', module:'players', page:'players', function:'readScopedPlayerRows', critical:true},
+      mapDocument:docSnap => normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()})
     });
-    const settled = await Promise.all(reads);
-    const byId = new Map();
-    settled.forEach(snap => snap.forEach(docSnap => byId.set(docSnap.id, normalizePlayer({id:docSnap.id, playerId:docSnap.id, documentId:docSnap.id, ...docSnap.data()}))));
-    return [...byId.values()];
   }
 
   async function listPlayers(ctx={}, filters={}){
