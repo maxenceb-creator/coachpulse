@@ -3,10 +3,17 @@
 (function(global){
   const DEFAULT_CHUNK_SIZE = 10;
 
+  function isCanonicalTeamId(value){
+    const id = String(value || '').trim();
+    return /^team-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)
+      && id !== 'team-global'
+      && !id.startsWith('team-team-');
+  }
+
   function cleanTeamIds(teamIds=[]){
     return [...new Set((Array.isArray(teamIds) ? teamIds : [])
       .map(value => String(value || '').trim())
-      .filter(Boolean))];
+      .filter(isCanonicalTeamId))];
   }
 
   function chunks(values=[], size=DEFAULT_CHUNK_SIZE){
@@ -111,7 +118,7 @@
   function readAttendanceByTeams(teamIds, options={}){ return scopedReader('attendance', teamIds, options); }
 
   const service = {
-    cleanTeamIds, chunks, firestoreDiagnostic, reportFirestoreError, settleProfileReads, readTeamScopedByIdOrIds, readPlayerRosterByTeams,
+    isCanonicalTeamId, cleanTeamIds, chunks, firestoreDiagnostic, reportFirestoreError, settleProfileReads, readTeamScopedByIdOrIds, readPlayerRosterByTeams,
     readMatchesByTeams, readMatchEventsByTeams, readSessionsByTeams, readAttendanceByTeams
   };
   global.CoachPulseFirestoreQueryService = service;

@@ -27,6 +27,54 @@ function loadBrowserScript(filePath, windowOverrides={}){
   return window;
 }
 
+function sourceFunction(source, name){
+  const start = source.indexOf(`async function ${name}(`);
+  assert(start >= 0, `Fonction ${name} introuvable.`);
+  const open = source.indexOf('){', start) + 1;
+  assert(open > 0, `Corps de ${name} introuvable.`);
+  let depth = 0;
+  for(let index=open;index<source.length;index++){
+    if(source[index] === '{') depth++;
+    if(source[index] === '}' && --depth === 0) return source.slice(start, index + 1);
+  }
+  throw new Error(`Fin de ${name} introuvable.`);
+}
+
+function runtimeFirestore(documents, deniedCollections=[]){
+  const reads = [];
+  const denied = new Set(deniedCollections);
+  const snapshot = rows => ({forEach(callback){ rows.forEach(row => callback({id:row.id, data:() => row.data})); }});
+  const firebaseFns = {
+    collection(_db, name){ return {name}; },
+    where(field, operator, value){ return {field, operator, value}; },
+    query(collectionRef, clause){ return {collectionRef, clause}; },
+    doc(_db, collectionName, id){ return {collectionName, id}; },
+    async getDoc(ref){
+      reads.push({collection:ref.collectionName, operation:'GET', id:ref.id});
+      const row = documents[ref.collectionName]?.find(item => item.id === ref.id);
+      return {id:ref.id, exists:() => Boolean(row), data:() => row?.data};
+    },
+    async getDocs(ref){
+      const collectionName = ref.name || ref.collectionRef?.name;
+      const clause = ref.clause;
+      reads.push({collection:collectionName, operation:'LIST', ...(clause || {global:true})});
+      if(denied.has(collectionName)) throw Object.assign(new Error(`${collectionName} denied`), {code:'firestore/permission-denied'});
+      const rows = documents[collectionName] || [];
+      if(!clause) return snapshot(rows);
+      const valueAt = (data, path) => path.split('.').reduce((value, key) => value?.[key], data);
+      const matching = rows.filter(row => {
+        const actual = valueAt(row.data, clause.field);
+        if(clause.operator === 'in') return clause.value.includes(actual);
+        if(clause.operator === 'array-contains-any') return Array.isArray(actual) && actual.some(value => clause.value.includes(value));
+        if(clause.operator === 'array-contains') return Array.isArray(actual) && actual.includes(clause.value);
+        return actual === clause.value;
+      });
+      return snapshot(matching);
+    }
+  };
+  return {firebaseFns, reads};
+}
+
 function testPlayerIdsAndSeasons(){
   const raw = {
     nom:'Martin',
@@ -784,7 +832,7 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes("const playerListAllScopeModules = new Set(['players','database','stats','teamProfile','playerProfile','tests','tests-athletiques','medical','presences']);"), 'La lecture globale players doit utiliser la même matrice allPlayers que les Rules.');
   assert(appSource.includes('if(!accessAllMatches && !teamIds.length) return [];'), 'Un compte non-admin sans équipe ne doit jamais lancer une lecture globale matches.');
   assert(appSource.includes("hasGlobalDataAccess() ? readWhereIn('players') : Promise.resolve([])"), 'La fiche joueuse non-admin ne doit pas lancer une liste players sans contrainte d’équipe.');
-  assert(appSource.includes("if(!hasGlobalDataAccess() && collectionName === 'matchEvents') return [];"), 'La fiche joueuse non-admin doit charger matchEvents par ses queries bornées par équipe.');
+  assert(appSource.includes("if(!hasGlobalDataAccess() && ['attendance','matchEvents'].includes(collectionName)) return [];"), 'La fiche joueuse non-admin doit charger attendance et matchEvents par ses queries bornées par équipe.');
   assert(appSource.includes("hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds, true) : Promise.resolve([])"), 'La fiche équipe non-admin ne doit pas lister matchEvents uniquement par matchId.');
   assert(rulesSource.includes('allow list: if canListMatchRecords(resource.data);'), 'Les listes matches doivent être prouvées directement par leur scope équipe.');
   assert(rulesSource.includes('allow list: if canListMatchEventRecords(resource.data);'), 'Les listes matchEvents doivent être prouvées directement par leur scope équipe.');
@@ -1529,6 +1577,10 @@ async function testTeamScopedFirestoreQueryContract(){
   assert.deepEqual(await firestoreQueries.readMatchesByTeams([], options), []);
   assert.equal(calls.length, 0, 'Une portée vide ne doit lancer aucune query Firestore.');
 
+  assert.deepEqual(firestoreQueries.cleanTeamIds(['U11 A','team-team-u11-a','team-global','team-u11-a']), ['team-u11-a']);
+  assert.equal(firestoreQueries.isCanonicalTeamId('team-u11-a'), true);
+  assert.equal(firestoreQueries.isCanonicalTeamId('U11 A'), false);
+
   const matches = await firestoreQueries.readMatchesByTeams(['', 'team-u13-a', 'team-u13-a'], options);
   assert.deepEqual(calls.map(call => [call.clause.field, call.clause.operator]), [
     ['teamId','in'], ['teamIds','array-contains-any']
@@ -1553,6 +1605,9 @@ async function testTeamScopedFirestoreQueryContract(){
   assert(appSource.includes("getDocs(firebaseFns.collection(db, 'matches'))"), 'La lecture globale matches doit rester disponible pour ADMIN.');
   assert(playersSource.includes("ctx.accessAllPlayers === false"), 'PlayersService doit conserver la séparation ADMIN/non-admin.');
   assert(playersSource.includes('readPlayerRosterByTeams(canonicalIds'), 'Le roster non-admin doit utiliser le contrat centralisé.');
+  assert(appSource.includes("['attendance','matchEvents'].includes(collectionName)"), 'La fiche joueuse non-admin ne doit pas lire attendance ou matchEvents par playerId seul.');
+  assert(appSource.includes('readSessionsByTeams(selectedTeamIds'), 'La fiche joueuse doit charger les séances via le scope équipe.');
+  assert(appSource.includes('readAttendanceByTeams(selectedTeamIds'), 'La fiche joueuse doit charger les présences via le scope équipe.');
 
   const diagnostics = [];
   const failingFns = {...firebaseFns, async getDocs(){
@@ -1574,6 +1629,117 @@ async function testTeamScopedFirestoreQueryContract(){
     assert.equal(diagnostic.critical, false);
     assert(!('token' in diagnostic) && !('password' in diagnostic) && !('credentials' in diagnostic));
   });
+}
+
+async function testTeamProfileRuntimeUsesOnlyTeamScopedQueries(){
+  const teamId = 'team-u11-a';
+  const foreignTeamId = 'team-u13-a';
+  const documents = {
+    players:[
+      {id:'player-home', data:{playerId:'player-home', teamId, teamIds:[teamId], rosterTeamIds:[teamId]}},
+      {id:'player-away', data:{playerId:'player-away', teamId:foreignTeamId, teamIds:[foreignTeamId], rosterTeamIds:[foreignTeamId]}}
+    ],
+    matches:[
+      {id:'match-old', data:{matchId:'match-old', teamId, teamIds:[teamId], date:'2025-09-01'}},
+      {id:'match-new', data:{matchId:'match-new', teamId, teamIds:[teamId], date:'2026-09-01'}},
+      {id:'match-away', data:{matchId:'match-away', teamId:foreignTeamId, teamIds:[foreignTeamId]}}
+    ],
+    matchEvents:[
+      {id:'event-home', data:{eventId:'event-home', matchId:'match-new', teamId, teamIds:[teamId]}},
+      {id:'event-away', data:{eventId:'event-away', matchId:'match-away', teamId:foreignTeamId, teamIds:[foreignTeamId]}}
+    ],
+    sessions:[{id:'session-home', data:{sessionId:'session-home', teamId, teamIds:[teamId]}}],
+    attendance:[{id:'attendance-home', data:{sessionId:'session-home', playerId:'player-home', teamId, teamIds:[teamId]}}]
+  };
+  const cloud = runtimeFirestore(documents, ['medicalAppointments']);
+  const quietConsole = {...console, error() {}, info() {}};
+  const context = vm.createContext({
+    console:quietConsole, Date, Map, Set, JSON,
+    db:{}, currentUser:{uid:'coach'}, firebaseFns:cloud.firebaseFns,
+    measureAsync:(_name, read) => read(), canViewModule:() => true, canAccessTeamId:id => id === teamId,
+    hasGlobalDataAccess:() => false, currentSeason:() => '2026-2027', recordPerfEvent() {},
+    appDataCache:{teamProfiles:new Map()}, DATA_CACHE_TTL_MS:0, cloneData:value => structuredClone(value),
+    collectCentralFirestoreDocs:() => ({}), presenceEventsService:() => ({collectionsForTeam:() => ({sessions:[],attendance:[]})}),
+    uniqueProfileRows:rows => rows, parseStoredJson:() => [], listTeams:async () => [{id:teamId,teamId,name:'U11 A'}],
+    normalizePlayer:value => value, playerMatchesTeamIdForAnySeason:(row,id) => row.teamId === id || row.teamIds?.includes(id) || row.rosterTeamIds?.includes(id),
+    canAccessPlayerRecord:row => row.teamId === teamId || row.teamIds?.includes(teamId) || row.rosterTeamIds?.includes(teamId),
+    filterAuthorizedPlayers:rows => rows.filter(row => row.teamId === teamId || row.teamIds?.includes(teamId) || row.rosterTeamIds?.includes(teamId)),
+    rowMatchesTeamId:(row,id) => row.teamId === id || row.teamIds?.includes(id),
+    firestoreQueryService:() => firestoreQueries,
+    reportFirestoreReadError:(error, diagnostic) => firestoreQueries.firestoreDiagnostic(error, diagnostic)
+  });
+  vm.runInContext(sourceFunction(fs.readFileSync('app.js','utf8'), 'teamProfileLoadData'), context);
+  const payload = await context.teamProfileLoadData({teamId, forceRefresh:true});
+  assert.deepEqual(Array.from(payload.collections.players, row => row.playerId), ['player-home']);
+  assert.deepEqual(Array.from(payload.collections.matches, row => row.matchId).sort(), ['match-new','match-old']);
+  assert.deepEqual(Array.from(payload.collections.matchEvents, row => row.eventId), ['event-home']);
+  assert.deepEqual(Array.from(payload.collections.sessions, row => row.sessionId), ['session-home']);
+  assert.deepEqual(Array.from(payload.collections.attendance, row => row.playerId), ['player-home']);
+  assert(payload.readErrors.some(error => error.collection === 'medicalAppointments' && error.critical === false));
+  assert.equal(cloud.reads.some(read => read.global), false, 'teamProfile non-admin ne doit lancer aucune LIST globale.');
+  assert.equal(cloud.reads.some(read => read.collection === 'matchEvents' && read.field === 'matchId'), false, 'teamProfile non-admin ne doit pas lire matchEvents par matchId seul.');
+
+  const readsBeforeEmptyScope = cloud.reads.length;
+  const empty = await context.teamProfileLoadData({forceRefresh:true});
+  assert.equal(empty.collections.players.length, 0);
+  assert.equal(cloud.reads.length, readsBeforeEmptyScope, 'teamProfile sans équipe autorisée ne doit lancer aucune query.');
+}
+
+async function testPlayerProfileRuntimeUsesCanonicalGetAndTeamScope(){
+  const teamId = 'team-u11-a';
+  const foreignTeamId = 'team-u13-a';
+  const player = {id:'player-home', playerId:'player-home', teamId, teamIds:[teamId], rosterTeamIds:[teamId]};
+  const documents = {
+    players:[{id:'player-home', data:player}],
+    matches:[
+      {id:'match-home', data:{matchId:'match-home', teamId, teamIds:[teamId], playerIds:['player-home']}},
+      {id:'match-away', data:{matchId:'match-away', teamId:foreignTeamId, teamIds:[foreignTeamId], playerIds:['player-away']}}
+    ],
+    matchEvents:[
+      {id:'event-home', data:{eventId:'event-home', matchId:'match-home', playerId:'player-home', teamId, teamIds:[teamId]}},
+      {id:'event-away', data:{eventId:'event-away', matchId:'match-away', playerId:'player-away', teamId:foreignTeamId, teamIds:[foreignTeamId]}}
+    ],
+    sessions:[{id:'session-home', data:{sessionId:'session-home', teamId, teamIds:[teamId]}}],
+    attendance:[
+      {id:'attendance-home', data:{attendanceId:'attendance-home', sessionId:'session-home', playerId:'player-home', teamId, teamIds:[teamId]}},
+      {id:'attendance-other-player', data:{attendanceId:'attendance-other-player', sessionId:'session-home', playerId:'player-other', teamId, teamIds:[teamId]}}
+    ]
+  };
+  const cloud = runtimeFirestore(documents, ['injuries']);
+  const quietConsole = {...console, error() {}, info() {}};
+  const context = vm.createContext({
+    console:quietConsole, Date, Map, Set, JSON,
+    db:{}, currentUser:{uid:'coach'}, firebaseFns:cloud.firebaseFns,
+    measureAsync:(_name, read) => read(), canViewModule:() => true, hasGlobalDataAccess:() => false,
+    appDataCache:{playerProfiles:new Map()}, DATA_CACHE_TTL_MS:0, recordPerfEvent() {}, cloneData:value => structuredClone(value),
+    currentSeason:() => '2026-2027', listPlayers:async () => [player],
+    technicalPlayerFootHints:async () => ({}), readTechnicalPlayerFootHints:() => ({}),
+    rowsMatchingProfileAliases:(rows, aliases) => rows.filter(row => aliases.includes(row.playerId || row.id)),
+    filterAuthorizedPlayers:rows => rows.filter(row => row.teamId === teamId), normalizePlayer:value => value,
+    canAccessPlayerRecord:row => row.teamId === teamId, enrichPlayersWithTechnicalFootHints:rows => rows,
+    reportFirestoreReadError:(error, diagnostic) => firestoreQueries.firestoreDiagnostic(error, diagnostic),
+    presenceListEvents:async () => [], presenceLoadSettings:async () => ({}), profilePresenceDeletionMarkers:() => new Set(),
+    isDeletedProfilePresenceEvent:() => false, profilePresenceEventMatchesPlayer:() => false,
+    presenceEventsService:() => ({collectionsFromEvents:() => ({sessions:[],attendance:[]})}),
+    profilePresenceSessionId:row => row.sessionId || row.id, seedTechnicalTestsForProfile:async () => [],
+    canUseAthletic:() => false, localTechnicalTestsForProfile:() => [], athleticListData:async () => [],
+    stableFirestoreId:(...parts) => parts.join('-'), canAccessRecord:row => row.teamId === teamId,
+    rowTeamIds:row => [...new Set([row.teamId, ...(row.teamIds || []), ...(row.rosterTeamIds || [])].filter(Boolean))],
+    canAccessTeamId:id => id === teamId, firestoreQueryService:() => firestoreQueries,
+    isElapsedProfilePresenceRow:() => true
+  });
+  vm.runInContext(sourceFunction(fs.readFileSync('app.js','utf8'), 'playerProfileLoadData'), context);
+  const payload = await context.playerProfileLoadData({playerId:'player-home', aliases:['HOME','old-player-home'], forceRefresh:true});
+  assert.deepEqual(Array.from(payload.collections.players, row => row.playerId), ['player-home']);
+  assert.deepEqual(Array.from(payload.collections.matches, row => row.matchId), ['match-home']);
+  assert.deepEqual(Array.from(payload.collections.matchEvents, row => row.eventId), ['event-home']);
+  assert.deepEqual(Array.from(payload.collections.sessions, row => row.sessionId), ['session-home']);
+  assert.deepEqual(Array.from(payload.collections.attendance, row => row.playerId), ['player-home']);
+  assert(payload.readErrors.some(error => error.collection === 'injuries' && error.critical === false));
+  assert.deepEqual(cloud.reads.filter(read => read.collection === 'players' && read.operation === 'GET').map(read => read.id), ['player-home']);
+  assert.equal(cloud.reads.some(read => read.collection === 'attendance' && read.field === 'playerId'), false, 'playerProfile non-admin ne doit pas lire attendance par playerId seul.');
+  assert.equal(cloud.reads.some(read => read.collection === 'matchEvents' && read.field === 'matchId'), false, 'playerProfile non-admin ne doit pas lire matchEvents par matchId seul.');
+  assert.equal(cloud.reads.some(read => read.global), false, 'playerProfile non-admin ne doit lancer aucune LIST globale.');
 }
 
 testPlayerIdsAndSeasons();
@@ -1621,6 +1787,8 @@ testProfileFirestoreDiagnosticsStayScoped();
 
 Promise.resolve()
   .then(testTeamScopedFirestoreQueryContract)
+  .then(testTeamProfileRuntimeUsesOnlyTeamScopedQueries)
+  .then(testPlayerProfileRuntimeUsesCanonicalGetAndTeamScope)
   .then(testProfileReadIsolationContract)
   .then(testPresenceLoadingBoundaryReturnsSameRows)
   .then(testScopedPlayerReadFiltersInFirestore)

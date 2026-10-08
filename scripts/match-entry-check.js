@@ -505,6 +505,21 @@ async function main() {
     assert.deepEqual([...cloud.documents.keys()], refsAfterLegacyRecovery);
   });
 
+  await test('team-scoped match runtime returns old and recent matches with grouped authorized events', async () => {
+    const cloud = firestoreHarness();
+    cloud.documents.set('matches/match-old', {matchId:'match-old', teamId:'team-u13-a', teamIds:['team-u13-a'], date:'2025-09-01'});
+    cloud.documents.set('matches/match-recent', {matchId:'match-recent', teamId:'team-u13-a', teamIds:['team-u13-a'], date:'2026-09-01'});
+    cloud.documents.set('matches/match-foreign', {matchId:'match-foreign', teamId:'team-u11-a', teamIds:['team-u11-a'], date:'2026-10-01'});
+    cloud.documents.set('matchEvents/event-old', {eventId:'event-old', matchId:'match-old', teamId:'team-u13-a', teamIds:['team-u13-a'], minute:4});
+    cloud.documents.set('matchEvents/event-recent', {eventId:'event-recent', matchId:'match-recent', teamId:'team-u13-a', teamIds:['team-u13-a'], minute:9});
+    cloud.documents.set('matchEvents/event-foreign', {eventId:'event-foreign', matchId:'match-foreign', teamId:'team-u11-a', teamIds:['team-u11-a'], minute:2});
+    const matches = await cloud.sandbox.matchListFromFirestore({});
+    assert.deepEqual(Array.from(matches, match => match.matchId).sort(), ['match-old','match-recent']);
+    assert.deepEqual(Array.from(matches.flatMap(match => match.events), event => event.eventId).sort(), ['event-old','event-recent']);
+    assert.equal(cloud.reads.some(read => read === 'matches' || read === 'matchEvents'), false);
+    assert.equal(cloud.reads.some(read => read?.collection === 'matchEvents' && read?.filter?.field === 'matchId'), false);
+  });
+
   console.log(`Match entry guards OK (${checks} behavior groups; DOM/rendering and Firebase I/O mocked).`);
 }
 
