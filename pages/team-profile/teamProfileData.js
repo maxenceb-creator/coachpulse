@@ -51,7 +51,7 @@
   }
   function rowMatchesTeam(row={}, teamId=''){ return Boolean(text(teamId) && rowTeamIds(row).includes(text(teamId))); }
   async function listTeams(){
-    if(api().listTeams) return (await api().listTeams({includeArchived:false})).filter(team => !api().canAccessTeam || api().canAccessTeam(teamIdOf(team)));
+    if(api().listTeams) return (await api().listTeams({includeArchived:false, diagnosticPage:'teamProfile'})).filter(team => !api().canAccessTeam || api().canAccessTeam(teamIdOf(team)));
     return OFFICIAL_TEAMS;
   }
   async function loadTeamData(teamId, options={}){

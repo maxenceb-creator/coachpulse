@@ -169,11 +169,17 @@
       || String(diagnostic?.firebaseMessage || error?.message || '').toLowerCase().includes('missing or insufficient permissions');
     if(permissionDenied && diagnostic){
       const safeDiagnostic = {
-        task:String(diagnostic.task || options.label || 'operation'), coachPulseFunction:String(diagnostic.coachPulseFunction || diagnostic.function || 'unknown'),
+        task:String(diagnostic.task || options.label || 'operation'), function:String(diagnostic.function || diagnostic.coachPulseFunction || 'unknown'),
         collection:String(diagnostic.collection || 'unknown'), operation:String(diagnostic.operation || 'unknown'),
-        module:String(diagnostic.module || 'app'), scope:String(diagnostic.scope || 'unknown'),
+        module:String(diagnostic.module || 'app'), page:String(diagnostic.page || ''), scope:String(diagnostic.scope || 'unknown'),
+        critical:diagnostic.critical === true,
         ...(diagnostic.teamId ? {teamId:String(diagnostic.teamId)} : {}), role:String(diagnostic.role || 'unknown'),
         ...(Array.isArray(diagnostic.teamIds) ? {teamIds:diagnostic.teamIds.map(value => String(value))} : {}),
+        ...(diagnostic.field ? {field:String(diagnostic.field)} : {}),
+        ...(diagnostic.operator ? {operator:String(diagnostic.operator)} : {}),
+        ...(Array.isArray(diagnostic.values) ? {values:diagnostic.values.map(value => String(value))} : {}),
+        ...(diagnostic.playerId ? {playerId:String(diagnostic.playerId)} : {}),
+        ...(diagnostic.matchId ? {matchId:String(diagnostic.matchId)} : {}),
         ...(diagnostic.query ? {query:String(diagnostic.query)} : {}),
         ...(Array.isArray(diagnostic.batchDocuments) ? {batchDocuments:diagnostic.batchDocuments.map(row => ({
           path:String(row?.path || ''), operation:String(row?.operation || ''), teamId:String(row?.teamId || ''),

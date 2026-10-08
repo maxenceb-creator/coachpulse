@@ -16,7 +16,8 @@
     view:'overview',
     filters:{team:'', matchType:'', periodMode:'season', season:Data.currentSeason(), startDate:'', endDate:'', compareSeasonA:'', compareSeasonB:Data.currentSeason(), comparePlayerIds:[]},
     renderToken:0,
-    loadingPlayerId:''
+    loadingPlayerId:'',
+    criticalError:null
   };
   function debugPerf(){ try{ return localStorage.getItem('coachpulse:debugPerf') === '1'; }catch(_e){ return false; } }
   function logPerf(label, start){ if(debugPerf()) console.info(`[CoachPulse perf] ${label}: ${Math.round(performance.now() - start)}ms`); }
@@ -135,14 +136,20 @@
       return;
     }
     state.selectedPlayerId = playerId;
+    state.criticalError = null;
     try{ localStorage.setItem('coachpulse:playerProfile:selectedPlayerId', playerId); }catch(_e){}
     const alreadyLoaded = !!state.collectionCache[playerId];
     state.loadingPlayerId = alreadyLoaded ? '' : playerId;
     await render();
     if(!alreadyLoaded){
-      await loadSelected();
-      state.loadingPlayerId = '';
-      await render();
+      try{
+        await loadSelected();
+      }catch(error){
+        state.criticalError = error;
+      }finally{
+        state.loadingPlayerId = '';
+        await render();
+      }
     }else{
       const loaded = state.collectionCache[playerId];
       state.payload = loaded.payload;
@@ -232,6 +239,11 @@
     await ensureSelectedPlayer();
     if(renderToken !== state.renderToken) return;
     const selectedPlayer = player();
+    if(state.criticalError){
+      root.innerHTML = Render.renderControls(state) + `<section class="panel"><div class="empty-state">Chargement impossible : ${Render.esc(state.criticalError.message || state.criticalError)}</div></section>`;
+      bind();
+      return;
+    }
     const period = Filters.periodFromState(state);
     const selectedCollections = collectionsForPlayer(state.selectedPlayerId);
     const summary = Stats.summarize(selectedPlayer, selectedCollections, state);
@@ -254,7 +266,10 @@
       body = Render.renderPlayerCompare(Compare.comparePlayers(comparePlayers, collectionMap, state), state);
     }
     if(renderToken !== state.renderToken) return;
-    root.innerHTML = Render.renderControls(state) + Render.renderKpis(summary) + body;
+    const optionalNotice = state.payload?.readErrors?.length
+      ? `<div class="notice">Certaines sections secondaires sont temporairement indisponibles (${state.payload.readErrors.length}).</div>`
+      : '';
+    root.innerHTML = Render.renderControls(state) + optionalNotice + Render.renderKpis(summary) + body;
     document.getElementById('identityCard').innerHTML = Render.renderIdentity(selectedPlayer, period, summary);
     document.querySelectorAll('[data-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.view === state.view));
     bind();
