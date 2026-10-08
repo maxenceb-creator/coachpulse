@@ -2648,7 +2648,7 @@ async function teamProfileLoadData(options={}){
 	  const medicalLinkedNames = ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps'];
     async function readOptionalMedical(name){
       const specs = [
-        ['teamId', '=='], ['teamIds', 'array-contains'],
+        ['teamId', '=='],
         ['playerSnapshot.teamId', '=='], ['playerSnapshot.teamIds', 'array-contains']
       ];
       const settled = await firestoreQueryService().settleProfileReads(specs.map(([field, operator]) => ({

@@ -653,7 +653,9 @@ function testProfileReadsStayCanonicalAndTeamScoped(){
     appSource.indexOf('const detailReads = await firestoreQueryService().settleProfileReads')
   );
   assert(medicalTeamBlock.includes("['teamId', '==']"), 'La fiche équipe doit lire les données médicales par teamId.');
-  assert(medicalTeamBlock.includes("['teamIds', 'array-contains']"), 'La fiche équipe doit lire les données médicales par teamIds.');
+  assert(!medicalTeamBlock.includes("['teamIds', 'array-contains']"), 'La fiche équipe ne doit pas lancer de LIST médicale directe teamIds array-contains non démontrable par les Rules.');
+  assert(medicalTeamBlock.includes("['playerSnapshot.teamId', '==']"), 'La fiche équipe doit conserver la lecture médicale par playerSnapshot.teamId.');
+  assert(medicalTeamBlock.includes("['playerSnapshot.teamIds', 'array-contains']"), 'La fiche équipe doit conserver la lecture médicale par playerSnapshot.teamIds.');
   assert(!medicalTeamBlock.includes("readWhereIn(name, 'playerId', playerIds)"), 'La fiche équipe ne doit pas lancer de LIST médicale playerId-in non démontrable par les Rules.');
   assert(appSource.includes('Promise.allSettled(directCollections.map(name => readPlayerLinkedCollection(name)))'), 'Les collections secondaires playerProfile doivent être isolées des données critiques.');
   assert(appSource.includes('payload.readErrors.push(reportFirestoreReadError'), 'Les sections playerProfile refusées doivent conserver un diagnostic structuré dans readErrors.');
