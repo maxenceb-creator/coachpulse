@@ -95,6 +95,18 @@ async function main() {
         allowedModules: ['presences'], authorizedTeamIds: ['U11'],
         modulePermissions: {presences: 'write'}, moduleScopes: {presences: {allPlayers: false}}
       });
+      for (const uid of [
+        'selfRole', 'selfLevel', 'selfModules', 'selfAuthorizedTeams', 'selfTeamIds',
+        'selfAllowedTeamIds', 'selfScopes', 'selfModulePermissions', 'selfUnknown',
+        'selfPromotion', 'selfWrongEmail', 'selfWrongTimestamp'
+      ]) {
+        await setDoc(doc(db, 'staff_members', uid), {
+          status: 'ACTIVE', role: 'ENTRAINEUR', permissionLevel: 'SAISIE',
+          email: `${uid}@example.test`, lastLoginAt: Timestamp.fromMillis(1),
+          allowedModules: ['presences'], authorizedTeamIds: ['U11'],
+          modulePermissions: {presences: 'write'}, moduleScopes: {presences: {allPlayers: false}}
+        });
+      }
       await setDoc(doc(db, 'staff_members', 'presenceBatchCoach'), {
         status: 'ACTIVE', role: 'ENTRAINEUR', permissionLevel: 'EDITEUR',
         allowedModules: ['presences'],
@@ -331,18 +343,22 @@ async function main() {
         uid, email:`${uid}@example.test`, ...profile
       }));
     }
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {role:'ADMIN'}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {permissionLevel:'ADMIN'}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {allowedModules:['admin']}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {authorizedTeamIds:['team-arbitrary']}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {teamIds:['team-arbitrary']}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {allowedTeamIds:['team-arbitrary']}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {moduleScopes:{admin:{allPlayers:true}}}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {modulePermissions:{admin:'write'}}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {status:'ACTIVE', unknownPrivilege:true}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {role:'ADMIN', permissionLevel:'ADMIN'}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {email:'other@example.test', lastLoginAt:Timestamp.fromMillis(2)}, {merge:true}));
-    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {email:'self-maintainer@example.test', lastLoginAt:'not-a-timestamp'}, {merge:true}));
+    const assertSelfUpdateFails = async (uid, patch) => {
+      const selfDb = environment.authenticatedContext(uid, {email:`${uid}@example.test`}).firestore();
+      await assertFails(setDoc(doc(selfDb, 'staff_members', uid), patch, {merge:true}));
+    };
+    await assertSelfUpdateFails('selfRole', {role:'ADMIN'});
+    await assertSelfUpdateFails('selfLevel', {permissionLevel:'ADMIN'});
+    await assertSelfUpdateFails('selfModules', {allowedModules:['admin']});
+    await assertSelfUpdateFails('selfAuthorizedTeams', {authorizedTeamIds:['team-arbitrary']});
+    await assertSelfUpdateFails('selfTeamIds', {teamIds:['team-arbitrary']});
+    await assertSelfUpdateFails('selfAllowedTeamIds', {allowedTeamIds:['team-arbitrary']});
+    await assertSelfUpdateFails('selfScopes', {moduleScopes:{admin:{allPlayers:true}}});
+    await assertSelfUpdateFails('selfModulePermissions', {modulePermissions:{admin:'write'}});
+    await assertSelfUpdateFails('selfUnknown', {unknownPrivilege:true});
+    await assertSelfUpdateFails('selfPromotion', {role:'ADMIN', permissionLevel:'ADMIN'});
+    await assertSelfUpdateFails('selfWrongEmail', {email:'other@example.test', lastLoginAt:Timestamp.fromMillis(2)});
+    await assertSelfUpdateFails('selfWrongTimestamp', {email:'selfWrongTimestamp@example.test', lastLoginAt:'not-a-timestamp'});
     await assertSucceeds(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {
       email:'self-maintainer@example.test', lastLoginAt:Timestamp.fromMillis(2)
     }, {merge:true}));
