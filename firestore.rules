@@ -100,7 +100,9 @@ service cloud.firestore {
     }
 
     function canManageUsers() {
-      return canEditData() && canAccessModule('admin');
+      return hasActiveStaffProfile()
+        && role() == 'ADMIN'
+        && permissionLevel() == 'ADMIN';
     }
 
     function canManageCoreData() {
@@ -697,19 +699,16 @@ service cloud.firestore {
     function isAllowedSelfStaffMaintenance(uid) {
       return signedIn()
         && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email']);
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email'])
+        && request.resource.data.email is string
+        && request.auth.token.email is string
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.lastLoginAt is timestamp;
     }
 
     match /staff_members/{uid} {
       allow read: if canManageUsers() || (signedIn() && request.auth.uid == uid);
-      allow create: if canManageUsers()
-        || (
-          signedIn()
-          && request.auth.uid == uid
-          && request.resource.data.role in ['RESPONSABLE_POLE', 'ENTRAINEUR', 'ENTRAINEUR_ADJOINT', 'PREPARATEUR_PHYSIQUE', 'KINE', 'MEDECIN', 'DIRIGEANT', 'EDUCATEUR', 'COACH', 'LECTURE', 'OBSERVATEUR_STAFF']
-          && request.resource.data.permissionLevel in ['LECTEUR', 'SAISIE', 'EDITEUR']
-          && request.resource.data.status == 'ACTIVE'
-        );
+      allow create: if canManageUsers();
       allow update: if canManageUsers() || isAllowedSelfStaffMaintenance(uid);
       allow delete: if noDelete();
     }

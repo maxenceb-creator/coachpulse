@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {collection, doc, documentId, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
+const {Timestamp, collection, doc, documentId, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
 
 async function main() {
   const playerSnapshotScopedCollections = [
@@ -54,6 +54,10 @@ async function main() {
         status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
         allowedModules: ['stats', 'presences', 'tests'], authorizedTeamIds: ['U11']
       });
+      await setDoc(doc(db, 'staff_members', 'adminModuleEditor'), {
+        status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
+        allowedModules: ['admin'], authorizedTeamIds: ['U11']
+      });
       await setDoc(doc(db, 'staff_members', 'noTests'), {
         status: 'ACTIVE', role: 'COACH', permissionLevel: 'SAISIE',
         allowedModules: ['presences'], authorizedTeamIds: ['U11']
@@ -84,6 +88,12 @@ async function main() {
       });
       await setDoc(doc(db, 'staff_members', 'inactive'), {
         status: 'INACTIVE', role: 'ADMIN', permissionLevel: 'ADMIN'
+      });
+      await setDoc(doc(db, 'staff_members', 'selfMaintainer'), {
+        status: 'ACTIVE', role: 'ENTRAINEUR', permissionLevel: 'SAISIE',
+        email: 'self-maintainer@example.test', lastLoginAt: Timestamp.fromMillis(1),
+        allowedModules: ['presences'], authorizedTeamIds: ['U11'],
+        modulePermissions: {presences: 'write'}, moduleScopes: {presences: {allPlayers: false}}
       });
       await setDoc(doc(db, 'staff_members', 'presenceBatchCoach'), {
         status: 'ACTIVE', role: 'ENTRAINEUR', permissionLevel: 'EDITEUR',
@@ -297,13 +307,57 @@ async function main() {
     const assistantDb = environment.authenticatedContext('assistant').firestore();
     const realAssistantDb = environment.authenticatedContext('realAssistant').firestore();
     const editorDb = environment.authenticatedContext('editor').firestore();
+    const adminModuleEditorDb = environment.authenticatedContext('adminModuleEditor').firestore();
     const noTestsDb = environment.authenticatedContext('noTests').firestore();
     const adminDb = environment.authenticatedContext('admin').firestore();
     const limitedDb = environment.authenticatedContext('limited').firestore();
     const allPlayersDb = environment.authenticatedContext('allPlayers').firestore();
     const unsupportedAllPlayersDb = environment.authenticatedContext('assistantUnsupportedAllPlayers').firestore();
     const inactiveDb = environment.authenticatedContext('inactive').firestore();
+    const selfMaintainerDb = environment.authenticatedContext('selfMaintainer', {
+      email: 'self-maintainer@example.test'
+    }).firestore();
     const presenceBatchDb = environment.authenticatedContext('presenceBatchCoach').firestore();
+    process.stdout.write('Checking staff privilege-escalation guards\n');
+    const selfProvisionCases = [
+      ['selfNoProfile', {role:'ENTRAINEUR', permissionLevel:'LECTEUR', status:'ACTIVE'}],
+      ['selfEditorAdmin', {role:'ENTRAINEUR', permissionLevel:'EDITEUR', status:'ACTIVE', allowedModules:['admin']}],
+      ['selfNoModules', {role:'ENTRAINEUR', permissionLevel:'SAISIE', status:'ACTIVE'}],
+      ['selfArbitraryTeams', {role:'ENTRAINEUR', permissionLevel:'SAISIE', status:'ACTIVE', authorizedTeamIds:['team-arbitrary']}]
+    ];
+    for (const [uid, profile] of selfProvisionCases) {
+      const selfProvisionDb = environment.authenticatedContext(uid, {email:`${uid}@example.test`}).firestore();
+      await assertFails(setDoc(doc(selfProvisionDb, 'staff_members', uid), {
+        uid, email:`${uid}@example.test`, ...profile
+      }));
+    }
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {role:'ADMIN'}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {permissionLevel:'ADMIN'}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {allowedModules:['admin']}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {authorizedTeamIds:['team-arbitrary']}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {teamIds:['team-arbitrary']}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {allowedTeamIds:['team-arbitrary']}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {moduleScopes:{admin:{allPlayers:true}}}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {modulePermissions:{admin:'write'}}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {status:'ACTIVE', unknownPrivilege:true}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {role:'ADMIN', permissionLevel:'ADMIN'}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {email:'other@example.test', lastLoginAt:Timestamp.fromMillis(2)}, {merge:true}));
+    await assertFails(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {email:'self-maintainer@example.test', lastLoginAt:'not-a-timestamp'}, {merge:true}));
+    await assertSucceeds(setDoc(doc(selfMaintainerDb, 'staff_members', 'selfMaintainer'), {
+      email:'self-maintainer@example.test', lastLoginAt:Timestamp.fromMillis(2)
+    }, {merge:true}));
+    await assertFails(setDoc(doc(adminModuleEditorDb, 'staff_members', 'managedByEditor'), {
+      role:'ENTRAINEUR', permissionLevel:'LECTEUR', status:'ACTIVE'
+    }));
+    await assertFails(setDoc(doc(inactiveDb, 'staff_members', 'managedByInactiveAdmin'), {
+      role:'ENTRAINEUR', permissionLevel:'LECTEUR', status:'ACTIVE'
+    }));
+    await assertSucceeds(setDoc(doc(adminDb, 'staff_members', 'managedByStrictAdmin'), {
+      role:'ENTRAINEUR', permissionLevel:'LECTEUR', status:'ACTIVE'
+    }));
+    await assertSucceeds(setDoc(doc(adminDb, 'staff_members', 'managedByStrictAdmin'), {
+      role:'ENTRAINEUR', permissionLevel:'SAISIE', status:'ACTIVE', allowedModules:['presences']
+    }));
     for (const attendanceCount of [0, 1, 5, 10, 15, 20, 22]) {
       const sessionId = `presence-batch-${attendanceCount}`;
       const batch = writeBatch(presenceBatchDb);
