@@ -1,4 +1,4 @@
-const CACHE_NAME = 'coachpulse-v6-4-93-release';
+const CACHE_NAME = 'coachpulse-v6-4-94-private-html';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
@@ -69,6 +69,9 @@ self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS)).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', event => {
+  // Delete every older CoachPulse-managed cache, including versions that may
+  // contain the formerly embedded rosters. IndexedDB/localStorage are left
+  // untouched so pending offline writes remain recoverable.
   event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith(APP_CACHE_PREFIX) && k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('message', event => {
