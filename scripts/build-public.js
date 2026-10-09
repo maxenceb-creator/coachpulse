@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const {assertPublicHtmlSafe} = require('./check-public-personal-data.js');
 
 const root = path.resolve(__dirname, '..');
 const outDir = path.join(root, 'public');
@@ -54,9 +55,15 @@ function copyRecursive(relativePath) {
   fs.copyFileSync(source, target);
 }
 
+// Fail before copying so a sensitive source file never reaches the hosting tree.
+assertPublicHtmlSafe(['pages/tests-techniques.html', 'pages/coach-stats.html']);
+
 fs.rmSync(outDir, {recursive: true, force: true});
 ensureDir(outDir);
 
 entries.filter(exists).forEach(copyRecursive);
+
+// Also verify the exact artifact that Firebase Hosting will publish.
+assertPublicHtmlSafe(['public/pages/tests-techniques.html', 'public/pages/coach-stats.html']);
 
 console.log(`CoachPulse public build ready: ${path.relative(root, outDir)}`);
