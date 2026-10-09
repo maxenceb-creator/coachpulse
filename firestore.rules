@@ -699,7 +699,7 @@ service cloud.firestore {
     function isAllowedSelfStaffMaintenance(uid) {
       return signedIn()
         && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['lastLoginAt', 'email'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLoginAt', 'email'])
         && request.resource.data.email is string
         && request.auth.token.email is string
         && request.resource.data.email == request.auth.token.email
