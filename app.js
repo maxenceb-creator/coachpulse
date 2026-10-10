@@ -2509,12 +2509,13 @@ function playerMatchesTeamIdForAnySeason(player={}, teamId=''){
 }
 async function teamProfileLoadData(options={}){
   return measureAsync('teamProfileLoadData', async () => {
-  const allowHomeDashboard = options.homeDashboard === true && ['teamProfile','presences','stats','tests','tests-athletiques'].some(canViewModule);
+  const homeDashboard = options.homeDashboard === true;
+  const allowHomeDashboard = options.homeDashboard === true && ['teamProfile','presences','stats','tests','tests-athletiques','medical'].some(canViewModule);
   if(!canViewModule('teamProfile') && !allowHomeDashboard) throw new Error('Accès non autorisé.');
 	  const teamId = String(options.teamId || '').trim();
 	  if(teamId && !canAccessTeamId(teamId)) throw new Error('Accès non autorisé à cette équipe.');
 	  const summaryOnly = options.summaryOnly === true;
-	  const cacheKey = `${teamId || 'all'}:${summaryOnly ? 'summary' : 'full'}`;
+	  const cacheKey = `${teamId || 'all'}:${homeDashboard ? 'home' : (summaryOnly ? 'summary' : 'full')}`;
 	  const cached = appDataCache.teamProfiles.get(cacheKey);
 	  if(!options.forceRefresh && cached && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS){
 	    recordPerfEvent('cache:hit', {cache:'teamProfile', key:cacheKey});
@@ -2525,12 +2526,39 @@ async function teamProfileLoadData(options={}){
   const names = ['teams','players','matches','matchEvents','sessions','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','workloads','convocations','medicalFollowUps','individualReports'];
   names.forEach(name => { payload.collections[name] = []; });
 
+	  const profile = accessProfile();
+	  const service = permissionsService();
+	  const permissionLevel = service?.normalizePermission
+	    ? service.normalizePermission(null, profile)
+	    : String(profile?.permissionLevel || '').trim().toUpperCase();
+	  const adminRole = [profile?.role, profile?.legacyRole, profile?.businessRole, profile?.userRole]
+	    .some(role => String(role || '').trim().toUpperCase() === 'ADMIN');
+	  const teamProfileAdmin = permissionLevel === 'ADMIN' || adminRole;
+	  const allowedModules = new Set(Array.isArray(profile?.allowedModules) ? profile.allowedModules : []);
+	  const collectionModules = {
+	    matches:['stats','playerProfile'], matchEvents:['stats','playerProfile'],
+	    sessions:['presences'], attendance:['presences'],
+	    technicalTests:['tests','playerProfile'], physicalTests:['tests-athletiques','tests','playerProfile'],
+	    injuries:['medical','playerProfile'], injuryUpdates:['medical','playerProfile'],
+	    medicalAppointments:['medical','playerProfile'], rehabRoutines:['medical','playerProfile'],
+	    medicalFollowUps:['medical','playerProfile'], workloads:['workload','playerProfile'],
+	    convocations:['convocations','playerProfile'], individualReports:['individualReports','playerProfile']
+	  };
+	  function canReadTeamProfileCollection(name){
+	    if(teamProfileAdmin) return true;
+	    return (collectionModules[name] || []).some(moduleId => allowedModules.has(moduleId));
+	  }
+
   if(!hasGlobalDataAccess() && !teamId) return payload;
 
   if(!db || !currentUser){
     const docs = collectCentralFirestoreDocs();
-    names.forEach(name => { payload.collections[name] = [...(docs[name] || new Map()).values()]; });
-    const localPresence = presenceEventsService()?.collectionsForTeam(teamId) || {sessions:[], attendance:[]};
+    names.forEach(name => {
+      if(['teams','players'].includes(name) || canReadTeamProfileCollection(name)) payload.collections[name] = [...(docs[name] || new Map()).values()];
+    });
+    const localPresence = canReadTeamProfileCollection('sessions')
+      ? (presenceEventsService()?.collectionsForTeam(teamId) || {sessions:[], attendance:[]})
+      : {sessions:[], attendance:[]};
     payload.collections.sessions = uniqueProfileRows([
       ...(payload.collections.sessions || []),
       ...(localPresence.sessions || [])
@@ -2623,7 +2651,7 @@ async function teamProfileLoadData(options={}){
     return filterAuthorizedPlayers(rows).filter(player => playerMatchesTeamIdForAnySeason(player, teamId) || rowMatchesTeamId(player, teamId));
   }
 
-	  const criticalBase = await firestoreQueryService().settleProfileReads([
+	  const criticalBase = homeDashboard ? {values:{teams:[], players:[]}} : await firestoreQueryService().settleProfileReads([
       {name:'teams', critical:true, diagnostic:teamProfileDiagnostic('teams', true), read:() => listTeams({includeArchived:true, diagnosticPage:'teamProfile'})},
       {name:'players', critical:true, diagnostic:teamProfileDiagnostic('players', true), read:() => readTeamPlayers(teamId)}
     ], {readErrors:payload.readErrors});
@@ -2633,30 +2661,13 @@ async function teamProfileLoadData(options={}){
 	    if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
 	    return payload;
 	  }
-	  const optionalModuleReads = {
-	    convocations:['convocations','playerProfile'],
-	    individualReports:['individualReports','playerProfile']
-	  };
-	  function canReadOptionalTeamProfileCollection(name){
-	    const moduleIds = optionalModuleReads[name];
-	    if(!moduleIds) return true;
-	    const profile = accessProfile();
-	    const service = permissionsService();
-	    const permissionLevel = service?.normalizePermission
-	      ? service.normalizePermission(null, profile)
-	      : String(profile?.permissionLevel || '').trim().toUpperCase();
-	    const adminRole = [profile?.role, profile?.legacyRole, profile?.businessRole, profile?.userRole]
-	      .some(role => String(role || '').trim().toUpperCase() === 'ADMIN');
-	    if(permissionLevel === 'ADMIN' || adminRole) return true;
-	    // Firestore traite encore allowedModules absent/vide comme un joker. Ici, ces deux lectures
-	    // restent volontairement fermées jusqu'à l'alignement global prévu dans une PR distincte.
-	    const allowedModules = Array.isArray(profile?.allowedModules) ? profile.allowedModules : [];
-	    return moduleIds.some(moduleId => allowedModules.includes(moduleId));
-	  }
-	  const directNames = ['matches','sessions','technicalTests','physicalTests','injuries','workloads','convocations','individualReports']
-	    .filter(canReadOptionalTeamProfileCollection);
+	  const directCandidates = homeDashboard
+	    ? ['matches','technicalTests','physicalTests','injuries']
+	    : ['matches','technicalTests','physicalTests','injuries','workloads','convocations','individualReports'];
+	  const directNames = directCandidates
+	    .filter(canReadTeamProfileCollection);
 	  const directReads = await firestoreQueryService().settleProfileReads(directNames.map(name => {
-      const critical = name === 'matches' || Boolean(optionalModuleReads[name]);
+	    const critical = true;
       return {
         name, critical, diagnostic:teamProfileDiagnostic(name, critical),
         read:() => firestoreQueryService().readTeamScopedByIdOrIds(name, [teamId], {
@@ -2666,29 +2677,36 @@ async function teamProfileLoadData(options={}){
     }), {readErrors:payload.readErrors});
 	  directNames.forEach(name => { payload.collections[name] = directReads.values[name]; });
 	  const matchIds = payload.collections.matches.map(row => row.matchId || row.id).filter(Boolean);
-	  const medicalLinkedNames = ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps'];
+	  const medicalLinkedNames = ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps']
+	    .filter(canReadTeamProfileCollection);
     async function readOptionalMedical(name){
       const specs = [
         ['teamId', '=='],
         ['playerSnapshot.teamId', '=='], ['playerSnapshot.teamIds', 'array-contains']
       ];
       const settled = await firestoreQueryService().settleProfileReads(specs.map(([field, operator]) => ({
-        name:field, critical:false,
-        diagnostic:teamProfileDiagnostic(name, false, {field, operator, values:teamId, query:`where(${field}, ${operator}, ${JSON.stringify(teamId)})`}),
-        read:() => readWhere(name, field, operator, teamId, false)
+	        name:field, critical:true,
+	        diagnostic:teamProfileDiagnostic(name, true, {field, operator, values:teamId, query:`where(${field}, ${operator}, ${JSON.stringify(teamId)})`}),
+	        read:() => readWhere(name, field, operator, teamId, true)
       })), {readErrors:payload.readErrors});
       return uniqueRows(specs.flatMap(([field]) => settled.values[field] || []));
     }
-    const detailReads = await firestoreQueryService().settleProfileReads([
-      {name:'teamMatchEvents', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true), read:() => firestoreQueryService().readMatchEventsByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('matchEvents', true)})},
-      {name:'matchEventsByMatch', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true, {field:'matchId', operator:'in', values:matchIds}), read:() => hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds, true) : Promise.resolve([])},
-      {name:'teamAttendance', critical:false, diagnostic:teamProfileDiagnostic('attendance', false), read:() => firestoreQueryService().readAttendanceByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('attendance', false)})},
-      ...medicalLinkedNames.map(name => ({name, critical:false, diagnostic:teamProfileDiagnostic(name, false), read:() => readOptionalMedical(name)}))
-    ], {readErrors:payload.readErrors});
-	  payload.collections.matchEvents = uniqueRows([...detailReads.values.teamMatchEvents, ...detailReads.values.matchEventsByMatch]);
-	  const localPresence = presenceEventsService()?.collectionsForTeam(teamId) || {sessions:[], attendance:[]};
-	  payload.collections.sessions = uniqueRows([...(payload.collections.sessions || []), ...(localPresence.sessions || [])]);
-	  payload.collections.attendance = uniqueRows([...(detailReads.values.teamAttendance || []), ...(localPresence.attendance || [])]);
+    const detailSpecs = [
+      ...(canReadTeamProfileCollection('matchEvents') ? [
+        {name:'teamMatchEvents', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true), read:() => firestoreQueryService().readMatchEventsByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('matchEvents', true)})},
+        {name:'matchEventsByMatch', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true, {field:'matchId', operator:'in', values:matchIds}), read:() => hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds, true) : Promise.resolve([])}
+      ] : []),
+      ...medicalLinkedNames.map(name => ({name, critical:true, diagnostic:teamProfileDiagnostic(name, true), read:() => readOptionalMedical(name)}))
+    ];
+    const detailReads = await firestoreQueryService().settleProfileReads(detailSpecs, {readErrors:payload.readErrors});
+	  payload.collections.matchEvents = uniqueRows([...(detailReads.values.teamMatchEvents || []), ...(detailReads.values.matchEventsByMatch || [])]);
+	  if(canReadTeamProfileCollection('sessions')){
+	    const presenceEvents = await presenceListEvents({forceRefresh:options.forceRefresh === true});
+	    const cloudPresence = presenceEventsService()?.collectionsFromEvents(presenceEvents) || {sessions:[], attendance:[]};
+	    payload.collections.sessions = uniqueRows((cloudPresence.sessions || []).filter(row => rowMatchesTeamId(row, teamId)));
+	    const sessionIds = new Set(payload.collections.sessions.map(row => row.sessionId || row.id).filter(Boolean));
+	    payload.collections.attendance = uniqueRows((cloudPresence.attendance || []).filter(row => rowMatchesTeamId(row, teamId) || sessionIds.has(row.sessionId)));
+	  }
 	  medicalLinkedNames.forEach(name => { payload.collections[name] = detailReads.values[name] || []; });
   if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
   return payload;
