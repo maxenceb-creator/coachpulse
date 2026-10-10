@@ -2640,10 +2640,18 @@ async function teamProfileLoadData(options={}){
 	  function canReadOptionalTeamProfileCollection(name){
 	    const moduleIds = optionalModuleReads[name];
 	    if(!moduleIds) return true;
-	    const service = permissionsService();
-	    if(!service?.canReadModule) return false;
 	    const profile = accessProfile();
-	    return moduleIds.some(moduleId => service.canReadModule(profile, {id:moduleId, active:true}));
+	    const service = permissionsService();
+	    const permissionLevel = service?.normalizePermission
+	      ? service.normalizePermission(null, profile)
+	      : String(profile?.permissionLevel || '').trim().toUpperCase();
+	    const adminRole = [profile?.role, profile?.legacyRole, profile?.businessRole, profile?.userRole]
+	      .some(role => String(role || '').trim().toUpperCase() === 'ADMIN');
+	    if(permissionLevel === 'ADMIN' || adminRole) return true;
+	    // Firestore traite encore allowedModules absent/vide comme un joker. Ici, ces deux lectures
+	    // restent volontairement fermées jusqu'à l'alignement global prévu dans une PR distincte.
+	    const allowedModules = Array.isArray(profile?.allowedModules) ? profile.allowedModules : [];
+	    return moduleIds.some(moduleId => allowedModules.includes(moduleId));
 	  }
 	  const directNames = ['matches','sessions','technicalTests','physicalTests','injuries','workloads','convocations','individualReports']
 	    .filter(canReadOptionalTeamProfileCollection);
