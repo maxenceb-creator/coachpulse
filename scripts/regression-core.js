@@ -1755,16 +1755,44 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   const withoutRights = await load(editorWithoutOptionalRights);
   assert.equal(withoutRights.reads.some(read => ['convocations','individualReports'].includes(read.collection)), false, 'Un entraîneur sans droits optionnels ne doit lire aucune collection optionnelle.');
 
-  const withExplicitRights = {
+  const modulePermissionOnly = await load({
     ...editorWithoutOptionalRights,
-    allowedModules:['stats','teamProfile','convocations','individualReports'],
-    modulePermissions:{...editorWithoutOptionalRights.modulePermissions, convocations:{read:true}, individualReports:{read:true}}
-  };
-  const explicit = await load(withExplicitRights);
-  assert.equal(explicit.reads.filter(read => read.collection === 'convocations').length, 2, 'Le droit convocations doit conserver les deux requêtes teamId/teamIds.');
-  assert.equal(explicit.reads.filter(read => read.collection === 'individualReports').length, 2, 'Le droit individualReports doit conserver les deux requêtes teamId/teamIds.');
-  const authorizedDenial = await load(withExplicitRights, teamA, ['individualReports']);
-  assert.equal(authorizedDenial.error?.code, 'firestore/permission-denied', 'Un refus Firestore inattendu sur une lecture autorisée doit rester une erreur.');
+    modulePermissions:{...editorWithoutOptionalRights.modulePermissions, individualReports:{read:true}}
+  });
+  assert.equal(modulePermissionOnly.reads.some(read => read.collection === 'individualReports'), false, 'modulePermissions.individualReports ne doit pas accorder seul la lecture.');
+
+  const playerProfilePermissionOnly = await load({
+    ...editorWithoutOptionalRights,
+    modulePermissions:{...editorWithoutOptionalRights.modulePermissions, playerProfile:{read:true}}
+  });
+  assert.equal(playerProfilePermissionOnly.reads.some(read => ['convocations','individualReports'].includes(read.collection)), false, 'modulePermissions.playerProfile ne doit déclencher aucune lecture alternative sans allowedModules.');
+
+  const emptyAllowedModules = await load({
+    ...editorWithoutOptionalRights,
+    allowedModules:[],
+    modulePermissions:{...editorWithoutOptionalRights.modulePermissions, playerProfile:{read:true}, convocations:{read:true}, individualReports:{read:true}}
+  });
+  assert.equal(emptyAllowedModules.reads.some(read => ['convocations','individualReports'].includes(read.collection)), false, 'allowedModules vide doit fermer toutes les lectures optionnelles.');
+
+  const missingAllowedModules = {...editorWithoutOptionalRights};
+  delete missingAllowedModules.allowedModules;
+  missingAllowedModules.modulePermissions = {...missingAllowedModules.modulePermissions, playerProfile:{read:true}};
+  const missingAllowedModulesResult = await load(missingAllowedModules);
+  assert.equal(missingAllowedModulesResult.reads.some(read => ['convocations','individualReports'].includes(read.collection)), false, 'allowedModules absent ne doit inférer aucun droit optionnel.');
+
+  const individualReportsRights = await load({
+    ...editorWithoutOptionalRights,
+    allowedModules:['stats','teamProfile','individualReports']
+  });
+  assert.equal(individualReportsRights.reads.filter(read => read.collection === 'individualReports').length, 2, 'allowedModules.individualReports doit autoriser les requêtes teamId/teamIds.');
+  assert.equal(individualReportsRights.reads.some(read => read.collection === 'convocations'), false, 'Le droit individualReports ne doit pas autoriser convocations.');
+
+  const convocationsRights = await load({
+    ...editorWithoutOptionalRights,
+    allowedModules:['stats','teamProfile','convocations']
+  });
+  assert.equal(convocationsRights.reads.filter(read => read.collection === 'convocations').length, 2, 'allowedModules.convocations doit autoriser les requêtes teamId/teamIds.');
+  assert.equal(convocationsRights.reads.some(read => read.collection === 'individualReports'), false, 'Le droit convocations ne doit pas autoriser individualReports.');
 
   const assistant = {
     role:'ENTRAINEUR_ADJOINT', permissionLevel:'LECTEUR', status:'ACTIVE', authorizedTeamIds:[teamA],
@@ -1777,8 +1805,15 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   const playerProfileRights = {
     ...editorWithoutOptionalRights,
     allowedModules:['stats','teamProfile','playerProfile'],
-    modulePermissions:{...editorWithoutOptionalRights.modulePermissions, playerProfile:{read:true}}
+    modulePermissions:{...editorWithoutOptionalRights.modulePermissions}
   };
+  const scopedToA = await load({...playerProfileRights, authorizedTeamIds:[teamA]}, teamA);
+  assert.deepEqual(Array.from(scopedToA.payload.collections.convocations, row => row.id), ['convocation-a']);
+  assert.deepEqual(Array.from(scopedToA.payload.collections.individualReports, row => row.id), ['report-a']);
+  scopedToA.reads.filter(read => ['convocations','individualReports'].includes(read.collection)).forEach(read => {
+    assert.deepEqual(Array.from(read.value), [teamA], 'Une équipe autorisée doit produire uniquement des requêtes limitées à cette équipe.');
+  });
+
   const scopedToB = await load(playerProfileRights, teamB);
   assert.deepEqual(Array.from(scopedToB.payload.collections.convocations, row => row.id), ['convocation-b']);
   assert.deepEqual(Array.from(scopedToB.payload.collections.individualReports, row => row.id), ['report-b']);
@@ -1790,7 +1825,17 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   assert.match(outsideScope.error?.message || '', /Accès non autorisé à cette équipe/);
   assert.equal(outsideScope.reads.length, 0, 'Un utilisateur hors périmètre doit être refusé avant toute lecture Firestore.');
 
-  const matchDiagnostic = explicit.diagnostics.find(row => row.name === 'matches');
+  const admin = await load({role:'ADMIN', permissionLevel:'ADMIN', status:'ACTIVE', authorizedTeamIds:[], allowedModules:[]}, teamA);
+  assert.equal(admin.reads.filter(read => read.collection === 'convocations').length, 2, 'ADMIN doit conserver la lecture de convocations.');
+  assert.equal(admin.reads.filter(read => read.collection === 'individualReports').length, 2, 'ADMIN doit conserver la lecture de individualReports.');
+
+  const authorizedDenial = await load(playerProfileRights, teamA, ['individualReports']);
+  assert.equal(authorizedDenial.error?.code, 'firestore/permission-denied', 'Un refus Firestore inattendu sur une lecture autorisée doit rester une erreur.');
+  assert.equal(authorizedDenial.error?.coachPulseDiagnostic?.collection, 'individualReports', 'Le refus inattendu doit conserver le diagnostic de collection.');
+  assert.equal(authorizedDenial.error?.coachPulseDiagnostic?.task, 'team-profile:individualReports', 'Le refus inattendu doit conserver le diagnostic de tâche.');
+  assert.deepEqual(Array.from(authorizedDenial.error?.coachPulseDiagnostic?.teamIds || []), [teamA], 'Le diagnostic doit conserver le périmètre équipe.');
+
+  const matchDiagnostic = playerProfilePermissionOnly.diagnostics.find(row => row.name === 'matches');
   assert.equal(matchDiagnostic?.module, 'teamProfile', 'Une lecture Matchs issue de la fiche équipe doit rester attribuée à teamProfile.');
   assert.equal(matchDiagnostic?.task, 'team-profile:matches');
 }
