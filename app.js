@@ -2633,9 +2633,22 @@ async function teamProfileLoadData(options={}){
 	    if(cacheKey) appDataCache.teamProfiles.set(cacheKey, {payload:cloneData(payload), loadedAt:Date.now()});
 	    return payload;
 	  }
-	  const directNames = ['matches','sessions','technicalTests','physicalTests','injuries','workloads','convocations','individualReports'];
+	  const optionalModuleReads = {
+	    convocations:['convocations','playerProfile'],
+	    individualReports:['individualReports','playerProfile']
+	  };
+	  function canReadOptionalTeamProfileCollection(name){
+	    const moduleIds = optionalModuleReads[name];
+	    if(!moduleIds) return true;
+	    const service = permissionsService();
+	    if(!service?.canReadModule) return false;
+	    const profile = accessProfile();
+	    return moduleIds.some(moduleId => service.canReadModule(profile, {id:moduleId, active:true}));
+	  }
+	  const directNames = ['matches','sessions','technicalTests','physicalTests','injuries','workloads','convocations','individualReports']
+	    .filter(canReadOptionalTeamProfileCollection);
 	  const directReads = await firestoreQueryService().settleProfileReads(directNames.map(name => {
-      const critical = name === 'matches';
+      const critical = name === 'matches' || Boolean(optionalModuleReads[name]);
       return {
         name, critical, diagnostic:teamProfileDiagnostic(name, critical),
         read:() => firestoreQueryService().readTeamScopedByIdOrIds(name, [teamId], {
