@@ -665,7 +665,7 @@ function testProfileReadsStayCanonicalAndTeamScoped(){
   assert(!appSource.includes("readDocsByIdsOrField('matches'"), 'La fiche joueuse ne doit pas relancer une LIST matches par matchId sans scope équipe.');
   assert(appSource.includes("const payload = {app:'CoachPulse', module:'teamProfile', currentSeason:currentSeason(), loadedAt:new Date().toISOString(), teamId, readErrors:[], collections:{}}"), 'La fiche équipe doit exposer readErrors.');
   assert(appSource.includes("{name:'players', critical:true"), 'Le roster de la fiche équipe doit rester critique.');
-  assert(appSource.includes("const critical = name === 'matches'"), 'Les matches de la fiche équipe doivent rester critiques.');
+  assert(appSource.includes('const critical = true;'), 'Toute lecture autorisée de la fiche équipe doit propager un refus Firestore inattendu.');
   assert(appSource.includes("{name:'teamMatchEvents', critical:true"), 'Les événements de match de la fiche équipe doivent rester critiques.');
 }
 
@@ -1653,7 +1653,7 @@ async function testTeamProfileRuntimeUsesOnlyTeamScopedQueries(){
     sessions:[{id:'session-home', data:{sessionId:'session-home', teamId, teamIds:[teamId]}}],
     attendance:[{id:'attendance-home', data:{sessionId:'session-home', playerId:'player-home', teamId, teamIds:[teamId]}}]
   };
-  const cloud = runtimeFirestore(documents, ['medicalAppointments']);
+  const cloud = runtimeFirestore(documents);
   const quietConsole = {...console, error() {}, info() {}};
   const context = vm.createContext({
     console:quietConsole, Date, Map, Set, JSON,
@@ -1661,7 +1661,15 @@ async function testTeamProfileRuntimeUsesOnlyTeamScopedQueries(){
     measureAsync:(_name, read) => read(), canViewModule:() => true, canAccessTeamId:id => id === teamId,
     hasGlobalDataAccess:() => false, currentSeason:() => '2026-2027', recordPerfEvent() {},
     appDataCache:{teamProfiles:new Map()}, DATA_CACHE_TTL_MS:0, cloneData:value => structuredClone(value),
-    collectCentralFirestoreDocs:() => ({}), presenceEventsService:() => ({collectionsForTeam:() => ({sessions:[],attendance:[]})}),
+    collectCentralFirestoreDocs:() => ({}),
+    presenceListEvents:async () => [{id:'session-home'}],
+    presenceEventsService:() => ({
+      collectionsForTeam:() => ({sessions:[],attendance:[]}),
+      collectionsFromEvents:() => ({
+        sessions:[{id:'session-home', sessionId:'session-home', teamId, teamIds:[teamId]}],
+        attendance:[{id:'attendance-home', sessionId:'session-home', playerId:'player-home', teamId, teamIds:[teamId]}]
+      })
+    }),
     uniqueProfileRows:rows => rows, parseStoredJson:() => [], listTeams:async () => [{id:teamId,teamId,name:'U11 A'}],
     normalizePlayer:value => value, playerMatchesTeamIdForAnySeason:(row,id) => row.teamId === id || row.teamIds?.includes(id) || row.rosterTeamIds?.includes(id),
     canAccessPlayerRecord:row => row.teamId === teamId || row.teamIds?.includes(teamId) || row.rosterTeamIds?.includes(teamId),
@@ -1678,7 +1686,7 @@ async function testTeamProfileRuntimeUsesOnlyTeamScopedQueries(){
   assert.deepEqual(Array.from(payload.collections.matchEvents, row => row.eventId), ['event-home']);
   assert.deepEqual(Array.from(payload.collections.sessions, row => row.sessionId), ['session-home']);
   assert.deepEqual(Array.from(payload.collections.attendance, row => row.playerId), ['player-home']);
-  assert(payload.readErrors.some(error => error.collection === 'medicalAppointments' && error.critical === false));
+  assert.deepEqual(Array.from(payload.readErrors), []);
   assert.equal(cloud.reads.some(read => read.global), false, 'teamProfile non-admin ne doit lancer aucune LIST globale.');
   assert.equal(cloud.reads.some(read => read.collection === 'matchEvents' && read.field === 'matchId'), false, 'teamProfile non-admin ne doit pas lire matchEvents par matchId seul.');
 
@@ -1698,8 +1706,19 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       {id:teamB, data:{teamId:teamB}},
       {id:foreignTeam, data:{teamId:foreignTeam}}
     ],
-    players:[], matches:[], matchEvents:[], sessions:[], attendance:[],
-    technicalTests:[], physicalTests:[], injuries:[], workloads:[],
+    players:[], matches:[], matchEvents:[],
+    sessions:[
+      {id:'presence-modern-a', data:{sessionId:'presence-modern-a', teamId:teamA, teamIds:[teamA], createdFromPresenceModule:true}},
+      {id:'presence-legacy-a', data:{sessionId:'presence-legacy-a', teamIds:[teamA], source:'Présences'}},
+      {id:'methodology-a', data:{sessionId:'methodology-a', teamId:teamA, teamIds:[teamA], source:'Méthodologie'}},
+      {id:'presence-foreign', data:{sessionId:'presence-foreign', teamId:foreignTeam, teamIds:[foreignTeam], createdFromPresenceModule:true}}
+    ],
+    attendance:[{id:'attendance-a', data:{attendanceId:'attendance-a', sessionId:'presence-modern-a', teamId:teamA, teamIds:[teamA]}}],
+    technicalTests:[{id:'technical-a', data:{teamId:teamA, teamIds:[teamA]}}],
+    physicalTests:[{id:'physical-a', data:{teamId:teamA, teamIds:[teamA]}}],
+    injuries:[{id:'injury-a', data:{teamId:teamA}}],
+    injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[],
+    workloads:[{id:'workload-a', data:{teamId:teamA, teamIds:[teamA]}}],
     convocations:[
       {id:'convocation-a', data:{teamId:teamA, teamIds:[teamA]}},
       {id:'convocation-b', data:{teamId:teamB, teamIds:[teamB]}},
@@ -1712,7 +1731,7 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
     ]
   };
 
-  async function load(profile, teamId=teamA, deniedCollections=[]){
+  async function load(profile, teamId=teamA, deniedCollections=[], loadOptions={}){
     const cloud = runtimeFirestore(documents, deniedCollections);
     const diagnostics = [];
     const queryService = {
@@ -1732,7 +1751,20 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       permissionsService:() => permissions, accessProfile:() => profile,
       hasGlobalDataAccess:() => profile.permissionLevel === 'ADMIN', currentSeason:() => '2026-2027', recordPerfEvent() {},
       appDataCache:{teamProfiles:new Map()}, DATA_CACHE_TTL_MS:0, cloneData:value => structuredClone(value),
-      collectCentralFirestoreDocs:() => ({}), presenceEventsService:() => ({collectionsForTeam:() => ({sessions:[],attendance:[]})}),
+      collectCentralFirestoreDocs:() => ({}),
+      presenceListEvents:async () => {
+        cloud.reads.push({collection:'sessions', operation:'LIST', constraints:['createdFromPresenceModule == true','teamId/teamIds scoped']});
+        cloud.reads.push({collection:'sessions', operation:'LIST', constraints:['source == Présences','teamId/teamIds scoped']});
+        cloud.reads.push({collection:'attendance', operation:'LIST', constraints:['teamId/teamIds scoped']});
+        return [];
+      },
+      presenceEventsService:() => ({
+        collectionsForTeam:() => ({sessions:[],attendance:[]}),
+        collectionsFromEvents:() => ({
+          sessions:documents.sessions.map(row => ({id:row.id, ...row.data})).filter(row => row.createdFromPresenceModule === true || row.source === 'Présences'),
+          attendance:documents.attendance.map(row => ({id:row.id, ...row.data}))
+        })
+      }),
       uniqueProfileRows:rows => rows, parseStoredJson:() => [], listTeams:async () => documents.teams.map(row => ({id:row.id, ...row.data})),
       normalizePlayer:value => value, playerMatchesTeamIdForAnySeason:(row,id) => row.teamId === id || row.teamIds?.includes(id),
       canAccessPlayerRecord:row => permissions.canAccessPlayer(profile, row), filterAuthorizedPlayers:rows => permissions.filterAuthorizedPlayers(profile, rows),
@@ -1741,7 +1773,7 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
     });
     vm.runInContext(sourceFunction(fs.readFileSync('app.js','utf8'), 'teamProfileLoadData'), context);
     try{
-      return {payload:await context.teamProfileLoadData({teamId, forceRefresh:true}), reads:cloud.reads, diagnostics};
+      return {payload:await context.teamProfileLoadData({teamId, forceRefresh:true, ...loadOptions}), reads:cloud.reads, diagnostics};
     }catch(error){
       return {error, reads:cloud.reads, diagnostics};
     }
@@ -1753,7 +1785,28 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
     modulePermissions:{stats:{read:true,write:true}, teamProfile:{read:true,write:true}}
   };
   const withoutRights = await load(editorWithoutOptionalRights);
-  assert.equal(withoutRights.reads.some(read => ['convocations','individualReports'].includes(read.collection)), false, 'Un entraîneur sans droits optionnels ne doit lire aucune collection optionnelle.');
+  const forbiddenWithoutRights = ['sessions','attendance','technicalTests','physicalTests','injuries','injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps','workloads','convocations','individualReports'];
+  assert.equal(withoutRights.reads.some(read => forbiddenWithoutRights.includes(read.collection)), false, 'Stats + teamProfile ne doit déclencher aucune lecture de séance, test, médical, workload ou collection optionnelle.');
+  assert(withoutRights.reads.some(read => read.collection === 'matches'), 'Stats doit conserver la lecture des matchs.');
+
+  const homeWithoutRights = await load(editorWithoutOptionalRights, teamA, [], {homeDashboard:true});
+  assert.equal(homeWithoutRights.reads.some(read => forbiddenWithoutRights.includes(read.collection)), false, 'L’accueil Stats + teamProfile doit rester réduit aux cartes autorisées.');
+  assert.equal(homeWithoutRights.reads.some(read => read.collection === 'players'), false, 'L’accueil ne doit pas relire le roster inutilement.');
+
+  const presenceRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','presences']});
+  const presenceSessionReads = presenceRights.reads.filter(read => read.collection === 'sessions');
+  assert.equal(presenceSessionReads.length, 2, 'Présences doit utiliser uniquement les deux familles de requêtes discriminées.');
+  assert(presenceSessionReads.every(read => read.constraints?.some(value => value.includes('teamId/teamIds'))), 'Chaque requête séance doit rester limitée au périmètre équipe.');
+  assert.equal(presenceRights.payload.collections.sessions.some(row => row.id === 'methodology-a' || row.id === 'presence-foreign'), false, 'Présences ne doit exposer ni séance méthodologie ni séance étrangère.');
+  assert.deepEqual(Array.from(presenceRights.payload.collections.sessions, row => row.id).sort(), ['presence-legacy-a','presence-modern-a']);
+
+  const testsRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','tests']});
+  assert.equal(testsRights.reads.filter(read => ['technicalTests','physicalTests'].includes(read.collection)).length, 4, 'Tests doit lire uniquement les tests techniques et physiques par teamId/teamIds.');
+  assert.equal(testsRights.reads.some(read => ['sessions','attendance','injuries','workloads'].includes(read.collection)), false);
+
+  const medicalRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','medical']});
+  assert(medicalRights.reads.some(read => read.collection === 'injuries'), 'Medical doit conserver ses lectures autorisées.');
+  assert.equal(medicalRights.reads.some(read => ['sessions','attendance','technicalTests','physicalTests','workloads'].includes(read.collection)), false);
 
   const modulePermissionOnly = await load({
     ...editorWithoutOptionalRights,
@@ -1828,6 +1881,8 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   const admin = await load({role:'ADMIN', permissionLevel:'ADMIN', status:'ACTIVE', authorizedTeamIds:[], allowedModules:[]}, teamA);
   assert.equal(admin.reads.filter(read => read.collection === 'convocations').length, 2, 'ADMIN doit conserver la lecture de convocations.');
   assert.equal(admin.reads.filter(read => read.collection === 'individualReports').length, 2, 'ADMIN doit conserver la lecture de individualReports.');
+  const adminHome = await load({role:'ADMIN', permissionLevel:'ADMIN', status:'ACTIVE', authorizedTeamIds:[], allowedModules:[]}, teamA, [], {homeDashboard:true});
+  assert.equal(adminHome.reads.some(read => ['workloads','convocations','individualReports'].includes(read.collection)), false, 'Même ADMIN, l’accueil ne doit pas charger les collections absentes de ses cartes.');
 
   const authorizedDenial = await load(playerProfileRights, teamA, ['individualReports']);
   assert.equal(authorizedDenial.error?.code, 'firestore/permission-denied', 'Un refus Firestore inattendu sur une lecture autorisée doit rester une erreur.');
