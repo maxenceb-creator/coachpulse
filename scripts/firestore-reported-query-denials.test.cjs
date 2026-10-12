@@ -40,11 +40,15 @@ function staffProfile(overrides = {}) {
   };
 }
 
-function exactQuery(db, collectionName) {
+function teamIdsQuery(db, collectionName, teamIds = [ALLOWED_TEAM]) {
   return query(
     collection(db, collectionName),
-    where('teamIds', 'array-contains-any', [ALLOWED_TEAM])
+    where('teamIds', 'array-contains-any', teamIds)
   );
+}
+
+function teamIdQuery(db, collectionName, teamIds = [ALLOWED_TEAM]) {
+  return query(collection(db, collectionName), where('teamId', 'in', teamIds));
 }
 
 async function outcome(operation) {
@@ -80,6 +84,19 @@ async function main() {
       await setDoc(doc(db, 'staff_members', 'outsideCoach'), staffProfile({
         authorizedTeamIds: [OUTSIDE_TEAM], teamIds: [OUTSIDE_TEAM], allowedTeamIds: [OUTSIDE_TEAM]
       }));
+      await setDoc(doc(db, 'staff_members', 'inactiveCoach'), staffProfile({status: 'INACTIVE'}));
+      await setDoc(doc(db, 'staff_members', 'technicalProfileCoach'), staffProfile({
+        allowedModules: ['playerProfile']
+      }));
+      await setDoc(doc(db, 'staff_members', 'physicalTestsCoach'), staffProfile({
+        allowedModules: ['tests']
+      }));
+      await setDoc(doc(db, 'staff_members', 'physicalProfileCoach'), staffProfile({
+        allowedModules: ['playerProfile']
+      }));
+      await setDoc(doc(db, 'staff_members', 'injuryProfileCoach'), staffProfile({
+        allowedModules: ['playerProfile']
+      }));
 
       for (const collectionName of COLLECTIONS) {
         await setDoc(doc(db, collectionName, 'team-id-only'), {teamId: ALLOWED_TEAM});
@@ -97,27 +114,80 @@ async function main() {
     const coachDb = environment.authenticatedContext('reportedCoach').firestore();
     const noModuleDb = environment.authenticatedContext('noRequiredModule').firestore();
     const outsideDb = environment.authenticatedContext('outsideCoach').firestore();
+    const inactiveDb = environment.authenticatedContext('inactiveCoach').firestore();
+    const unauthenticatedDb = environment.unauthenticatedContext().firestore();
+    const technicalProfileDb = environment.authenticatedContext('technicalProfileCoach').firestore();
+    const physicalTestsDb = environment.authenticatedContext('physicalTestsCoach').firestore();
+    const physicalProfileDb = environment.authenticatedContext('physicalProfileCoach').firestore();
+    const injuryProfileDb = environment.authenticatedContext('injuryProfileCoach').firestore();
 
-    process.stdout.write('Exact Safari queries\n');
+    process.stdout.write('Authorized team-scoped LIST queries\n');
     for (const collectionName of COLLECTIONS) {
-      await expectDecision(
+      const byTeamIds = await expectDecision(
         `${collectionName} LIST teamIds array-contains-any [${ALLOWED_TEAM}]`,
-        'DENY',
-        () => getDocs(exactQuery(coachDb, collectionName))
+        'ALLOW',
+        () => getDocs(teamIdsQuery(coachDb, collectionName))
       );
+      assert.deepEqual(byTeamIds.docs.map(snapshot => snapshot.id).sort(), [
+        'both-team-fields', 'team-ids-only'
+      ]);
+
+      const byTeamId = await expectDecision(
+        `${collectionName} LIST teamId in [${ALLOWED_TEAM}]`,
+        'ALLOW',
+        () => getDocs(teamIdQuery(coachDb, collectionName))
+      );
+      assert.deepEqual(byTeamId.docs.map(snapshot => snapshot.id).sort(), [
+        'both-team-fields', 'team-id-only'
+      ]);
     }
+
+    process.stdout.write('Alternative permitted modules\n');
+    await expectDecision('technicalTests LIST with playerProfile module', 'ALLOW', () =>
+      getDocs(teamIdsQuery(technicalProfileDb, 'technicalTests')));
+    await expectDecision('physicalTests LIST with tests module', 'ALLOW', () =>
+      getDocs(teamIdsQuery(physicalTestsDb, 'physicalTests')));
+    await expectDecision('physicalTests LIST with playerProfile module', 'ALLOW', () =>
+      getDocs(teamIdQuery(physicalProfileDb, 'physicalTests')));
+    await expectDecision('injuries LIST with playerProfile module', 'ALLOW', () =>
+      getDocs(teamIdQuery(injuryProfileDb, 'injuries')));
 
     process.stdout.write('Negative profiles\n');
     for (const collectionName of COLLECTIONS) {
       await expectDecision(
         `${collectionName} LIST without required ${REQUIRED_MODULE[collectionName]} module`,
         'DENY',
-        () => getDocs(exactQuery(noModuleDb, collectionName))
+        () => getDocs(teamIdsQuery(noModuleDb, collectionName))
       );
       await expectDecision(
         `${collectionName} LIST outside authorized teams`,
         'DENY',
-        () => getDocs(exactQuery(outsideDb, collectionName))
+        () => getDocs(teamIdsQuery(outsideDb, collectionName))
+      );
+      await expectDecision(
+        `${collectionName} LIST inactive user`,
+        'DENY',
+        () => getDocs(teamIdsQuery(inactiveDb, collectionName))
+      );
+      await expectDecision(
+        `${collectionName} LIST unauthenticated user`,
+        'DENY',
+        () => getDocs(teamIdsQuery(unauthenticatedDb, collectionName))
+      );
+      await expectDecision(
+        `${collectionName} LIST broad teamId query`,
+        'DENY',
+        () => getDocs(teamIdQuery(coachDb, collectionName, [ALLOWED_TEAM, OUTSIDE_TEAM]))
+      );
+      await expectDecision(
+        `${collectionName} LIST broad teamIds query`,
+        'DENY',
+        () => getDocs(teamIdsQuery(coachDb, collectionName, [ALLOWED_TEAM, OUTSIDE_TEAM]))
+      );
+      await expectDecision(
+        `${collectionName} LIST without team filter`,
+        'DENY',
+        () => getDocs(collection(coachDb, collectionName))
       );
     }
 
