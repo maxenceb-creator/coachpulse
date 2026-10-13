@@ -1789,6 +1789,35 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   assert.equal(withoutRights.reads.some(read => forbiddenWithoutRights.includes(read.collection)), false, 'Stats + teamProfile ne doit déclencher aucune lecture de séance, test, médical, workload ou collection optionnelle.');
   assert(withoutRights.reads.some(read => read.collection === 'matches'), 'Stats doit conserver la lecture des matchs.');
 
+  const profileWithModules = modules => ({
+    role:'ENTRAINEUR', permissionLevel:'EDITEUR', status:'ACTIVE', authorizedTeamIds:[teamA],
+    allowedModules:['teamProfile', ...modules], modulePermissions:{teamProfile:{read:true,write:true}}
+  });
+  const sensitiveCollections = ['technicalTests','physicalTests','injuries'];
+  async function assertSensitiveReads(modules, expected, label){
+    const result = await load(profileWithModules(modules));
+    assert.equal(result.error, undefined, `${label} ne doit pas échouer.`);
+    sensitiveCollections.forEach(name => {
+      assert.equal(
+        result.reads.some(read => read.collection === name),
+        expected.includes(name),
+        `${label}: lecture ${name} inattendue.`
+      );
+    });
+    return result;
+  }
+  await assertSensitiveReads([], [], 'teamProfile seul');
+  await assertSensitiveReads(['tests'], ['technicalTests','physicalTests'], 'teamProfile + tests');
+  await assertSensitiveReads(['tests-athletiques'], ['physicalTests'], 'teamProfile + tests-athletiques');
+  await assertSensitiveReads(['medical'], ['injuries'], 'teamProfile + medical');
+  await assertSensitiveReads(['playerProfile'], sensitiveCollections, 'teamProfile + playerProfile');
+  await assertSensitiveReads(['tests','tests-athletiques','medical','playerProfile'], sensitiveCollections, 'toutes les permissions');
+  const scopeWithoutModule = await load({
+    ...profileWithModules([]),
+    moduleScopes:{tests:{allPlayers:true}, 'tests-athletiques':{allPlayers:true}, medical:{allPlayers:true}}
+  });
+  assert.equal(scopeWithoutModule.reads.some(read => sensitiveCollections.includes(read.collection)), false, 'moduleScopes ne doit jamais accorder un module absent.');
+
   const homeWithoutRights = await load(editorWithoutOptionalRights, teamA, [], {homeDashboard:true});
   assert.equal(homeWithoutRights.reads.some(read => forbiddenWithoutRights.includes(read.collection)), false, 'L’accueil Stats + teamProfile doit rester réduit aux cartes autorisées.');
   assert.equal(homeWithoutRights.reads.some(read => read.collection === 'players'), false, 'L’accueil ne doit pas relire le roster inutilement.');
