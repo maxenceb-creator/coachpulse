@@ -8,7 +8,15 @@ const PROJECT_ID = 'demo-coachpulse-reported-denials';
 const ALLOWED_TEAM = 'team-u13-a';
 const OTHER_ALLOWED_TEAM = 'team-u13-b';
 const OUTSIDE_TEAM = 'team-u16-a';
-const COLLECTIONS = ['technicalTests', 'physicalTests', 'injuries'];
+const COLLECTIONS = [
+  'technicalTests',
+  'physicalTests',
+  'injuries',
+  'workloads',
+  'convocations',
+  'individualReports'
+];
+const TEAM_PROFILE_SECONDARY_COLLECTIONS = ['workloads', 'convocations', 'individualReports'];
 
 const FULL_MODULES = [
   'stats',
@@ -18,13 +26,19 @@ const FULL_MODULES = [
   'methodologie',
   'medical',
   'playerProfile',
-  'teamProfile'
+  'teamProfile',
+  'workload',
+  'convocations',
+  'individualReports'
 ];
 
 const REQUIRED_MODULE = {
   technicalTests: 'tests',
   physicalTests: 'tests-athletiques',
-  injuries: 'medical'
+  injuries: 'medical',
+  workloads: 'workload',
+  convocations: 'convocations',
+  individualReports: 'individualReports'
 };
 
 function staffProfile(overrides = {}) {
@@ -97,6 +111,19 @@ async function main() {
       await setDoc(doc(db, 'staff_members', 'injuryProfileCoach'), staffProfile({
         allowedModules: ['playerProfile']
       }));
+      await setDoc(doc(db, 'staff_members', 'medicalOnlyCoach'), staffProfile({
+        allowedModules: ['medical']
+      }));
+      await setDoc(doc(db, 'staff_members', 'admin'), staffProfile({
+        role: 'ADMIN', permissionLevel: 'ADMIN', allowedModules: [],
+        authorizedTeamIds: [], teamIds: [], allowedTeamIds: []
+      }));
+      await setDoc(doc(db, 'players', 'allowed-player'), {playerId: 'allowed-player', teamId: ALLOWED_TEAM});
+      await setDoc(doc(db, 'players', 'outside-player'), {playerId: 'outside-player', teamId: OUTSIDE_TEAM});
+      await setDoc(doc(db, 'sessions', 'allowed-session'), {sessionId: 'allowed-session', teamId: ALLOWED_TEAM});
+      await setDoc(doc(db, 'sessions', 'outside-session'), {sessionId: 'outside-session', teamId: OUTSIDE_TEAM});
+      await setDoc(doc(db, 'matches', 'allowed-match'), {matchId: 'allowed-match', teamId: ALLOWED_TEAM});
+      await setDoc(doc(db, 'matches', 'outside-match'), {matchId: 'outside-match', teamId: OUTSIDE_TEAM});
 
       for (const collectionName of COLLECTIONS) {
         await setDoc(doc(db, collectionName, 'team-id-only'), {teamId: ALLOWED_TEAM});
@@ -109,6 +136,12 @@ async function main() {
         });
         await setDoc(doc(db, collectionName, 'no-team-scope'), {label: 'no team scope'});
       }
+      await setDoc(doc(db, 'workloads', 'allowed-indirect'), {sessionId: 'allowed-session'});
+      await setDoc(doc(db, 'workloads', 'outside-indirect'), {sessionId: 'outside-session'});
+      await setDoc(doc(db, 'convocations', 'allowed-indirect'), {matchId: 'allowed-match'});
+      await setDoc(doc(db, 'convocations', 'outside-indirect'), {matchId: 'outside-match'});
+      await setDoc(doc(db, 'individualReports', 'allowed-indirect'), {playerId: 'allowed-player'});
+      await setDoc(doc(db, 'individualReports', 'outside-indirect'), {playerId: 'outside-player'});
     });
 
     const coachDb = environment.authenticatedContext('reportedCoach').firestore();
@@ -120,6 +153,8 @@ async function main() {
     const physicalTestsDb = environment.authenticatedContext('physicalTestsCoach').firestore();
     const physicalProfileDb = environment.authenticatedContext('physicalProfileCoach').firestore();
     const injuryProfileDb = environment.authenticatedContext('injuryProfileCoach').firestore();
+    const medicalOnlyDb = environment.authenticatedContext('medicalOnlyCoach').firestore();
+    const adminDb = environment.authenticatedContext('admin').firestore();
 
     process.stdout.write('Authorized team-scoped LIST queries\n');
     for (const collectionName of COLLECTIONS) {
@@ -151,6 +186,39 @@ async function main() {
       getDocs(teamIdQuery(physicalProfileDb, 'physicalTests')));
     await expectDecision('injuries LIST with playerProfile module', 'ALLOW', () =>
       getDocs(teamIdQuery(injuryProfileDb, 'injuries')));
+
+    process.stdout.write('Team profile secondary collection isolation\n');
+    for (const collectionName of TEAM_PROFILE_SECONDARY_COLLECTIONS) {
+      await expectDecision(
+        `${collectionName} LIST with medical module only`,
+        'DENY',
+        () => getDocs(teamIdsQuery(medicalOnlyDb, collectionName))
+      );
+      await expectDecision(
+        `${collectionName} admin LIST without team filter`,
+        'ALLOW',
+        () => getDocs(collection(adminDb, collectionName))
+      );
+      await expectDecision(
+        `${collectionName}/outside-team admin GET`,
+        'ALLOW',
+        () => getDoc(doc(adminDb, collectionName, 'outside-team'))
+      );
+    }
+
+    process.stdout.write('Existing indirect GET behavior\n');
+    for (const collectionName of TEAM_PROFILE_SECONDARY_COLLECTIONS) {
+      await expectDecision(
+        `${collectionName}/allowed-indirect GET`,
+        'ALLOW',
+        () => getDoc(doc(coachDb, collectionName, 'allowed-indirect'))
+      );
+      await expectDecision(
+        `${collectionName}/outside-indirect GET`,
+        'DENY',
+        () => getDoc(doc(coachDb, collectionName, 'outside-indirect'))
+      );
+    }
 
     process.stdout.write('Negative profiles\n');
     for (const collectionName of COLLECTIONS) {
