@@ -423,10 +423,11 @@ async function main() {
   await test('pendingSync, synced, syncError, network retry and idempotent Firestore writes', async () => {
     const h = matchHarness();
     const cloud = firestoreHarness();
-    h.run("state.matchType='tournament';recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
+    h.run("state.matchType='tournament';state.players['UNRELATED REFERENCE']={...blank(),playerId:'fixture-unrelated'};recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
     assert.equal(h.state().savedMatches[0].syncStatus, 'pendingSync');
     assert.equal(h.state().savedMatches[0].matchType, 'tournament');
     assert.equal(h.state().savedMatches[0].matchTypeLabel, 'Tournoi');
+    h.run("state.savedMatches[0].playerIds=['legacy-oversized-id'];save();");
     h.sandbox.parent.CoachPulseCentralData = {
       matchSaveToFirestore: async match => {
         const local = JSON.parse(h.storage.get('coachStatsV170'));
@@ -447,6 +448,9 @@ async function main() {
     const matchRef = firstRefs.find(ref => ref.startsWith('matches/'));
     assert.equal(cloud.documents.get(matchRef).matchType, 'tournament');
     assert.equal(cloud.documents.get(matchRef).matchTypeLabel, 'Tournoi');
+    assert.deepEqual(cloud.documents.get(matchRef).playerIds.slice().sort(), ['fixture-player-0','fixture-player-1','fixture-player-2']);
+    assert.equal(cloud.documents.get(matchRef).playerIds.includes('fixture-unrelated'), false, 'Le référentiel state.players ne doit pas gonfler playerIds.');
+    assert.equal(cloud.documents.get(matchRef).playerIds.includes('legacy-oversized-id'), false);
     delete cloud.documents.get(matchRef).log;
     delete cloud.documents.get(matchRef).events;
     const remote = await cloud.sandbox.matchListFromFirestore({teamId: 'team-u13-a'});
