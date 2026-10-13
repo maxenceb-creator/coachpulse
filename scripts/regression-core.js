@@ -1087,29 +1087,58 @@ function testPlayerProfileAttendanceUsesExistingSessionsAsSource(){
 }
 
 function testPlayerProfileUsesCompleteMatchPlayerStats(){
+  const dataWindow = loadBrowserScript('pages/player-profile/playerProfileData.js');
+  const Data = dataWindow.PlayerProfileData;
   const window = loadBrowserScript('pages/player-profile/playerProfileStats.js', {
-    PlayerProfileData:{playerAliases(player){ return [player.playerId, player.displayName]; }},
-    PlayerProfileFilters:{dateOf(row){ return row.date || ''; }, filterRows(rows){ return rows; }}
+    PlayerProfileData:Data,
+    PlayerProfileFilters:{
+      dateOf(row){ return row.date || ''; },
+      filterRows(rows, state){ return state?.filters?.season ? rows.filter(row => row.season === state.filters.season) : rows; },
+      filterMatches(rows, state){ return state?.filters?.season ? rows.filter(row => row.season === state.filters.season) : rows; }
+    }
   });
-  const player = {playerId:'player-lisa', displayName:'BOMBARD LISA'};
+  const player = {playerId:'player-lisa', legacyPlayerIds:['legacy-lisa'], displayName:'BOMBARD LISA'};
   const matches = [
-    {matchId:'match-1', date:'2026-09-19', opponent:'GS Dervaux', scoreUs:0, scoreThem:6, players:{
+    {matchId:'match-1', season:'2026-2027', date:'2026-09-19', opponent:'GS Dervaux', scoreUs:0, scoreThem:6, players:{
       'BOMBARD LISA':{playerId:'player-lisa', seconds:1200, positionSeconds:{DCG:1200, MG:500}, but:1, passe:2, tirCadre:3, recup:4}
     }},
-    {matchId:'match-2', date:'2026-09-20', opponent:'ASSE B', scoreUs:2, scoreThem:1, players:{
-      'BOMBARD LISA':{playerId:'player-lisa', seconds:600, positionSeconds:{MG:600}}
+    {matchId:'match-2', season:'2026-2027', date:'2026-09-20', opponent:'ASSE B', scoreUs:2, scoreThem:1, players:{
+      'BOMBARD LISA':{playerId:'legacy-lisa', seconds:600, positionSeconds:{MG:600}}
+    }},
+    {matchId:'match-old-season', season:'2025-2026', date:'2026-05-20', playerIds:['player-lisa','unrelated-id'], players:{
+      'BOMBARD LISA':{playerId:'player-lisa', seconds:0, positionSeconds:{}}
     }}
   ];
-  const stats = window.PlayerProfileStats.matchPerformance(player, matches);
+  const participatingMatches = matches.filter(match => Data.matchHasPlayerParticipation(match, Data.playerAliases(player)));
+  const stats = window.PlayerProfileStats.matchPerformance(player, participatingMatches);
   assert.equal(stats.matches, 2, 'Un match sans action doit compter dès lors que la joueuse possède du temps de jeu.');
   assert.equal(stats.seconds, 1800);
   assert.equal(stats.averageSeconds, 900);
   assert.equal(stats.but, 1);
   assert.equal(stats.passe, 2);
   assert.equal(Object.values(stats.history[1].positions).reduce((total,value) => total + value, 0), 1200, 'Le cumul des postes doit être plafonné au temps joué du match.');
+  assert.equal(Data.matchHasPlayerParticipation({playerIds:['player-lisa'], players:{}}, Data.playerAliases(player)), false, 'Un ancien playerIds surdimensionné ne prouve pas la participation.');
+  assert.equal(Data.matchHasPlayerParticipation({players:{'BOMBARD LISA':{playerId:'player-lisa', seconds:0}}}, Data.playerAliases(player)), false, 'Une convoquée non entrée ne doit pas recevoir un match joué.');
+  assert.equal(Data.matchHasPlayerParticipation({players:{'AUTRE JOUEUSE':{playerId:'other', seconds:900}}}, Data.playerAliases(player)), false, 'Une non-convoquée ne doit pas récupérer le match.');
+  assert.equal(Data.matchHasPlayerParticipation({players:{'BOMBARD LISA':{playerId:'player-lisa', seconds:900, positionSeconds:{GB:900}}}}, Data.playerAliases(player)), true, 'Une gardienne avec temps de jeu et sans action doit être retenue.');
+  assert.equal(Data.matchHasPlayerParticipation(matches[1], Data.playerAliases(player)), true, 'Un ancien alias doit résoudre la joueuse canonique.');
+  const seasonMatches = window.PlayerProfileStats.matchPerformance(player, window.PlayerProfileFilters.filterMatches(participatingMatches, {filters:{season:'2026-2027'}}));
+  assert.equal(seasonMatches.matches, 2, 'Le filtre saison doit conserver uniquement les matchs de la saison demandée.');
+  const summary = window.PlayerProfileStats.summarize(player, {
+    attendance:[], sessions:[], matches:participatingMatches,
+    matchEvents:[
+      {eventId:'event-1', matchId:'match-1', playerId:'player-lisa', season:'2026-2027', type:'tir'},
+      {eventId:'event-2', matchId:'match-1', playerId:'player-lisa', season:'2026-2027', type:'but'},
+      {eventId:'event-3', matchId:'match-2', playerId:'legacy-lisa', season:'2026-2027', type:'tir'}
+    ],
+    technicalTests:[], physicalTests:[], playerMeasurements:[], injuries:[], injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[], convocations:[], individualReports:[]
+  }, {filters:{season:'2026-2027'}});
+  assert.equal(summary.linkedCounts.matchs, 2, 'Plusieurs événements du même match ne doivent pas multiplier le nombre de rencontres.');
+  assert.deepEqual({...summary.actions}, {tir:2, but:1}, 'Les événements restent une source complémentaire pour les statistiques d’actions.');
 
   const appSource = fs.readFileSync('app.js', 'utf8');
-  assert(appSource.includes('...Object.values(raw.players || {}).flatMap'), 'Les prochains matchs synchronisés doivent indexer leurs playerId.');
+  assert(appSource.includes('const playerIds = matchAssociatedPlayerIds(raw)'), 'Les prochains matchs synchronisés doivent indexer uniquement les joueuses associées.');
+  assert(!appSource.includes('if((match.playerIds || []).some(id => aliases.includes'), 'La lecture ne doit pas déduire une participation du seul playerIds historique.');
   assert(appSource.includes("firebaseFns.where('teamIds', 'array-contains-any', chunk)"), 'La fiche individuelle doit retrouver les matchs des différentes équipes de la joueuse.');
   assert(appSource.includes('const playerMatches = teamMatches.filter'), 'Les matchs historiques sans événement individuel doivent être relus depuis leur bloc players.');
   const renderSource = fs.readFileSync('pages/player-profile/playerProfileRender.js', 'utf8');
@@ -1936,7 +1965,9 @@ async function testPlayerProfileRuntimeUsesCanonicalGetAndTeamScope(){
   const documents = {
     players:[{id:'player-home', data:player}],
     matches:[
-      {id:'match-home', data:{matchId:'match-home', teamId, teamIds:[teamId], playerIds:['player-home']}},
+      {id:'match-home', data:{matchId:'match-home', teamId, teamIds:[teamId], playerIds:['player-home'], players:{HOME:{playerId:'player-home', seconds:900, positionSeconds:{GB:900}}}}},
+      {id:'match-oversized-index', data:{matchId:'match-oversized-index', teamId, teamIds:[teamId], playerIds:['player-home'], players:{OTHER:{playerId:'player-other', seconds:900}}}},
+      {id:'match-called-only', data:{matchId:'match-called-only', teamId, teamIds:[teamId], playerIds:['player-home'], players:{HOME:{playerId:'player-home', seconds:0}}}},
       {id:'match-away', data:{matchId:'match-away', teamId:foreignTeamId, teamIds:[foreignTeamId], playerIds:['player-away']}}
     ],
     matchEvents:[
@@ -1970,6 +2001,7 @@ async function testPlayerProfileRuntimeUsesCanonicalGetAndTeamScope(){
     stableFirestoreId:(...parts) => parts.join('-'), canAccessRecord:row => row.teamId === teamId,
     rowTeamIds:row => [...new Set([row.teamId, ...(row.teamIds || []), ...(row.rosterTeamIds || [])].filter(Boolean))],
     canAccessTeamId:id => id === teamId, firestoreQueryService:() => firestoreQueries,
+    matchPlayerHasParticipation:row => Number(row.seconds || 0) > 0 || Object.values(row.positionSeconds || {}).some(value => Number(value) > 0),
     isElapsedProfilePresenceRow:() => true
   });
   vm.runInContext(sourceFunction(fs.readFileSync('app.js','utf8'), 'playerProfileLoadData'), context);

@@ -2388,7 +2388,6 @@ async function playerProfileLoadData(options={}){
       || accessiblePlayerIds.has(row.player?.playerId)
     );
   });
-  const matchIds = new Set((payload.collections.matchEvents || []).map(row => row.matchId).filter(Boolean));
   const selectedHistory = selectedPlayer.seasonHistory || selectedPlayer.seasons || {};
   const selectedTeamIds = [...new Set([
     ...rowTeamIds(selectedPlayer),
@@ -2436,15 +2435,10 @@ async function playerProfileLoadData(options={}){
   }], {readErrors:payload.readErrors});
   const teamMatches = optionalMatches.values.matches;
   const playerMatches = teamMatches.filter(match => {
-    if((match.playerIds || []).some(id => aliases.includes(String(id || '').trim()))) return true;
     const rows = Object.entries(match.players || {}).map(([playerName, value]) => ({...(value || {}), playerName}));
-    return rowsMatchingProfileAliases(rows, aliases).length > 0;
+    return rowsMatchingProfileAliases(rows, aliases).some(matchPlayerHasParticipation);
   });
-  playerMatches.forEach(match => matchIds.add(match.matchId || match.id));
-  const matches = mergeRows([
-    ...playerMatches,
-    ...teamMatches.filter(match => matchIds.has(match.matchId || match.id))
-  ], row => row.matchId || row.id);
+  const matches = mergeRows(playerMatches, row => row.matchId || row.id);
   if(!hasGlobalDataAccess() && selectedTeamIds.length){
     const optionalEvents = await scopedQueries.settleProfileReads([{
       name:'matchEvents', critical:false,
@@ -4890,6 +4884,32 @@ function matchDocumentId(match={}){
 function matchEventDocumentId(matchId, event={}, index=0){
   return String(event.eventId || stableFirestoreId('event', matchId, event.ts || event.t || event.minute || index, event.playerId || event.player || '', event.key || event.action || '', index)).slice(0, 120);
 }
+function matchPlayerHasParticipation(player={}){
+  const seconds = Number(player.seconds ?? player.playingSeconds ?? player.tempsSecondes ?? player.playedSeconds ?? 0);
+  const positionSeconds = player.positionSeconds || player.positions || {};
+  const positionedSeconds = Object.values(positionSeconds).reduce((total, value) => total + Math.max(0, Number(value) || 0), 0);
+  const status = String(player.participationStatus || player.status || '').trim().toUpperCase();
+  return seconds > 0 || positionedSeconds > 0 || player.entered === true || player.played === true || player.participated === true
+    || ['PLAYED','PARTICIPATED','ENTERED'].includes(status);
+}
+function matchAssociatedPlayerIds(raw={}){
+  const players = raw.players && typeof raw.players === 'object' ? raw.players : {};
+  const byName = new Map(Object.entries(players));
+  const references = [
+    ...(Array.isArray(raw.called) ? raw.called : []),
+    ...(Array.isArray(raw.calledPlayers) ? raw.calledPlayers : []),
+    ...(Array.isArray(raw.selectedPlayers) ? raw.selectedPlayers : []),
+    ...Object.values(raw.lineup || {}),
+    ...(Array.isArray(raw.bench) ? raw.bench : []),
+    ...Object.entries(players).filter(([, player]) => matchPlayerHasParticipation(player || {})).map(([name]) => name)
+  ];
+  return [...new Set(references.flatMap(reference => {
+    const referenceRow = reference && typeof reference === 'object' ? reference : {};
+    const name = typeof reference === 'string' ? reference : (referenceRow.playerName || referenceRow.name || '');
+    const player = byName.get(name) || referenceRow;
+    return [player?.playerId, player?.playerSnapshot?.playerId, referenceRow.playerId, referenceRow.playerSnapshot?.playerId];
+  }).map(value => String(value || '').trim()).filter(Boolean))];
+}
 function matchSyncCapabilities(){
   return {available:!!(db && currentUser), online:navigator.onLine, canRead:canViewModule('stats'), canWrite:canEditModule('stats')};
 }
@@ -4906,10 +4926,7 @@ function normalizeMatchForFirestore(raw={}){
     : matchTypeRaw === 'futsal' ? 'futsal'
     : ['friendly','amical','match amical'].includes(matchTypeRaw) ? 'friendly' : '';
   const matchTypeLabel = {championship:'Championnat', tournament:'Tournoi', futsal:'Futsal', friendly:'Match amical'}[matchType] || 'Non renseigné';
-  const playerIds = [...new Set([
-    ...(Array.isArray(raw.playerIds) ? raw.playerIds : []),
-    ...Object.values(raw.players || {}).flatMap(player => [player?.playerId, player?.playerSnapshot?.playerId])
-  ].map(value => String(value || '').trim()).filter(Boolean))];
+  const playerIds = matchAssociatedPlayerIds(raw);
   const events = (raw.log || raw.events || raw.actions || []).map((event, index) => ({
     ...event,
     id:matchEventDocumentId(matchId, event, index),
