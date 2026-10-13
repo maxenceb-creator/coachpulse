@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const {assertPublicHtmlSafe} = require('./check-public-personal-data.js');
+const {checkTechnicalEntry} = require('./technical-tests-entry-check.js');
 
 const root = path.resolve(__dirname, '..');
 const outDir = path.join(root, 'public');
@@ -65,5 +66,6 @@ entries.filter(exists).forEach(copyRecursive);
 
 // Also verify the exact artifact that Firebase Hosting will publish.
 assertPublicHtmlSafe(['public/pages/tests-techniques.html', 'public/pages/coach-stats.html']);
+checkTechnicalEntry('public/pages/tests-techniques.html');
 
 console.log(`CoachPulse public build ready: ${path.relative(root, outDir)}`);
