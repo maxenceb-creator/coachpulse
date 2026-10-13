@@ -11,12 +11,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy Firestore rules
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Prepare Firebase credentials
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COACH_PULSE_EE6B0 }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+        run: printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
+      - name: Check active Firestore Rules fingerprint
+        id: rules_fingerprint
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          GOOGLE_CLOUD_PROJECT: coach-pulse-ee6b0
+        run: node scripts/verify-active-firestore-rules.cjs firestore.rules --allow-mismatch
+      - name: Deploy Firestore rules when required
+        if: steps.rules_fingerprint.outputs.match == 'false'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          GOOGLE_CLOUD_PROJECT: coach-pulse-ee6b0
         run: |
-          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
           max_attempts=3
           attempt=1
           while true; do
@@ -25,6 +42,11 @@ jobs:
             status=${PIPESTATUS[0]}
             set -e
             if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if grep -Eq 'HTTP Error: 409([^0-9]|$)' "${RUNNER_TEMP}/firebase-rules-${attempt}.log"; then
+              echo "HTTP 409 reçu. Vérification stricte des Rules actives avant toute poursuite."
+              node scripts/verify-active-firestore-rules.cjs firestore.rules
               break
             fi
             if ! grep -Eq 'HTTP Error: (429|500|502|503|504)([^0-9]|$)' "${RUNNER_TEMP}/firebase-rules-${attempt}.log"; then
@@ -38,7 +60,15 @@ jobs:
             sleep "$sleep_seconds"
             attempt=$((attempt + 1))
           done
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      - name: Verify deployed Firestore Rules fingerprint
+        if: steps.rules_fingerprint.outputs.match == 'false'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          GOOGLE_CLOUD_PROJECT: coach-pulse-ee6b0
+        run: node scripts/verify-active-firestore-rules.cjs firestore.rules
+      - name: Deploy Firebase Hosting
+        if: success()
+        uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COACH_PULSE_EE6B0 }}
