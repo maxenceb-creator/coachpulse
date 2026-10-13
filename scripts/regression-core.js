@@ -858,6 +858,11 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(mergeWorkflowSource.includes('deploy --only firestore:rules'), 'Le merge sur main doit publier les règles Firestore avant le site.');
   assert(mergeWorkflowSource.includes('max_attempts=3'), 'Le déploiement Rules doit limiter les nouvelles tentatives.');
   assert(mergeWorkflowSource.includes("HTTP Error: (429|500|502|503|504)"), 'Seules les erreurs HTTP transitoires prévues doivent relancer le déploiement Rules.');
+  assert(mergeWorkflowSource.includes('verify-active-firestore-rules.cjs firestore.rules --allow-mismatch'), 'Le déploiement PROD doit comparer les empreintes avant tout appel de compilation Rules.');
+  assert(mergeWorkflowSource.includes("if: steps.rules_fingerprint.outputs.match == 'false'"), 'Les Rules ne doivent être déployées que lorsque les empreintes diffèrent.');
+  assert(mergeWorkflowSource.includes("HTTP Error: 409([^0-9]|$)"), 'Un HTTP 409 doit déclencher une vérification stricte des Rules actives.');
+  assert(mergeWorkflowSource.match(/node scripts\/verify-active-firestore-rules\.cjs firestore\.rules/g)?.length >= 3, 'Les Rules doivent être revérifiées strictement après déploiement ou HTTP 409.');
+  assert(mergeWorkflowSource.includes('name: Deploy Firebase Hosting\n        if: success()'), 'Hosting ne doit être exécuté qu’après satisfaction de tous les contrôles Rules.');
   const previewWorkflowSource = fs.readFileSync('.github/workflows/firebase-hosting-pull-request.yml', 'utf8');
   assert(previewWorkflowSource.includes('verify-active-firestore-rules.cjs firestore.rules'), 'La preview doit comparer les Rules attendues aux Rules actives avant Hosting.');
   assert(previewWorkflowSource.includes("Channel URL[^:]*:"), 'La preview doit extraire explicitement la Channel URL Firebase.');
