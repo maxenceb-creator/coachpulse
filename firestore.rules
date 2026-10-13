@@ -325,6 +325,30 @@ service cloud.firestore {
         || (data.keys().hasAny(['sessionId']) && canAccessLinkedDocument('sessions', data.sessionId));
     }
 
+    function canListPlayerLinkedData(data, moduleId) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['LECTEUR', 'SAISIE', 'EDITEUR', 'ADMIN']
+        && (
+          moduleAllowedFrom(modules, level, staffRole, moduleId)
+          || moduleAllowedFrom(modules, level, staffRole, 'playerProfile')
+        )
+        && (
+          level == 'ADMIN'
+          || staffRole == 'ADMIN'
+          || teams.hasAny([data.get('teamId', '')])
+          || data.get('teamIds', []).hasAny(teams)
+          || (data.keys().hasAny(['playerId'])
+            && linkedTeamMatches('players', data.playerId, teams))
+        );
+    }
+
     function canAccessMatchScopedDataForModule(data, moduleId) {
       return canAccessMatchScopedData(data) || moduleScopeAllowsAllPlayers(moduleId);
     }
@@ -984,23 +1008,26 @@ service cloud.firestore {
     }
 
     match /workloads/{workloadId} {
-      allow read: if (canReadData() && canAccessModule('workload') && canAccessSessionScopedData(resource.data))
+      allow get: if (canReadData() && canAccessModule('workload') && canAccessSessionScopedData(resource.data))
         || canReadPlayerProfileLinkedData(resource.data);
+      allow list: if canListPlayerLinkedData(resource.data, 'workload');
       allow create: if canWritePhysicalData() && canAccessModule('workload') && canAccessSessionScopedData(request.resource.data);
       allow update: if canWritePhysicalData() && canAccessModule('workload') && canAccessSessionScopedData(resource.data) && canAccessSessionScopedData(request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /convocations/{convocationId} {
-      allow read: if (canReadData() && canAccessModule('convocations') && canAccessMatchScopedData(resource.data))
+      allow get: if (canReadData() && canAccessModule('convocations') && canAccessMatchScopedData(resource.data))
         || canReadPlayerProfileLinkedData(resource.data);
+      allow list: if canListPlayerLinkedData(resource.data, 'convocations');
       allow create: if canWriteSportData() && canAccessModule('convocations') && canAccessMatchScopedData(request.resource.data);
       allow update: if canWriteSportData() && canAccessModule('convocations') && canAccessMatchScopedData(resource.data) && canAccessMatchScopedData(request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);
     }
 
     match /individualReports/{reportId} {
-      allow read: if (canReadData() && canAccessModule('individualReports') && canAccessScopedData(resource.data)) || canReadPlayerProfileLinkedData(resource.data);
+      allow get: if (canReadData() && canAccessModule('individualReports') && canAccessScopedData(resource.data)) || canReadPlayerProfileLinkedData(resource.data);
+      allow list: if canListPlayerLinkedData(resource.data, 'individualReports');
       allow create: if canWriteSportData() && canAccessModule('individualReports') && canAccessScopedData(request.resource.data);
       allow update: if canWriteSportData() && canAccessModule('individualReports') && canAccessScopedData(resource.data) && canAccessScopedData(request.resource.data);
       allow delete: if canDeleteCoreData(resource.data);
