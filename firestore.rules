@@ -344,6 +344,8 @@ service cloud.firestore {
           || staffRole == 'ADMIN'
           || teams.hasAny([data.get('teamId', '')])
           || data.get('teamIds', []).hasAny(teams)
+          || (data.keys().hasAny(['playerId'])
+            && linkedTeamMatches('players', data.playerId, teams))
         );
     }
 
