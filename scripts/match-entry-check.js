@@ -139,6 +139,33 @@ async function test(name, callback) {
 }
 
 async function main() {
+  await test('active lineup drag coalesces pitch refreshes until the exact session finishes', () => {
+    const h = matchHarness();
+    h.run(`
+      let deferredPitchRenders=0;
+      renderPitch=()=>{deferredPitchRenders++};
+      const session={pointerId:7,renderPending:false};
+      activeMatchDrag=session;
+      if(!deferPitchRender()||!deferPitchRender())throw new Error('render was not deferred');
+      finishMatchDrag({pointerId:7,renderPending:true});
+    `);
+    assert.equal(h.run('deferredPitchRenders'), 0);
+    assert.equal(h.run('activeMatchDrag.pointerId'), 7);
+    h.run('finishMatchDrag(session)');
+    assert.equal(h.run('deferredPitchRenders'), 1);
+    assert.equal(h.run('activeMatchDrag'), null);
+  });
+
+  await test('drag implementation uses a body-level ghost and keeps pointer cancellation non-validating', () => {
+    const source = read('pages/coach-stats.html');
+    const addSlotSource = between(source, 'function addSlot(', '\nfunction movePlayer(');
+    assert.match(addSlotSource, /document\.body\.appendChild\(ghost\)/);
+    assert.match(addSlotSource, /pointercancel/);
+    const cancelHandler = between(addSlotSource, "d.addEventListener('pointercancel'", '\n container.appendChild');
+    assert.doesNotMatch(cancelHandler, /movePlayer\s*\(/);
+    assert.match(cancelHandler, /cleanDrag\(\);completeDrag\(\)/);
+  });
+
   await test('tactical placement uses clamped relative coordinates and resets explicitly', () => {
     const h = matchHarness();
     h.run("saveTacticalPlacement('BU',1.4,-0.2);");
