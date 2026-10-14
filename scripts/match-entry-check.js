@@ -139,6 +139,33 @@ async function test(name, callback) {
 }
 
 async function main() {
+  await test('active lineup drag coalesces pitch refreshes until the exact session finishes', () => {
+    const h = matchHarness();
+    h.run(`
+      let deferredPitchRenders=0;
+      renderPitch=()=>{deferredPitchRenders++};
+      const session={pointerId:7,renderPending:false};
+      activeMatchDrag=session;
+      if(!deferPitchRender()||!deferPitchRender())throw new Error('render was not deferred');
+      finishMatchDrag({pointerId:7,renderPending:true});
+    `);
+    assert.equal(h.run('deferredPitchRenders'), 0);
+    assert.equal(h.run('activeMatchDrag.pointerId'), 7);
+    h.run('finishMatchDrag(session)');
+    assert.equal(h.run('deferredPitchRenders'), 1);
+    assert.equal(h.run('activeMatchDrag'), null);
+  });
+
+  await test('drag implementation uses a body-level ghost and keeps pointer cancellation non-validating', () => {
+    const source = read('pages/coach-stats.html');
+    const addSlotSource = between(source, 'function addSlot(', '\nfunction movePlayer(');
+    assert.match(addSlotSource, /document\.body\.appendChild\(ghost\)/);
+    assert.match(addSlotSource, /pointercancel/);
+    const cancelHandler = between(addSlotSource, "d.addEventListener('pointercancel'", '\n container.appendChild');
+    assert.doesNotMatch(cancelHandler, /movePlayer\s*\(/);
+    assert.match(cancelHandler, /cleanDrag\(\);completeDrag\(\)/);
+  });
+
   await test('tactical placement uses clamped relative coordinates and resets explicitly', () => {
     const h = matchHarness();
     h.run("saveTacticalPlacement('BU',1.4,-0.2);");
@@ -423,10 +450,11 @@ async function main() {
   await test('pendingSync, synced, syncError, network retry and idempotent Firestore writes', async () => {
     const h = matchHarness();
     const cloud = firestoreHarness();
-    h.run("state.matchType='tournament';recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
+    h.run("state.matchType='tournament';state.players['UNRELATED REFERENCE']={...blank(),playerId:'fixture-unrelated'};recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
     assert.equal(h.state().savedMatches[0].syncStatus, 'pendingSync');
     assert.equal(h.state().savedMatches[0].matchType, 'tournament');
     assert.equal(h.state().savedMatches[0].matchTypeLabel, 'Tournoi');
+    h.run("state.savedMatches[0].playerIds=['legacy-oversized-id'];save();");
     h.sandbox.parent.CoachPulseCentralData = {
       matchSaveToFirestore: async match => {
         const local = JSON.parse(h.storage.get('coachStatsV170'));
@@ -447,6 +475,9 @@ async function main() {
     const matchRef = firstRefs.find(ref => ref.startsWith('matches/'));
     assert.equal(cloud.documents.get(matchRef).matchType, 'tournament');
     assert.equal(cloud.documents.get(matchRef).matchTypeLabel, 'Tournoi');
+    assert.deepEqual(cloud.documents.get(matchRef).playerIds.slice().sort(), ['fixture-player-0','fixture-player-1','fixture-player-2']);
+    assert.equal(cloud.documents.get(matchRef).playerIds.includes('fixture-unrelated'), false, 'Le référentiel state.players ne doit pas gonfler playerIds.');
+    assert.equal(cloud.documents.get(matchRef).playerIds.includes('legacy-oversized-id'), false);
     delete cloud.documents.get(matchRef).log;
     delete cloud.documents.get(matchRef).events;
     const remote = await cloud.sandbox.matchListFromFirestore({teamId: 'team-u13-a'});

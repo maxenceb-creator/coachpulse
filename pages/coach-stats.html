@@ -371,7 +371,23 @@ function showPositionMenu(){
  box.innerHTML=`<div class="actionMenuTitle">Gestion joueuse · changer le poste</div><div class="positionChoiceGroups">${groups.map(group=>{const positions=canonicalMatchPositions().filter(pos=>positionGroup(pos)===group);return `<div class="positionChoiceGroup"><b>${group}</b><div>${positions.map(pos=>`<button class="ghost${pos===current?' current':''}" onclick="changePlayerPosition('${esc(name)}','${pos}');hideActionMenu()" ${pos===current?'disabled':''}>${pos}${state.lineup[pos]&&state.lineup[pos]!==name?' ⇄':''}</button>`).join('')}</div></div>`}).join('')}</div>`;
  box.classList.add('show','positionMenu');positionContextActionMenu();
 }
-function renderPitch(){const pitch=document.getElementById('pitch');if(!pitch)return;document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());const pos=POSITIONS[state.system]||[];pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,p[1],p[2],false)});state.bench.forEach((name,i)=>addSlot('Banc',name,91,16+i*10,true));const panel=document.getElementById('playerActionPanel');if(panel?.classList.contains('show'))requestAnimationFrame(()=>positionContextActionMenu())}
+let activeMatchDrag=null;
+function deferPitchRender(){if(!activeMatchDrag)return false;activeMatchDrag.renderPending=true;return true}
+function finishMatchDrag(session){
+ if(activeMatchDrag!==session)return;
+ const renderPending=Boolean(session.renderPending);
+ activeMatchDrag=null;
+ if(renderPending)renderPitch();
+}
+function copyDragAppearance(source,clone){
+ const sourceNodes=[source,...source.querySelectorAll('*')],cloneNodes=[clone,...clone.querySelectorAll('*')];
+ sourceNodes.forEach((node,index)=>{
+   const target=cloneNodes[index],style=getComputedStyle(node);
+   if(!target||!style)return;
+   for(const property of style)target.style.setProperty(property,style.getPropertyValue(property),style.getPropertyPriority(property));
+ });
+}
+function renderPitch(){if(deferPitchRender())return;const pitch=document.getElementById('pitch');if(!pitch)return;document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());const pos=POSITIONS[state.system]||[];pos.forEach(p=>{const name=state.lineup[p[0]]||'';addSlot(p[0],name,p[1],p[2],false)});state.bench.forEach((name,i)=>addSlot('Banc',name,91,16+i*10,true));const panel=document.getElementById('playerActionPanel');if(panel?.classList.contains('show'))requestAnimationFrame(()=>positionContextActionMenu())}
 function addSlot(pos,name,x,y,bench){
  const container=document.getElementById(bench?'matchBench':'pitch')||document.getElementById('pitch');
  const d=document.createElement('div');
@@ -381,9 +397,17 @@ function addSlot(pos,name,x,y,bench){
  d.draggable=false;d.dataset.name=name||'';d.dataset.pos=pos;
  d.innerHTML=`${name?avatarHTML(name,'slotPhoto'):''}<span class="slotName">${name?shortPlayerName(name):'—'}</span><span class="pos">${pos}</span><span class="min">${name?fmt(state.players[name]?.seconds||0).split(':')[0]+'′':''}</span>`;
  d.title=name?short(name):'';
- let pointerDown=false,isDragging=false,startX=0,startY=0,originLeft=0,originTop=0,lastX=x,lastY=y;
- function elementBelow(clientX,clientY){const old=d.style.pointerEvents;d.style.pointerEvents='none';const el=document.elementFromPoint(clientX,clientY);d.style.pointerEvents=old;return el}
- function cleanDrag(restore=true){d.classList.remove('dragging');document.querySelectorAll('.slot.dropReady').forEach(s=>s.classList.remove('dropReady'));document.body.classList.remove('dragging-player','lineup-touching');d.style.zIndex='';d.style.transform='';if(restore)setPosition(x,y)}
+ let pointerDown=false,isDragging=false,startX=0,startY=0,originLeft=0,originTop=0,lastX=x,lastY=y,dragSession=null,dragGhost=null;
+ function elementBelow(clientX,clientY){return document.elementFromPoint(clientX,clientY)}
+ function createDragGhost(){
+   const rect=d.getBoundingClientRect(),ghost=d.cloneNode(true);
+   copyDragAppearance(d,ghost);ghost.removeAttribute('id');ghost.classList.add('matchDragGhost','dragging');ghost.setAttribute('aria-hidden','true');
+   Object.assign(ghost.style,{position:'fixed',left:rect.left+'px',top:rect.top+'px',right:'auto',bottom:'auto',width:rect.width+'px',height:rect.height+'px',margin:'0',transform:'none',pointerEvents:'none',zIndex:'10001'});
+   document.body.appendChild(ghost);return ghost;
+ }
+ function moveDragGhost(clientX,clientY){if(dragGhost){dragGhost.style.left=(clientX-dragGhost.offsetWidth/2)+'px';dragGhost.style.top=(clientY-dragGhost.offsetHeight/2)+'px'}}
+ function cleanDrag(restore=true){dragGhost?.remove();dragGhost=null;d.classList.remove('dragging');d.style.visibility='';document.querySelectorAll('.slot.dropReady').forEach(s=>s.classList.remove('dropReady'));document.body.classList.remove('dragging-player','lineup-touching');d.style.zIndex='';d.style.transform='';if(restore)setPosition(x,y)}
+ function completeDrag(){const session=dragSession;dragSession=null;finishMatchDrag(session)}
  function moveFieldMarker(clientX,clientY){
    const field=document.getElementById('pitch'),r=field.getBoundingClientRect();
    const halfW=d.offsetWidth/2,halfH=d.offsetHeight/2;
@@ -395,33 +419,33 @@ function addSlot(pos,name,x,y,bench){
  d.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation()});
  d.addEventListener('selectstart',e=>e.preventDefault());d.addEventListener('dragstart',e=>e.preventDefault());
  d.addEventListener('pointerdown',e=>{
-   if(!name||(e.pointerType==='mouse'&&e.button!==0))return;
-   e.preventDefault();e.stopPropagation();pointerDown=true;isDragging=false;startX=e.clientX;startY=e.clientY;originLeft=d.offsetLeft;originTop=d.offsetTop;lastX=x/100;lastY=y/100;
+   if(!name||activeMatchDrag||(e.pointerType==='mouse'&&e.button!==0))return;
+   e.preventDefault();e.stopPropagation();pointerDown=true;isDragging=false;startX=e.clientX;startY=e.clientY;originLeft=d.offsetLeft;originTop=d.offsetTop;lastX=x/100;lastY=y/100;dragSession={pointerId:e.pointerId,renderPending:false};activeMatchDrag=dragSession;
    document.body.classList.add('lineup-touching');try{d.setPointerCapture(e.pointerId)}catch(_){}
  },{passive:false});
  d.addEventListener('pointermove',e=>{
-   if(!pointerDown||!name)return;
+   if(!pointerDown||!name||e.pointerId!==dragSession?.pointerId)return;
    const dx=e.clientX-startX,dy=e.clientY-startY;
-   if(!isDragging&&Math.hypot(dx,dy)>6){isDragging=true;state.justDragged=true;d.classList.add('dragging');document.body.classList.add('dragging-player')}
+   if(!isDragging&&Math.hypot(dx,dy)>6){isDragging=true;state.justDragged=true;dragGhost=createDragGhost();d.style.visibility='hidden';document.body.classList.add('dragging-player')}
    if(!isDragging)return;
-   e.preventDefault();e.stopPropagation();d.style.zIndex='500';
+   e.preventDefault();e.stopPropagation();moveDragGhost(e.clientX,e.clientY);
    document.querySelectorAll('.slot.dropReady').forEach(s=>s.classList.remove('dropReady'));
    if(bench){d.style.left=(originLeft+dx)+'px';d.style.top=(originTop+dy)+'px';const target=elementBelow(e.clientX,e.clientY)?.closest('.slot');if(target&&target!==d)target.classList.add('dropReady')}
    else {moveFieldMarker(e.clientX,e.clientY);const below=elementBelow(e.clientX,e.clientY);const target=below?.closest('#pitch .slot.player,#matchBench .slot');if(target&&target!==d)target.classList.add('dropReady')}
  },{passive:false});
  d.addEventListener('pointerup',e=>{
-   if(!pointerDown)return;pointerDown=false;
+   if(!pointerDown||e.pointerId!==dragSession?.pointerId)return;pointerDown=false;try{d.releasePointerCapture(e.pointerId)}catch(_){}
    if(isDragging){
      e.preventDefault();e.stopPropagation();const below=elementBelow(e.clientX,e.clientY);const target=below?.closest('.slot');
      if(bench){cleanDrag();if(target&&target!==d&&target.dataset.pos!=='Banc')movePlayer(name,pos,target.dataset.pos,target.dataset.name||'')}
      else if(target?.classList.contains('player')&&target!==d){cleanDrag();movePlayer(name,pos,target.dataset.pos,target.dataset.name||'')}
      else if(target?.dataset.pos==='Banc'||below?.closest('#matchBench')){cleanDrag();movePlayer(name,pos,'Banc',target?.dataset.name||'')}
      else {cleanDrag(false);saveTacticalPlacement(pos,lastX,lastY);renderPitch()}
-     setTimeout(()=>state.justDragged=false,260);return;
+     completeDrag();setTimeout(()=>state.justDragged=false,260);return;
    }
-   cleanDrag();if(name&&!state.justDragged){document.getElementById('playerActionPanel')?.classList.remove('advOnly');state.selected=name;save();renderAll();setTimeout(()=>openPlayerPanel(name),0)}
+   cleanDrag();if(name&&!state.justDragged){document.getElementById('playerActionPanel')?.classList.remove('advOnly');state.selected=name;save();renderAll();setTimeout(()=>openPlayerPanel(name),0)}completeDrag();
  },{passive:false});
- d.addEventListener('pointercancel',()=>{pointerDown=false;isDragging=false;cleanDrag();setTimeout(()=>state.justDragged=false,200)});
+ d.addEventListener('pointercancel',e=>{if(!pointerDown||e.pointerId!==dragSession?.pointerId)return;pointerDown=false;isDragging=false;try{d.releasePointerCapture(e.pointerId)}catch(_){}cleanDrag();completeDrag();setTimeout(()=>state.justDragged=false,200)});
  container.appendChild(d);
 }
 function movePlayer(name,from,to,targetName=''){
@@ -931,6 +955,7 @@ function zoneCellHTML(z,isAdv=false){
 }
 /* V6.9.3 : anciens overrides buildZones/heatmapHTML V3.1.1 supprimés. */
 renderPitch=function(){
+  if(deferPitchRender())return;
   const pitch=document.getElementById('pitch');
   if(!pitch)return;
   document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());
@@ -971,6 +996,7 @@ function setIconOnlyButtonsV313(){
 }
 const __v313OldRenderPitch=renderPitch;
 renderPitch=function(){
+  if(deferPitchRender())return;
   const pitch=document.getElementById('pitch');
   if(!pitch)return;
   document.querySelectorAll('#pitch .slot,#matchBench .slot').forEach(e=>e.remove());

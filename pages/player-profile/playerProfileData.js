@@ -127,6 +127,23 @@
     const normalizedAliases = new Set(aliases.map(normName).filter(Boolean));
     return rowPlayerNames(row).some(name => normalizedAliases.has(normName(name)));
   }
+  function matchPlayerHasParticipation(row={}){
+    const seconds = Number(row.seconds ?? row.playingSeconds ?? row.tempsSecondes ?? row.playedSeconds ?? 0);
+    const positionSeconds = row.positionSeconds || row.positions || {};
+    const positionedSeconds = Object.values(positionSeconds).reduce((total, value) => total + Math.max(0, Number(value) || 0), 0);
+    return seconds > 0
+      || positionedSeconds > 0
+      || row.entered === true
+      || row.played === true
+      || row.participated === true
+      || ['PLAYED','PARTICIPATED','ENTERED'].includes(text(row.participationStatus || row.status).toUpperCase());
+  }
+  function matchHasPlayerParticipation(match={}, aliases=[]){
+    return Object.entries(match.players || {}).some(([playerName, value]) => {
+      const row = {...(value || {}), playerName};
+      return rowMatchesPlayer(row, aliases) && matchPlayerHasParticipation(row);
+    });
+  }
   async function listPlayers(){
     if(api().listPlayers){
       const rows = await api().listPlayers({season:currentSeason()});
@@ -174,5 +191,5 @@
       individualReports:c.individualReports || []
     };
   }
-  global.PlayerProfileData = {api, text, seasonFromDate, currentSeason, playerForSeason, idOf, slug, stableId, displayName, teamLabel, listPlayers, loadProfileData, normalizeCollections, playerAliases, rowPlayerIds, rowMatchesPlayer};
+  global.PlayerProfileData = {api, text, seasonFromDate, currentSeason, playerForSeason, idOf, slug, stableId, displayName, teamLabel, listPlayers, loadProfileData, normalizeCollections, playerAliases, rowPlayerIds, rowMatchesPlayer, matchPlayerHasParticipation, matchHasPlayerParticipation};
 })(window);

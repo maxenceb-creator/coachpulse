@@ -227,8 +227,7 @@
       individualReports:(base.individualReports || []).filter(row => Data.rowMatchesPlayer(row, aliases))
     };
     out.sessions = (base.sessions || []).slice();
-    const matchIds = new Set(out.matchEvents.map(row => row.matchId).filter(Boolean));
-    out.matches = (base.matches || []).filter(row => matchIds.has(row.matchId || row.id));
+    out.matches = (base.matches || []).filter(row => Data.matchHasPlayerParticipation(row, aliases));
     if(hasLoadedCollections) state.filteredCollectionCache[playerId] = out;
     return out;
   }

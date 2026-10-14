@@ -214,7 +214,7 @@
     const linkedCounts = {
       presences:attendance.length,
       seances:sessions.length,
-      matchs:matchEvents.length,
+      matchs:matchSummary.matches,
       testsTechniques:technicalTests.length,
       testsAthletiques:physicalTests.length,
       blessures:injuries.length,
