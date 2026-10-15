@@ -1358,8 +1358,7 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(appSource.includes("Array.isArray(stats?.savedMatches) ? stats.savedMatches"), 'Les matchs locaux historiques doivent être récupérables par la migration non destructive.');
   assert(appSource.includes("Array.isArray(m.log) ? m.log"), 'Le fil réel du match doit alimenter matchEvents.');
   assert(rulesSource.includes('match /matches/{matchId}') && rulesSource.includes('match /matchEvents/{eventId}'), 'Les règles doivent couvrir matches et matchEvents.');
-  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats')")
-    && rulesSource.includes("&& canAccessMatchScopedDataForModule(resource.data, 'stats')")
+  assert(rulesSource.includes('allow delete: if canDeleteMatchEventData(resource.data)')
     && rulesSource.includes('&& eventDeleteUsesAtomicMatchRevision(resource.data);'), 'La suppression d’un événement Match doit utiliser les permissions du module Match et une révision atomique.');
 }
 

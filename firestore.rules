@@ -564,6 +564,20 @@ service cloud.firestore {
         && (level == 'ADMIN' || canAccessMatchEventScope(after, teams));
     }
 
+    function canDeleteMatchEventData(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['SAISIE', 'EDITEUR', 'ADMIN']
+        && moduleAllowedFrom(modules, level, staffRole, 'stats')
+        && (level == 'ADMIN' || canAccessMatchEventScope(data, teams));
+    }
+
     function hasValidRevision(data, field) {
       return data.keys().hasAny([field])
         && data[field] is int
@@ -946,8 +960,7 @@ service cloud.firestore {
         && eventWriteUsesAtomicMatchRevision({}, request.resource.data);
       allow update: if canWriteMatchEventData(resource.data, request.resource.data)
         && eventWriteUsesAtomicMatchRevision(resource.data, request.resource.data);
-      allow delete: if canWriteSportData() && canAccessModule('stats')
-        && canAccessMatchScopedDataForModule(resource.data, 'stats')
+      allow delete: if canDeleteMatchEventData(resource.data)
         && eventDeleteUsesAtomicMatchRevision(resource.data);
     }
 
