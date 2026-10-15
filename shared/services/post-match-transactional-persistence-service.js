@@ -1,9 +1,9 @@
-// Transactional persistence reserved for future post-match entry modes.
-// This service is intentionally not connected to the existing Live workflow.
+// Transactional persistence shared by manual Live corrections and post-match entry.
 
 (function(global){
   const MAX_TRANSACTION_WRITES = 500;
   const MAX_DOCUMENT_BYTES = 1_000_000;
+  const EDITOR_MODES = Object.freeze(['LIVE', 'QUICK_POST_MATCH', 'FULL_POST_MATCH']);
   const POST_MATCH_MODES = Object.freeze(['QUICK_POST_MATCH', 'FULL_POST_MATCH']);
 
   function dependency(name, commonJsPath){
@@ -60,7 +60,7 @@
   }
 
   function normalizedMatchSnapshot(matchSnapshot, matchId, nextRevision, serverTimestamp){
-    // Post-match forms must preserve unknown values instead of silently
+    // Manual forms must preserve unknown values instead of silently
     // manufacturing zeroes for counters that were never entered.
     const players = Statistics.normalizePlayers(matchSnapshot.players || {}, {unknown:'preserve'});
     const opponentSource = matchSnapshot.opp || matchSnapshot.opponent || {};
@@ -93,15 +93,16 @@
   function validateRequest(input){
     const matchId = text(input.matchId);
     if(!matchId) return failure('INVALID_MATCH_ID', 'Un matchId stable est obligatoire.');
-    if(!POST_MATCH_MODES.includes(input.matchSnapshot?.entryMode)){
-      return failure('INVALID_ENTRY_MODE', 'Ce service accepte uniquement les modes Apres-match.');
+    if(!EDITOR_MODES.includes(input.matchSnapshot?.entryMode)){
+      return failure('INVALID_ENTRY_MODE', 'Mode de saisie manuelle inconnu.');
     }
     if(!text(input.matchSnapshot?.teamId)){
-      return failure('INVALID_TEAM_SCOPE', 'Un teamId canonique est obligatoire pour une sauvegarde Apres-match.');
+      return failure('INVALID_TEAM_SCOPE', 'Un teamId canonique est obligatoire pour une sauvegarde manuelle.');
     }
     const expected = Persistence.revisionInfo(input.expectedRevision);
     if(!expected.valid) return failure('INVALID_EXPECTED_REVISION', 'La revision attendue est invalide.');
     if(!Array.isArray(input.nextEvents)) return failure('INVALID_EVENTS', 'nextEvents doit etre une liste.');
+    if(input.removedEventIds != null && !Array.isArray(input.removedEventIds)) return failure('INVALID_REMOVED_EVENTS', 'removedEventIds doit etre une liste.');
     if(input.deletionStrategy && !Persistence.DELETION_STRATEGIES.includes(input.deletionStrategy)){
       return failure('INVALID_DELETION_STRATEGY', 'La strategie de suppression est invalide.');
     }
@@ -154,6 +155,17 @@
           deletionStrategy:input.deletionStrategy || 'PHYSICAL',
           nextEventsComplete:input.nextEventsComplete === true
         });
+        const explicitRemovedIds = new Set((input.removedEventIds || []).map(text).filter(Boolean));
+        if(input.nextEventsComplete !== true && explicitRemovedIds.size){
+          const nextIds = new Set(input.nextEvents.map(Persistence.eventIdentifier));
+          remoteEvents.forEach(event => {
+            const eventId=Persistence.eventIdentifier(event);
+            if(!explicitRemovedIds.has(eventId)||nextIds.has(eventId))return;
+            reconciliation.removed.push((input.deletionStrategy || 'PHYSICAL') === 'LOGICAL'
+              ? {eventId,strategy:'LOGICAL',before:event,tombstone:{...event,deleted:true}}
+              : {eventId,strategy:'PHYSICAL',before:event});
+          });
+        }
         const writes = 1 + reconciliation.added.length + reconciliation.modified.length + reconciliation.removed.length;
         if(writes > MAX_TRANSACTION_WRITES){
           return failure('TRANSACTION_TOO_LARGE', `La sauvegarde exige ${writes} ecritures, au-dela de la limite de ${MAX_TRANSACTION_WRITES}.`, {writes});
@@ -209,7 +221,7 @@
     }
   }
 
-  const service = {MAX_TRANSACTION_WRITES, MAX_DOCUMENT_BYTES, POST_MATCH_MODES, savePostMatchTransactional};
+  const service = {MAX_TRANSACTION_WRITES, MAX_DOCUMENT_BYTES, EDITOR_MODES, POST_MATCH_MODES, savePostMatchTransactional};
   global.CoachPulsePostMatchTransactionalPersistence = service;
   if(typeof module !== 'undefined' && module.exports) module.exports = service;
 })(typeof window !== 'undefined' ? window : globalThis);
