@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const firestoreQueries = require('../shared/services/firestore-query-service.js');
+const matchStatistics = require('../shared/services/match-statistics-service.js');
 
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -55,6 +56,7 @@ function matchHarness() {
     CoachStatsNotify: {
       warn() {}, error() {}, success() {}, info() {}, ask: async () => true
     },
+    CoachPulseMatchStatistics: matchStatistics,
     PLAYER_DB: ['TEST ALICE', 'TEST BEA', 'TEST CLEO'].map((name, index) => ({
       name, playerId: `fixture-player-${index}`, team: 'U13 A', teamId: 'team-u13-a'
     }))
