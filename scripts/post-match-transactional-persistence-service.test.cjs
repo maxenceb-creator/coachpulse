@@ -181,11 +181,12 @@ test('operation trop grande refuse toute ecriture', async () => {
   assert.equal(mock.commits.length,0);
 });
 
-test('service reserve aux parcours apres-match et non au Live', async () => {
+test('service accepte explicitement les provenances Live et Apres-match', async () => {
   const mock = mockFirestore();
-  const result = await save(mock,{matchSnapshot:{...baseMatch,entryMode:'LIVE'}});
-  assert.equal(result.code,'INVALID_ENTRY_MODE');
-  assert.equal(mock.commits.length,0);
+  const result = await save(mock,{matchSnapshot:{...baseMatch,entryMode:'LIVE',statsSource:'EVENTS'}});
+  assert.equal(result.ok,true);
+  assert.equal(mock.store.match.entryMode,'LIVE');
+  assert.equal(mock.store.match.statsSource,'EVENTS');
 });
 
 test('evenements exclus du document match et conserves dans matchEvents', async () => {

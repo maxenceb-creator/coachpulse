@@ -131,8 +131,11 @@
     const seconds = Number(row.seconds ?? row.playingSeconds ?? row.tempsSecondes ?? row.playedSeconds ?? 0);
     const positionSeconds = row.positionSeconds || row.positions || {};
     const positionedSeconds = Object.values(positionSeconds).reduce((total, value) => total + Math.max(0, Number(value) || 0), 0);
+    const hasPositiveStat = ['but','passe','tirCadre','tirNonCadre','centre','progression','entree20','recup','duelWon','duelLost']
+      .some(key => Number(row[key]) > 0);
     return seconds > 0
       || positionedSeconds > 0
+      || hasPositiveStat
       || row.entered === true
       || row.played === true
       || row.participated === true

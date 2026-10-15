@@ -2436,7 +2436,7 @@ async function playerProfileLoadData(options={}){
   const teamMatches = optionalMatches.values.matches;
   const playerMatches = teamMatches.filter(match => {
     const rows = Object.entries(match.players || {}).map(([playerName, value]) => ({...(value || {}), playerName}));
-    return rowsMatchingProfileAliases(rows, aliases).some(matchPlayerHasParticipation);
+    return rowsMatchingProfileAliases(rows, aliases).some(row => globalThis.CoachPulseMatchStatistics?.playerHasParticipation?.(row) || matchPlayerHasParticipation(row));
   });
   const matches = mergeRows(playerMatches, row => row.matchId || row.id);
   if(!hasGlobalDataAccess() && selectedTeamIds.length){
