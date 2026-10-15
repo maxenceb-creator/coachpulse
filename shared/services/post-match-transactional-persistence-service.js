@@ -117,6 +117,53 @@
     return null;
   }
 
+  async function initializeHistoricalEventsRevision(input={}){
+    const matchId = text(input.matchId);
+    if(!matchId) return failure('INVALID_MATCH_ID', 'Un matchId stable est obligatoire.');
+    if(!text(input.matchSnapshot?.teamId)) return failure('INVALID_TEAM_SCOPE', 'Un teamId canonique est obligatoire.');
+    const expected = Persistence.revisionInfo(input.expectedRevision);
+    if(!expected.valid) return failure('INVALID_EXPECTED_REVISION', 'La revision attendue est invalide.');
+    const denied = authorize(input.profile, input.matchSnapshot);
+    if(denied) return denied;
+    const firestore = input.firestore || {};
+    const required = ['runTransaction','doc','serverTimestamp'];
+    const missing = required.filter(name => typeof firestore[name] !== 'function');
+    if(missing.length) return failure('INVALID_FIRESTORE_ADAPTER', `Adaptateur Firestore incomplet: ${missing.join(', ')}.`);
+
+    const matchRef = firestore.doc(input.db, 'matches', matchId);
+    try{
+      return await firestore.runTransaction(input.db, async transaction => {
+        const remoteSnapshot = await transaction.get(matchRef);
+        if(!documentExists(remoteSnapshot)) return failure('MATCH_NOT_FOUND', 'Le match historique est introuvable.');
+        const remoteMatch = documentData(remoteSnapshot) || {};
+        const comparison = Persistence.compareRevisions(input.expectedRevision, remoteMatch.revision);
+        if(!comparison.ok) return failure(comparison.code, comparison.message, {
+          conflict:comparison.conflict, expectedRevision:comparison.expectedRevision, remoteRevision:comparison.remoteRevision
+        });
+        const remoteEventsRevision = Persistence.revisionInfo(remoteMatch.eventsRevision, {
+          present:Object.prototype.hasOwnProperty.call(remoteMatch, 'eventsRevision')
+        });
+        if(!remoteEventsRevision.valid) return failure('INVALID_REMOTE_EVENTS_REVISION', 'La revision distante des evenements est invalide.');
+        if(remoteEventsRevision.state !== 'ABSENT'){
+          return {ok:true,status:'READY',code:'EVENTS_REVISION_ALREADY_READY',matchId,revision:comparison.remoteRevision,eventsRevision:remoteEventsRevision.revision,writes:0};
+        }
+        // Deliberately update version markers only. No event is queried, rewritten,
+        // recreated or deleted by this preparation transaction.
+        const timestamp = firestore.serverTimestamp();
+        transaction.set(matchRef, {
+          matchId,
+          revision:comparison.nextRevision,
+          eventsRevision:0,
+          eventsRevisionInitializedAt:timestamp,
+          updatedAt:timestamp
+        }, {merge:true});
+        return {ok:true,status:'INITIALIZED',code:'EVENTS_REVISION_INITIALIZED',matchId,previousRevision:comparison.remoteRevision,revision:comparison.nextRevision,eventsRevision:0,writes:1};
+      });
+    }catch(error){
+      return failure(error?.code || 'TRANSACTION_FAILED', error?.message || "L'initialisation transactionnelle a echoue.", {cause:error});
+    }
+  }
+
   async function savePostMatchTransactional(input={}){
     const invalid = validateRequest(input);
     if(invalid) return invalid;
@@ -251,7 +298,7 @@
     }
   }
 
-  const service = {MAX_TRANSACTION_WRITES, MAX_DOCUMENT_BYTES, POST_MATCH_MODES, savePostMatchTransactional};
+  const service = {MAX_TRANSACTION_WRITES, MAX_DOCUMENT_BYTES, POST_MATCH_MODES, initializeHistoricalEventsRevision, savePostMatchTransactional};
   global.CoachPulsePostMatchTransactionalPersistence = service;
   if(typeof module !== 'undefined' && module.exports) module.exports = service;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -56,6 +56,13 @@ async function save(mock, overrides={}){
   });
 }
 
+async function initialize(mock, overrides={}){
+  return Service.initializeHistoricalEventsRevision({
+    db:{}, firestore:mock.adapter, profile:baseProfile, matchId:'match-1', expectedRevision:0,
+    matchSnapshot:baseMatch, ...overrides
+  });
+}
+
 const tests = [];
 function test(name, callback){ tests.push([name, callback]); }
 
@@ -146,6 +153,43 @@ test('match historique peut initialiser eventsRevision sans suppression avec une
   assert.equal(result.ok,true);
   assert.equal(result.eventsRevision,1);
   assert.equal(mock.store.events.has('legacy'),true);
+});
+
+test('preparation historique dediee initialise uniquement le match sans toucher aux evenements', async () => {
+  const events=[{eventId:'legacy-1',matchId:'match-1',value:1},{eventId:'legacy-2',matchId:'match-1',value:2}];
+  const mock=mockFirestore({match:{...baseMatch,revision:0,legacy:'kept'},events});
+  const result=await initialize(mock);
+  assert.equal(result.code,'EVENTS_REVISION_INITIALIZED');
+  assert.equal(result.eventsRevision,0);
+  assert.equal(mock.store.match.revision,1);
+  assert.equal(mock.store.match.legacy,'kept');
+  assert.deepEqual([...mock.store.events.values()],events);
+  assert.equal(mock.commits[0].filter(write=>write.ref.collection==='matchEvents').length,0);
+});
+
+test('ajout concurrent pendant la preparation est conserve', async () => {
+  const mock=mockFirestore({match:{...baseMatch,revision:0},events:[{eventId:'legacy',matchId:'match-1'}],beforeCommit:({store})=>{
+    store.events.set('concurrent-add',{eventId:'concurrent-add',matchId:'match-1'});
+  }});
+  const result=await initialize(mock);
+  assert.equal(result.ok,true);
+  assert.equal(mock.store.events.has('legacy'),true);
+  assert.equal(mock.store.events.has('concurrent-add'),true);
+});
+
+test('preparation historique detecte une revision de match concurrente', async () => {
+  const mock=mockFirestore({match:{...baseMatch,revision:2},events:[{eventId:'keep',matchId:'match-1'}]});
+  const result=await initialize(mock,{expectedRevision:1});
+  assert.equal(result.code,'REVISION_CONFLICT');
+  assert.equal(mock.commits.length,0);
+  assert.equal(mock.store.events.has('keep'),true);
+});
+
+test('preparation historique refuse un utilisateur sans permission', async () => {
+  const mock=mockFirestore({match:{...baseMatch,revision:0}});
+  const result=await initialize(mock,{profile:{...baseProfile,permissionLevel:'LECTEUR'}});
+  assert.equal(result.code,'PERMISSION_DENIED');
+  assert.equal(mock.commits.length,0);
 });
 
 test('evenement ajoute', async () => {
