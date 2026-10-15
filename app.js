@@ -4988,6 +4988,37 @@ async function matchSaveToFirestore(raw={}){
   await Promise.all(writes);
   return {matchId:match.matchId, status:'synced', events:writes.length, updatedAtIso};
 }
+async function matchSavePostMatchTransactional(raw={}, options={}){
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise. Le match reste sauvegardé localement.');
+  if(!navigator.onLine) throw new Error('Hors ligne. Le match reste en attente de synchronisation.');
+  if(!canEditModule('stats')) throw new Error('Droits insuffisants pour synchroniser les matchs.');
+  const service = window.CoachPulsePostMatchTransactionalPersistence;
+  if(!service?.savePostMatchTransactional) throw new Error('Service transactionnel Après-match indisponible.');
+  const normalized = normalizeMatchForFirestore(raw);
+  if(!normalized.teamId) throw new Error('Équipe non identifiée. Le match reste en attente de synchronisation.');
+  const matchSnapshot = firestoreSafeData({
+    ...normalized,
+    events:undefined,
+    entryMode:options.entryMode || raw.entryMode || 'FULL_POST_MATCH',
+    statsSource:raw.statsSource || 'MIXED'
+  });
+  const result = await service.savePostMatchTransactional({
+    db,
+    firestore:firebaseFns,
+    profile:currentProfile || {uid:currentUser.uid, email:currentUser.email || '', role:currentUserRole, status:'ACTIVE'},
+    matchId:normalized.matchId,
+    expectedRevision:Number.isSafeInteger(raw.revision) ? raw.revision : 0,
+    matchSnapshot,
+    nextEvents:normalized.events.map(event => firestoreSafeData(event)),
+    nextEventsComplete:options.nextEventsComplete === true,
+    deletionStrategy:options.deletionStrategy || raw.deletionStrategy || 'PHYSICAL'
+  });
+  if(!result?.ok){
+    const error = Object.assign(new Error(result?.message || 'La sauvegarde transactionnelle Après-match a échoué.'), result || {});
+    throw error;
+  }
+  return {...result, status:'synced', updatedAtIso:new Date().toISOString()};
+}
 async function matchListFromFirestore(filters={}){
   if(!db || !currentUser || !canViewModule('stats')) return [];
   const accessAllMatches = getCurrentPermissionLevel() === 'ADMIN' || getCurrentUserRole() === 'ADMIN';
@@ -6503,13 +6534,13 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchSavePostMatchTransactional, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {technicalDataStatus, accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 function instrumentCentralDataBoundaries(){
   const operations = {
     listPlayers:['players:load','sync','players'], listTeams:['teams:load','sync','teams'], getPlayer:['player:load','loading','player-profile'],
     playerProfileLoadData:['player-profile:load','loading','player-profile'], teamProfileLoadData:['team-profile:load','loading','team-profile'],
-    matchSaveToFirestore:['matches:save','sync','stats'], matchListFromFirestore:['matches:load','sync','stats'],
+    matchSaveToFirestore:['matches:save','sync','stats'], matchSavePostMatchTransactional:['matches:post-match-save','sync','stats'], matchListFromFirestore:['matches:load','sync','stats'],
     playerMeasurementsList:['measurements:load','sync','player-profile'], playerMeasurementsAdd:['measurements:save','sync','player-profile'], playerMeasurementsUpdate:['measurements:save','sync','player-profile'], playerMeasurementsDelete:['measurements:delete','sync','player-profile'],
     medicalListPlayers:['medical:players','sync','medical'], medicalListData:['medical:load','sync','medical'], medicalSaveInjury:['medical:save','sync','medical'], medicalAddUpdate:['medical:save','sync','medical'], medicalDeleteInjuries:['medical:delete','sync','medical'],
     athleticListData:['athletic-tests:load','sync','tests-athletiques'], athleticSaveTest:['athletic-tests:save','sync','tests-athletiques'], athleticDeleteTest:['athletic-tests:delete','sync','tests-athletiques'],

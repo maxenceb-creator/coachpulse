@@ -11,15 +11,21 @@ function mockFirestore({match=null, events=[], fail=null, beforeCommit=null}={})
     doc(_db, collection, id){ return {kind:'doc',collection,id}; },
     collection(_db, collection){ return {kind:'collection',collection}; },
     where(field, operator, value){ return {field,operator,value}; },
-    query(collection, condition){ return {kind:'query',collection:collection.collection,condition}; },
+    query(collection, ...conditions){ return {kind:'query',collection:collection.collection,conditions}; },
+    async getDocs(){
+      return {docs:[...store.events.entries()].map(([id,data]) => ({
+        id, ref:{kind:'doc',collection:'matchEvents',id}, data:() => structuredClone(data)
+      }))};
+    },
     serverTimestamp(){ return {__serverTimestamp:true}; },
     async runTransaction(_db, callback){
       if(fail === 'before') throw Object.assign(new Error('transaction unavailable'), {code:'unavailable'});
       const pending = [];
       const transaction = {
         async get(ref){
-          if(ref.kind === 'doc') return {exists:() => Boolean(store.match), data:() => structuredClone(store.match)};
-          return {docs:[...store.events.entries()].map(([id,data]) => ({id,data:() => structuredClone(data)}))};
+          if(ref.collection === 'matches') return {id:ref.id,ref,exists:() => Boolean(store.match),data:() => structuredClone(store.match)};
+          const event = store.events.get(ref.id);
+          return {id:ref.id,ref,exists:() => Boolean(event),data:() => structuredClone(event)};
         },
         set(ref,data,options){ pending.push({type:'set',ref,data:structuredClone(data),options}); },
         delete(ref){ pending.push({type:'delete',ref}); }
@@ -150,6 +156,14 @@ test('permissions module equipe et niveau refusees avant Firestore', async () =>
   const result = await save(mock,{profile:{...baseProfile,permissionLevel:'LECTEUR'}});
   assert.equal(result.code,'PERMISSION_DENIED');
   assert.equal(mock.commits.length,0);
+});
+
+test('entraineur et entraineur adjoint autorises sur leur equipe', async () => {
+  for(const role of ['ENTRAINEUR','ENTRAINEUR_ADJOINT']){
+    const mock = mockFirestore();
+    const result = await save(mock,{profile:{...baseProfile,role}});
+    assert.equal(result.ok,true,role);
+  }
 });
 
 test('statistiques manuelles ne creent aucun evenement fictif', async () => {

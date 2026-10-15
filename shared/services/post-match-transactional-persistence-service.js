@@ -113,7 +113,7 @@
     if(denied) return denied;
 
     const firestore = input.firestore || {};
-    const required = ['runTransaction','doc','collection','query','where','serverTimestamp'];
+    const required = ['runTransaction','doc','collection','query','where','getDocs','serverTimestamp'];
     const missing = required.filter(name => typeof firestore[name] !== 'function');
     if(missing.length) return failure('INVALID_FIRESTORE_ADAPTER', `Adaptateur Firestore incomplet: ${missing.join(', ')}.`);
 
@@ -126,10 +126,16 @@
     );
 
     try{
+      // The Web Firestore Transaction API reads DocumentReferences only. Discover
+      // the scoped event references first, then re-read every document inside the
+      // transaction so their contents participate in conflict detection.
+      const discoveredEvents = queryDocuments(await firestore.getDocs(eventsQuery));
       return await firestore.runTransaction(input.db, async transaction => {
         // Firestore requires every read before the first write in a transaction.
         const remoteMatchSnapshot = await transaction.get(matchRef);
-        const remoteEventsSnapshot = await transaction.get(eventsQuery);
+        const remoteEventSnapshots = await Promise.all(discoveredEvents.map(snapshot => transaction.get(
+          snapshot.ref || firestore.doc(input.db, 'matchEvents', text(snapshot.id))
+        )));
         const remoteMatch = documentExists(remoteMatchSnapshot) ? (documentData(remoteMatchSnapshot) || {}) : {};
         const comparison = Persistence.compareRevisions(input.expectedRevision, remoteMatch.revision);
         if(!comparison.ok) return failure(comparison.code, comparison.message, {
@@ -138,7 +144,7 @@
           remoteRevision:comparison.remoteRevision
         });
 
-        const remoteEvents = queryDocuments(remoteEventsSnapshot).map(snapshot => ({
+        const remoteEvents = remoteEventSnapshots.filter(documentExists).map(snapshot => ({
           ...(documentData(snapshot) || {}),
           eventId:Persistence.eventIdentifier(documentData(snapshot) || {}) || text(snapshot.id)
         }));
