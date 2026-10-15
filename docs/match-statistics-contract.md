@@ -79,3 +79,22 @@ Valeurs prévues mais non écrites dans cette PR :
 - `statsSource`: `EVENTS`, `MANUAL`, `MIXED`.
 
 Ces valeurs décriront la provenance. Elles ne modifieront pas à elles seules les règles de calcul et resteront facultatives pour tous les anciens matchs.
+
+## Persistance versionnée préparatoire
+
+Le service pur `match-persistence-service.js` prépare, sans les écrire, les champs suivants :
+
+- `schemaVersion`: version du schéma ; la version préparée est `1` ;
+- `revision`: entier sûr positif ou nul, incrémenté d'une unité après une modification acceptée ;
+- `entryMode`: `LIVE`, `QUICK_POST_MATCH` ou `FULL_POST_MATCH` ;
+- `statsSource`: `EVENTS`, `MANUAL` ou `MIXED` ;
+- `status`: `DRAFT` ou `COMPLETED` ;
+- `updatedAt`: horodatage de la dernière écriture, destiné à être fourni par le serveur.
+
+Pour une lecture compatible, un ancien match sans ces champs reçoit une vue par défaut : `schemaVersion: 0`, `revision: 0`, `entryMode: LIVE`, `statsSource: EVENTS`, `status: COMPLETED` et `updatedAt: null`. Cette vue ne réécrit pas le document. L'absence de `revision` produit l'état explicite `ABSENT`; une valeur présente mais négative, fractionnaire, non numérique ou hors des entiers sûrs produit `INVALID` et doit être refusée.
+
+La détection de conflit compare la révision attendue à la révision distante. Une égalité autorise la préparation de `revision + 1`; toute différence refuse la modification obsolète et fournit un message destiné à la future interface. Les dates clientes ne participent pas à cette décision. Aucune transaction Firestore n'est activée ici.
+
+La réconciliation compare les événements exclusivement par `eventId` stable (avec lecture de l'alias historique `id`). Elle sépare les événements ajoutés, modifiés, supprimés et inchangés, conserve tous les champs connus ou inconnus et refuse un événement sans identifiant. Elle ne fabrique aucun événement à partir de statistiques manuelles. La suppression est choisie explicitement : `PHYSICAL` prépare une suppression de document ; `LOGICAL` prépare un tombstone `deleted: true`. Le service n'exécute aucune suppression Firestore.
+
+Une correction future comporte le chemin du champ, l'ancienne valeur, la nouvelle valeur, l'auteur, la date, le motif, la révision initiale et la révision résultante. `targetType` distingue `STAT_TOTAL` de `EVENT`; une correction d'événement exige son `eventId`. Aucun historique n'est écrit dans cette PR.
