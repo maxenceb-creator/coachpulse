@@ -62,9 +62,10 @@
     return memory.has(key) ? memory.get(key) : fallback;
   }
 
-  function clearNonEssentialBackups(){
+  function clearNonEssentialBackups(options={}){
+    const preserved = new Set(options.preserve || []);
     keys()
-      .filter(key => key.startsWith(BACKUP_KEY_PREFIX) || key === LAST_AUTOSAVE_KEY)
+      .filter(key => !preserved.has(key) && (key.startsWith(BACKUP_KEY_PREFIX) || key === LAST_AUTOSAVE_KEY))
       .forEach(remove);
   }
 
@@ -98,25 +99,19 @@
       return true;
     }catch(error){
       if(!options.recover || !isQuotaError(error)) throw error;
-      clearNonEssentialBackups();
-      try{
-        store.setItem(key, nextValue);
-        return true;
-      }catch(secondError){
-        if(!isQuotaError(secondError)) throw secondError;
-        if(typeof options.cleanup === 'function'){
-          try{ options.cleanup({key, value:nextValue, usage:usage()}); }catch(_cleanupError){}
-          try{
-            store.setItem(key, nextValue);
-            return true;
-          }catch(thirdError){
-            if(!isQuotaError(thirdError)) throw thirdError;
-            secondError = thirdError;
-          }
+      let secondError = error;
+      if(typeof options.cleanup === 'function'){
+        try{ options.cleanup({key, value:nextValue, usage:usage()}); }catch(_cleanupError){}
+        try{
+          store.setItem(key, nextValue);
+          return true;
+        }catch(thirdError){
+          if(!isQuotaError(thirdError)) throw thirdError;
+          secondError = thirdError;
         }
-        console.warn('CoachPulse storage quota reached, value kept in memory for', key, secondError);
-        return false;
       }
+      console.warn('CoachPulse storage quota reached, value kept in memory only for', key, secondError);
+      return false;
     }
   }
 

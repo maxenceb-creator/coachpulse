@@ -1428,7 +1428,9 @@ function autoBackupItemSizes(items={}){
   return Object.entries(items).map(([key, value]) => ({key, bytes:autoBackupBytes(value)})).sort((a,b) => b.bytes - a.bytes);
 }
 function collectAutoBackupItems(payload={}){
-  const items = {...(payload.items || {})};
+  const criticalKey = key => /(?:draft|pending|offline|unsynced)/i.test(key)
+    || ['coachStatsPostMatchDraftV1','coachStatsLiveManualDraftV1'].includes(key);
+  const items = Object.fromEntries(Object.entries(payload.items || {}).filter(([key]) => criticalKey(key)));
   ['coachpulse:pendingSync', 'coachpulse:technicalTestsPending', 'coachpulse:technicalTestsPendingBackup'].forEach(key => {
     const value = storage.get(key, '');
     if(value) items[key] = value;
@@ -1507,7 +1509,13 @@ function snapshotLocalData(options={}){
       if(Array.isArray(events) && pending.length < events.length) storage.setJson(presenceKey, pending);
       storage.remove('coachpulse:technicalPlayerFootHints');
     }});
-    if(!stored) console.warn('[CoachPulse AutoBackup Diagnostic]', backupDiagnostic);
+    if(!stored){
+      console.warn('[CoachPulse AutoBackup Diagnostic]', backupDiagnostic);
+      updateSyncState('Stockage local saturé · sauvegarde durable non confirmée');
+    }else if(backupPayload.backup.omittedKeys.some(key => /(?:draft|pending|offline|unsynced)/i.test(key))){
+      console.warn('[CoachPulse AutoBackup Diagnostic]', {...backupDiagnostic, omittedKeys:backupPayload.backup.omittedKeys});
+      updateSyncState('Sauvegarde locale partielle · export du brouillon conseillé');
+    }
     setLocalStorageWithQuotaRecovery('coachpulse:lastAutoSave', payload.savedAt);
   }catch(e){
     console.warn('Sauvegarde locale indisponible', e);
@@ -5033,6 +5041,24 @@ async function matchSavePostMatchTransactional(raw={}, options={}){
   }
   return {...result, status:'synced', updatedAtIso:new Date().toISOString()};
 }
+async function matchPrepareHistoricalEventsRevision(raw={}){
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise. Le brouillon reste conservé localement.');
+  if(!navigator.onLine) throw new Error('Hors ligne. La préparation sera possible au retour de la connexion.');
+  if(!canEditModule('stats')) throw Object.assign(new Error('Droits insuffisants pour préparer ce match.'), {code:'PERMISSION_DENIED'});
+  const service = window.CoachPulsePostMatchTransactionalPersistence;
+  if(!service?.initializeHistoricalEventsRevision) throw new Error("Service d'initialisation historique indisponible.");
+  const normalized = normalizeMatchForFirestore(raw);
+  const result = await service.initializeHistoricalEventsRevision({
+    db,
+    firestore:firebaseFns,
+    profile:currentProfile || {uid:currentUser.uid,email:currentUser.email || '',role:currentUserRole,status:'ACTIVE'},
+    matchId:normalized.matchId,
+    expectedRevision:Number.isSafeInteger(raw.revision) ? raw.revision : 0,
+    matchSnapshot:firestoreSafeData(normalized)
+  });
+  if(!result?.ok) throw Object.assign(new Error(result?.message || 'La préparation sécurisée a échoué.'), result || {});
+  return result;
+}
 async function matchListFromFirestore(filters={}){
   if(!db || !currentUser || !canViewModule('stats')) return [];
   const accessAllMatches = getCurrentPermissionLevel() === 'ADMIN' || getCurrentUserRole() === 'ADMIN';
@@ -6549,7 +6575,7 @@ var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? ad
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
 window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchSavePostMatchTransactional, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
-Object.assign(window.CoachPulseCentralData, {technicalDataStatus, accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
+Object.assign(window.CoachPulseCentralData, {matchPrepareHistoricalEventsRevision, technicalDataStatus, accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 function instrumentCentralDataBoundaries(){
   const operations = {
     listPlayers:['players:load','sync','players'], listTeams:['teams:load','sync','teams'], getPlayer:['player:load','loading','player-profile'],

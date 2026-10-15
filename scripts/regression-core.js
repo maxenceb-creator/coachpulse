@@ -1547,6 +1547,7 @@ function testPresenceRuntimeSaveGuards(){
   }});
   vm.runInContext(`${sources}\nthis.result = buildBoundedAutoBackupPayload({items:{ordinary:'x'.repeat(4096)}}, 2048);`, backupContext);
   assert(backupContext.result.backup.maxBytes === 2048 && autoBackupTestBytes(backupContext.result) <= 2048, 'autoBackup:v6 doit rester borné.');
+  assert.equal(backupContext.result.items.ordinary, undefined, 'Les données ordinaires reconstructibles ne doivent plus être dupliquées dans autoBackup:v6.');
   assert.equal(backupContext.result.items['coachpulse:pendingSync'], '1', 'Le marqueur pending doit être conservé en priorité.');
   assert.match(backupContext.result.items['coachpulse:presenceEvents:pendingBackup:v1'], /1789649129080/, 'Les présences offline non synchronisées doivent être conservées.');
   assert(!backupContext.result.items['coachpulse:presenceEvents:pendingBackup:v1'].includes('presence-event-synced'), 'Les copies de présences déjà synchronisées ne doivent pas gonfler le backup.');

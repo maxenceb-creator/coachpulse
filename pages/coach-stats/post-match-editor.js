@@ -13,7 +13,7 @@
   ];
   const STORE_KEY = 'coachStatsPostMatchDraftV1';
   const LEGACY_LIVE_DRAFT_KEY = 'coachStatsLiveManualDraftV1';
-  let editor = {draft:null, baseline:null, selectedPlayer:'', dirty:false, conflict:null, mode:'collective'};
+  let editor = {draft:null, baseline:null, selectedPlayer:'', dirty:false, conflict:null, mode:'collective', persistenceWarning:false};
 
   function clone(value){ return JSON.parse(JSON.stringify(value)); }
   function esc(value){ return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
@@ -23,7 +23,11 @@
   function notify(type, message){ (global.CoachStatsNotify?.[type] || console[type === 'error' ? 'error' : 'log'])(message); }
   function persistDraft(){
     if(!editor.draft){ global.CoachStatsStorage?.remove(STORE_KEY); return; }
-    global.CoachStatsStorage?.setJson(STORE_KEY,{draft:editor.draft,baseline:editor.baseline,selectedPlayer:editor.selectedPlayer,dirty:editor.dirty,conflict:editor.conflict},{recover:true});
+    const wasWarning=editor.persistenceWarning;
+    const stored=global.CoachStatsStorage?.setJson(STORE_KEY,{draft:editor.draft,baseline:editor.baseline,selectedPlayer:editor.selectedPlayer,dirty:editor.dirty,conflict:editor.conflict},{recover:true});
+    editor.persistenceWarning=stored===false;
+    if(editor.persistenceWarning&&!wasWarning)notify('error','Stockage du navigateur saturé : le brouillon n’est conservé qu’en mémoire. Exportez une copie avant de fermer.');
+    return stored;
   }
   function loadDraft(){
     const saved=global.CoachStatsStorage?.getJson(STORE_KEY,null);
@@ -33,6 +37,22 @@
   function legacyLiveDraftNotice(){
     if(!legacyLiveDraftRaw()) return '';
     return `<div class="card postMatchNotice warn" id="legacyLiveDraftNotice"><b>Ancien brouillon Live manuel détecté.</b> Il est conservé localement et ne sera pas supprimé automatiquement. Exportez-le avant de nettoyer le stockage, ou ouvrez sa copie dans l’éditeur Après-match.<div class="postMatchToolbar" style="margin-top:8px"><button type="button" id="legacyLiveDraftExport">Exporter le brouillon</button><button type="button" class="warn" id="legacyLiveDraftRecover">Ouvrir une copie Après-match</button></div></div>`;
+  }
+  function recoveryNotice(){
+    if(!editor.persistenceWarning)return '';
+    return `<div class="card postMatchNotice warn" id="postMatchStorageWarning"><b>Stockage du navigateur saturé.</b> Le brouillon reste disponible tant que cette page est ouverte, mais il n’est pas confirmé comme sauvegardé durablement. Exportez une copie de secours avant de fermer.<div class="postMatchToolbar" style="margin-top:8px"><button type="button" id="postMatchDraftExport">Exporter le brouillon</button><label class="button ghost" for="postMatchDraftImport">Importer une copie</label><input class="hide" type="file" accept="application/json,.json" id="postMatchDraftImport"></div></div>`;
+  }
+  function exportDraft(){
+    if(!editor.draft)return;
+    const payload={format:'coachpulse-post-match-draft',version:1,exportedAt:new Date().toISOString(),draft:editor.draft,baseline:editor.baseline,dirty:editor.dirty};
+    if(typeof download==='function')download(`coachpulse-brouillon-apres-match-${editor.draft.matchId||new Date().toISOString().slice(0,10)}.json`,JSON.stringify(payload,null,2),'application/json;charset=utf-8');
+  }
+  async function importDraft(file){
+    try{
+      const payload=JSON.parse(await file.text());
+      if(payload?.format!=='coachpulse-post-match-draft'||payload?.version!==1||!payload?.draft)throw new Error('Format de brouillon non reconnu.');
+      await confirmReplace(()=>{editor.draft=normalizedLoaded(payload.draft);editor.baseline=normalizedLoaded(payload.baseline||payload.draft);editor.dirty=payload.dirty!==false;editor.conflict=null;persistDraft();render();});
+    }catch(error){notify('error',error.message||'Import du brouillon impossible.');}
   }
   function exportLegacyLiveDraft(){
     const raw=legacyLiveDraftRaw(); if(!raw)return;
@@ -164,6 +184,11 @@
   function render(){
     const root=document.getElementById('post-match-editor'); if(!root||!editor.draft)return;
     root.innerHTML=`${legacyLiveDraftNotice()}<div class="postMatchToolbar"><button type="button" class="good" id="postMatchNew">➕ Ajouter un match sans Live</button><select id="postMatchExisting"><option value="">Modifier un match terminé…</option>${currentMatches().slice().reverse().map(match=>`<option value="${esc(match.matchId||match.id)}">${esc((match.date||match.createdAt||'').slice(0,10))} · ${esc(match.team||'')} ${esc(match.scoreUs??'—')}-${esc(match.scoreThem??'—')} ${esc(match.opponent||'Adversaire')}</option>`).join('')}</select><span id="postMatchStatus" class="postMatchStatus"></span></div><div id="postMatchConflict" class="card postMatchNotice warn hide"><b>Conflit de révision.</b> Vos modifications restent dans ce brouillon.<div class="postMatchToolbar" style="margin-top:8px"><button type="button" id="postMatchReload">Recharger la version distante</button><button type="button" class="warn" id="postMatchKeep">Conserver le brouillon</button></div></div>${consistencyNotice()}${metaHTML()}<div class="card"><div class="postMatchToolbar"><button type="button" class="${editor.mode==='collective'?'good':'ghost'}" data-mode="collective">Tableau collectif</button><button type="button" class="${editor.mode==='individual'?'good':'ghost'}" data-mode="individual">Fiche individuelle</button></div></div><div id="postMatchWorkspace">${editor.mode==='collective'?collectiveHTML():individualHTML()}</div><div class="postMatchActions"><button type="button" class="good" id="postMatchSave">💾 Enregistrer les statistiques</button><button type="button" class="ghost" id="postMatchDiscard">Annuler les modifications</button></div>`;
+    if(editor.persistenceWarning)root.insertAdjacentHTML('afterbegin',recoveryNotice());
+    if(editor.conflict?.upgradeRequired){
+      const conflict=root.querySelector('#postMatchConflict');
+      conflict.innerHTML='<b>Ce match utilise un ancien format de sauvegarde.</b> Une mise à jour sécurisée est nécessaire avant de pouvoir enregistrer vos modifications. Aucun événement ne sera modifié pendant cette préparation.<div class="postMatchToolbar" style="margin-top:8px"><button type="button" class="good" id="postMatchPrepare">Préparer la sauvegarde</button><button type="button" class="warn" id="postMatchKeep">Conserver le brouillon</button></div>';
+    }
     bind(); renderStatus();
   }
   function renderOriginsOnly(){ document.querySelectorAll('[data-player][data-stat]').forEach(input=>{const badge=input.parentElement?.querySelector('.statOrigin');if(badge){const source=sourceFor(input.dataset.player,input.dataset.stat);badge.textContent=source;badge.className=`statOrigin ${source}`;}}); }
@@ -180,7 +205,10 @@
     document.getElementById('postMatchSave')?.addEventListener('click',saveDraft);
     document.getElementById('postMatchDiscard')?.addEventListener('click',()=>{if(editor.baseline)openDraft(editor.baseline);});
     document.getElementById('postMatchReload')?.addEventListener('click',reloadRemote);
+    document.getElementById('postMatchPrepare')?.addEventListener('click',prepareHistoricalSave);
     document.getElementById('postMatchKeep')?.addEventListener('click',()=>{editor.conflict=null;persistDraft();renderStatus();});
+    document.getElementById('postMatchDraftExport')?.addEventListener('click',exportDraft);
+    document.getElementById('postMatchDraftImport')?.addEventListener('change',event=>{const file=event.target.files?.[0];if(file)importDraft(file);});
     document.getElementById('legacyLiveDraftExport')?.addEventListener('click',exportLegacyLiveDraft);
     document.getElementById('legacyLiveDraftRecover')?.addEventListener('click',recoverLegacyLiveDraft);
     const search=document.getElementById('postMatchPlayerSearch'); if(search){search.addEventListener('input',renderSearch);document.getElementById('postMatchAddFirst')?.addEventListener('click',()=>{const first=searchMatches(search.value)[0];if(first)addPlayer(first);});renderSearch();}
@@ -193,12 +221,37 @@
   async function saveDraft(){
     const errors=validate();if(errors.length){notify('error',errors[0]);return;}
     const api=typeof matchCloudApi==='function'?matchCloudApi():null; const snapshot=clone(editor.draft); snapshot.updatedAtIso=new Date().toISOString(); snapshot.createdAt=snapshot.createdAt||`${snapshot.date||new Date().toISOString().slice(0,10)}T12:00:00.000Z`; snapshot.status='COMPLETED'; snapshot.entryMode=snapshot.entryMode||'FULL_POST_MATCH';
-    if(!api?.matchSavePostMatchTransactional||!navigator.onLine){snapshot.syncStatus='pendingSync';editor.draft=localUpsert(snapshot);editor.baseline=clone(editor.draft);editor.dirty=false;persistDraft();render();notify('warn','Match enregistré localement. La synchronisation cloud sera proposée au retour en ligne.');return;}
+    if(!api?.matchSavePostMatchTransactional||!navigator.onLine){snapshot.syncStatus='pendingSync';editor.draft=localUpsert(snapshot);editor.baseline=clone(editor.draft);editor.dirty=false;const durable=persistDraft();if(durable===false)editor.dirty=true;render();notify(durable===false?'error':'warn',durable===false?'Le brouillon reste ouvert, mais sa sauvegarde durable a échoué. Exportez une copie avant de fermer.':'Match enregistré localement. La synchronisation cloud sera proposée au retour en ligne.');return;}
     try{
       const result=await api.matchSavePostMatchTransactional(snapshot,{entryMode:snapshot.entryMode,nextEventsComplete:true,deletionStrategy:snapshot.deletionStrategy||'PHYSICAL'});
       snapshot.revision=result.revision;snapshot.eventsRevision=result.eventsRevision;snapshot.syncStatus='synced';snapshot.syncedAt=new Date().toISOString();editor.draft=localUpsert(snapshot);editor.baseline=clone(editor.draft);editor.dirty=false;editor.conflict=null;persistDraft();render();notify('success','Match et statistiques enregistrés atomiquement ✅');
     }catch(error){
-      snapshot.syncStatus=error?.conflict?'conflict':'syncError';snapshot.syncError=String(error?.message||error);editor.draft=localUpsert(snapshot);editor.dirty=true;editor.conflict=error?.conflict?{expectedRevision:error.expectedRevision??error.expectedEventsRevision,remoteRevision:error.remoteRevision??error.remoteEventsRevision,message:error.message}:null;persistDraft();render();notify(error?.conflict?'warn':'error',error?.conflict?`${error.message||'Conflit détecté'} Le brouillon local a été conservé.`:'Échec de la sauvegarde cloud. Le brouillon local est conservé.');
+      snapshot.syncStatus=error?.conflict?'conflict':'syncError';snapshot.syncError=String(error?.message||error);editor.draft=localUpsert(snapshot);editor.dirty=true;editor.conflict=error?.conflict?{expectedRevision:error.expectedRevision??error.expectedEventsRevision,remoteRevision:error.remoteRevision??error.remoteEventsRevision,message:error.message,upgradeRequired:error.upgradeRequired===true}:null;persistDraft();render();notify(error?.conflict?'warn':'error',error?.conflict?`${error.message||'Conflit détecté'} Le brouillon local a été conservé.`:'Échec de la sauvegarde cloud. Le brouillon local est conservé.');
+    }
+  }
+  function mergedReloadedEvents(remoteEvents,localEvents,baselineEvents){
+    const id=event=>String(event?.eventId||event?.id||'');
+    const localIds=new Set((localEvents||[]).map(id).filter(Boolean));
+    const baselineIds=new Set((baselineEvents||[]).map(id).filter(Boolean));
+    const merged=new Map((localEvents||[]).map(event=>[id(event),clone(event)]).filter(([eventId])=>eventId));
+    (remoteEvents||[]).forEach(event=>{const eventId=id(event);if(eventId&&!localIds.has(eventId)&&!baselineIds.has(eventId))merged.set(eventId,clone(event));});
+    return [...merged.values()];
+  }
+  async function prepareHistoricalSave(){
+    const api=typeof matchCloudApi==='function'?matchCloudApi():null;
+    if(!api?.matchPrepareHistoricalEventsRevision||!api?.matchListFromFirestore){notify('error','Préparation sécurisée indisponible. Le brouillon reste conservé.');return;}
+    const local=clone(editor.draft);const baseline=clone(editor.baseline||editor.draft);
+    try{
+      await api.matchPrepareHistoricalEventsRevision(local);
+      const matches=await api.matchListFromFirestore({teamId:local.teamId});
+      const remote=matches.find(match=>String(match.matchId||match.id)===String(local.matchId));
+      if(!remote||!Number.isSafeInteger(remote.eventsRevision))throw new Error('Le match préparé n’a pas pu être rechargé intégralement.');
+      local.log=mergedReloadedEvents(remote.log||remote.events||[],local.log||[],baseline.log||[]);
+      local.revision=remote.revision;local.eventsRevision=remote.eventsRevision;local.syncStatus='pendingSync';
+      editor.draft=local;editor.baseline=normalizedLoaded(remote);editor.dirty=true;editor.conflict=null;persistDraft();render();
+      notify('success','Sauvegarde préparée sans modifier les événements. Vérifiez puis enregistrez à nouveau.');
+    }catch(error){
+      editor.draft=local;editor.baseline=baseline;editor.dirty=true;editor.conflict={expectedRevision:error?.expectedRevision,remoteRevision:error?.remoteRevision,message:error?.message,upgradeRequired:true};persistDraft();render();notify('error',`${error?.message||'Préparation impossible.'} Le brouillon local a été conservé.`);
     }
   }
   async function reloadRemote(){
