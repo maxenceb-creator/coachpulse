@@ -141,7 +141,7 @@ function firestoreHarness() {
         if(result?.ok) pending.forEach(write => {
           writes.push(write);
           if(write.type === 'delete') documents.delete(write.ref);
-          else documents.set(write.ref,{...documents.get(write.ref),...write.value});
+          else documents.set(write.ref,write.options?.merge?{...documents.get(write.ref),...write.value}:{...write.value});
         });
         return result;
       }
@@ -493,7 +493,8 @@ async function main() {
     assert.deepEqual([...cloud.documents.keys()], firstRefs);
     assert.equal(firstRefs.filter(ref => ref.startsWith('matches/')).length, 1);
     assert.equal(firstRefs.filter(ref => ref.startsWith('matchEvents/')).length, 1);
-    assert(cloud.writes.every(write => write.options.merge === true));
+    assert(cloud.writes.filter(write => write.ref.startsWith('matchEvents/')).every(write => write.options?.merge === true));
+    assert(cloud.writes.filter(write => write.ref.startsWith('matches/')).every(write => write.options === undefined));
     const matchRef = firstRefs.find(ref => ref.startsWith('matches/'));
     assert.equal(cloud.documents.get(matchRef).matchType, 'tournament');
     assert.equal(cloud.documents.get(matchRef).matchTypeLabel, 'Tournoi');
