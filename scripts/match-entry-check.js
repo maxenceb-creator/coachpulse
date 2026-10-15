@@ -561,6 +561,52 @@ async function main() {
     assert.deepEqual([...cloud.documents.keys()], refsAfterLegacyRecovery);
   });
 
+  await test('historical retry initializes safely, reloads events and preserves the local draft', async () => {
+    const h = matchHarness();
+    const cloud = firestoreHarness();
+    h.run("recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
+    const local = h.state().savedMatches[0];
+    const remoteOnlyEvent = {eventId:'remote-only',matchId:local.matchId,teamId:'team-u13-a',teamIds:['team-u13-a'],key:'recup',player:'TEST ALICE',ts:1};
+    cloud.documents.set(`matches/${local.matchId}`, {matchId:local.matchId,teamId:'team-u13-a',teamIds:['team-u13-a'],revision:0,entryMode:'LIVE',createdAt:local.createdAt});
+    cloud.documents.set('matchEvents/remote-only', remoteOnlyEvent);
+    h.sandbox.parent.CoachPulseCentralData = {
+      matchSavePostMatchTransactional: cloud.sandbox.matchSavePostMatchTransactional,
+      matchPrepareHistoricalEventsRevision: cloud.sandbox.matchPrepareHistoricalEventsRevision,
+      matchListFromFirestore: cloud.sandbox.matchListFromFirestore
+    };
+    await h.run('reconcileMatchesWithCloud()');
+    assert(h.state().savedMatches[0].log.some(event => event.eventId === local.log[0].eventId), 'La réconciliation silencieuse doit conserver le brouillon local non synchronisé.');
+    assert.equal(await h.run('syncSavedMatch(state.savedMatches[0],{silent:false})'), true);
+    const saved = h.state().savedMatches[0];
+    assert.equal(saved.syncStatus, 'synced');
+    assert.equal(saved.eventsRevision, 1);
+    assert(saved.log.some(event => event.eventId === 'remote-only'));
+    assert(saved.log.some(event => event.eventId === local.log[0].eventId));
+    assert(cloud.documents.has('matchEvents/remote-only'));
+    assert.equal(cloud.writes.filter(write => write.type === 'delete').length, 0);
+  });
+
+  await test('local storage compacts synced history but retains unsynchronized matches losslessly', async () => {
+    const h = matchHarness();
+    h.run("recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();state.savedMatches.push({...JSON.parse(JSON.stringify(state.savedMatches[0])),id:'synced-large',matchId:'synced-large',syncStatus:'synced',revision:4,eventsRevision:3,log:Array.from({length:200},(_,i)=>({eventId:'e-'+i,payload:'x'.repeat(200)}))});save();");
+    const runtime = h.state();
+    const storedRaw = h.storage.get('coachStatsV170');
+    const stored = JSON.parse(storedRaw);
+    const pending = stored.savedMatches.find(match => match.syncStatus === 'pendingSync');
+    const synced = stored.savedMatches.find(match => match.matchId === 'synced-large');
+    assert.deepEqual(pending.log, runtime.savedMatches.find(match => match.syncStatus === 'pendingSync').log);
+    assert.equal(synced.cloudReference, true);
+    assert.equal(Object.hasOwn(synced, 'log'), false);
+    assert.equal(Object.hasOwn(synced, 'players'), false);
+    const fullBytes=Buffer.byteLength(JSON.stringify(runtime));
+    const storedBytes=Buffer.byteLength(storedRaw);
+    assert(storedBytes < fullBytes / 2);
+    console.log(`  storage fixture: ${fullBytes} bytes -> ${storedBytes} bytes (${Math.round((1-storedBytes/fullBytes)*100)}% reduction)`);
+    h.run("load();state.matchId='untouched-current';state.log=[];navigator.onLine=false");
+    await h.run("restoreSavedMatch('synced-large')");
+    assert.equal(h.state().matchId, 'untouched-current');
+  });
+
   await test('team-scoped match runtime returns old and recent matches with grouped authorized events', async () => {
     const cloud = firestoreHarness();
     cloud.documents.set('matches/match-old', {matchId:'match-old', teamId:'team-u13-a', teamIds:['team-u13-a'], date:'2025-09-01'});
