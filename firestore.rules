@@ -320,6 +320,16 @@ service cloud.firestore {
         || (data.keys().hasAny(['matchId']) && canAccessLinkedDocument('matches', data.matchId));
     }
 
+    function matchEventRevisionAdvances(data) {
+      let matchId = data.get('matchId', '');
+      let matchPath = /databases/$(database)/documents/matches/$(matchId);
+      let previousRevision = exists(matchPath) ? get(matchPath).data.get('eventsRevision', 0) : 0;
+      return matchId != ''
+        && existsAfter(matchPath)
+        && getAfter(matchPath).data.get('eventsRevision', -1) is int
+        && getAfter(matchPath).data.get('eventsRevision', -1) == previousRevision + 1;
+    }
+
     function canAccessSessionScopedData(data) {
       return canAccessScopedData(data)
         || (data.keys().hasAny(['sessionId']) && canAccessLinkedDocument('sessions', data.sessionId));
@@ -879,9 +889,13 @@ service cloud.firestore {
       allow get: if (canReadData() && canAccessModule('stats') && canAccessMatchScopedData(resource.data))
         || (canReadData() && canAccessModule('playerProfile') && canAccessMatchScopedData(resource.data));
       allow list: if canListMatchEventRecords(resource.data);
-      allow create: if canWriteMatchEventData(request.resource.data, request.resource.data);
-      allow update: if canWriteMatchEventData(resource.data, request.resource.data);
-      allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessMatchScopedDataForModule(resource.data, 'stats');
+      allow create: if canWriteMatchEventData(request.resource.data, request.resource.data)
+        && matchEventRevisionAdvances(request.resource.data);
+      allow update: if canWriteMatchEventData(resource.data, request.resource.data)
+        && matchEventRevisionAdvances(request.resource.data);
+      allow delete: if canWriteSportData() && canAccessModule('stats')
+        && canAccessMatchScopedDataForModule(resource.data, 'stats')
+        && matchEventRevisionAdvances(resource.data);
     }
 
     match /sessions/{sessionId} {

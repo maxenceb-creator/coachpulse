@@ -1356,7 +1356,8 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(appSource.includes("Array.isArray(stats?.savedMatches) ? stats.savedMatches"), 'Les matchs locaux historiques doivent être récupérables par la migration non destructive.');
   assert(appSource.includes("Array.isArray(m.log) ? m.log"), 'Le fil réel du match doit alimenter matchEvents.');
   assert(rulesSource.includes('match /matches/{matchId}') && rulesSource.includes('match /matchEvents/{eventId}'), 'Les règles doivent couvrir matches et matchEvents.');
-  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessMatchScopedDataForModule(resource.data, 'stats');"), 'La suppression d’un événement Match doit utiliser les permissions du module Match.');
+  assert(rulesSource.includes('matchEventRevisionAdvances') && rulesSource.includes('existsAfter(matchPath)') && rulesSource.includes('getAfter(matchPath)'), 'Les écritures matchEvents doivent exiger une avancée atomique de eventsRevision.');
+  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats')") && rulesSource.includes("canAccessMatchScopedDataForModule(resource.data, 'stats')"), 'La suppression d’un événement Match doit utiliser les permissions du module Match.');
 }
 
 function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
