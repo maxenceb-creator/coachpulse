@@ -537,7 +537,7 @@ async function main() {
       matchSavePostMatchTransactional: cloud.sandbox.matchSavePostMatchTransactional,
       matchListFromFirestore: cloud.sandbox.matchListFromFirestore
     };
-    legacyLocal.run(`state.savedMatches=[{...${JSON.stringify(h.state().savedMatches[0])},id:'legacy-local-only',matchId:'legacy-local-only',revision:0,syncStatus:'synced'}];save()`);
+    legacyLocal.run(`state.savedMatches=[{...${JSON.stringify(h.state().savedMatches[0])},id:'legacy-local-only',matchId:'legacy-local-only',revision:0,eventsRevision:0,syncStatus:'synced'}];save()`);
     await legacyLocal.run('reconcileMatchesWithCloud()');
     assert.equal(legacyLocal.state().savedMatches.find(match => match.matchId === 'legacy-local-only').syncStatus, 'synced');
     assert(cloud.documents.has('matches/legacy-local-only'));

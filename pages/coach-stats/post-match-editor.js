@@ -72,7 +72,7 @@
   function newDraft(){
     const now=new Date(); const matchId=typeof createMatchId==='function'?createMatchId():`match-${Date.now()}`;
     const team=typeof state!=='undefined'?state.team:''; const teamId=typeof state!=='undefined'?state.teamId:'';
-    return {id:matchId,matchId,team,teamId,date:now.toISOString().slice(0,10),createdAt:now.toISOString(),opponent:'',matchType:'',format:'',system:'',elapsed:null,duration:null,scoreUs:null,scoreThem:null,called:[],lineup:{},bench:[],players:{},opp:{},log:[],events:[],entryMode:'FULL_POST_MATCH',statsSource:'MANUAL',statsProvenance:{players:{},opponent:{}},status:'COMPLETED',revision:0,deletionStrategy:'PHYSICAL',syncStatus:'pendingSync'};
+    return {id:matchId,matchId,team,teamId,date:now.toISOString().slice(0,10),createdAt:now.toISOString(),opponent:'',matchType:'',format:'',system:'',elapsed:null,duration:null,scoreUs:null,scoreThem:null,called:[],lineup:{},bench:[],players:{},opp:{},log:[],events:[],entryMode:'FULL_POST_MATCH',statsSource:'MANUAL',statsProvenance:{players:{},opponent:{}},status:'COMPLETED',revision:0,eventsRevision:0,deletionStrategy:'PHYSICAL',syncStatus:'pendingSync'};
   }
   function normalizedLoaded(raw){
     const draft=clone(raw||{}); draft.matchId=draft.matchId||draft.id; draft.id=draft.id||draft.matchId;
@@ -196,9 +196,9 @@
     if(!api?.matchSavePostMatchTransactional||!navigator.onLine){snapshot.syncStatus='pendingSync';editor.draft=localUpsert(snapshot);editor.baseline=clone(editor.draft);editor.dirty=false;persistDraft();render();notify('warn','Match enregistré localement. La synchronisation cloud sera proposée au retour en ligne.');return;}
     try{
       const result=await api.matchSavePostMatchTransactional(snapshot,{entryMode:snapshot.entryMode,nextEventsComplete:true,deletionStrategy:snapshot.deletionStrategy||'PHYSICAL'});
-      snapshot.revision=result.revision;snapshot.syncStatus='synced';snapshot.syncedAt=new Date().toISOString();editor.draft=localUpsert(snapshot);editor.baseline=clone(editor.draft);editor.dirty=false;editor.conflict=null;persistDraft();render();notify('success','Match et statistiques enregistrés atomiquement ✅');
+      snapshot.revision=result.revision;snapshot.eventsRevision=result.eventsRevision;snapshot.syncStatus='synced';snapshot.syncedAt=new Date().toISOString();editor.draft=localUpsert(snapshot);editor.baseline=clone(editor.draft);editor.dirty=false;editor.conflict=null;persistDraft();render();notify('success','Match et statistiques enregistrés atomiquement ✅');
     }catch(error){
-      snapshot.syncStatus=error?.conflict?'conflict':'syncError';snapshot.syncError=String(error?.message||error);editor.draft=localUpsert(snapshot);editor.dirty=true;editor.conflict=error?.conflict?{expectedRevision:error.expectedRevision,remoteRevision:error.remoteRevision,message:error.message}:null;persistDraft();render();notify(error?.conflict?'warn':'error',error?.conflict?'Conflit détecté : le brouillon local a été conservé.':'Échec de la sauvegarde cloud. Le brouillon local est conservé.');
+      snapshot.syncStatus=error?.conflict?'conflict':'syncError';snapshot.syncError=String(error?.message||error);editor.draft=localUpsert(snapshot);editor.dirty=true;editor.conflict=error?.conflict?{expectedRevision:error.expectedRevision??error.expectedEventsRevision,remoteRevision:error.remoteRevision??error.remoteEventsRevision,message:error.message}:null;persistDraft();render();notify(error?.conflict?'warn':'error',error?.conflict?`${error.message||'Conflit détecté'} Le brouillon local a été conservé.`:'Échec de la sauvegarde cloud. Le brouillon local est conservé.');
     }
   }
   async function reloadRemote(){

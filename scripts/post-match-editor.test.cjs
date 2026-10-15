@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '..');
 const editor = fs.readFileSync(path.join(root, 'pages/coach-stats/post-match-editor.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'pages/coach-stats.html'), 'utf8');
 
-assert.match(html, /post-match-editor\.js\?v=237/);
+assert.match(html, /post-match-editor\.js\?v=239/);
 assert.match(html, /CoachPulsePostMatchEditor\.editMatch/);
 assert.doesNotMatch(html, /live-manual-editor|live-manual-statistics-service/);
 assert.match(editor, /beforeunload/);
@@ -53,7 +53,7 @@ const firestore = {
 
 (async()=>{
   const result=await persistence.savePostMatchTransactional({
-    db:{},firestore,matchId:'retro-1',expectedRevision:0,nextEvents:[],nextEventsComplete:true,
+    db:{},firestore,matchId:'retro-1',expectedRevision:0,expectedEventsRevision:0,nextEvents:[],nextEventsComplete:true,
     profile:{status:'ACTIVE',role:'ENTRAINEUR_ADJOINT',permissionLevel:'SAISIE',allowedModules:['stats'],authorizedTeamIds:['team-1']},
     matchSnapshot:{matchId:'retro-1',teamId:'team-1',entryMode:'FULL_POST_MATCH',statsSource:'MANUAL',players:{Alice:{playerId:'alice',but:null,recup:'',seconds:null}},opp:{butAdv:null}}
   });

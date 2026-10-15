@@ -1349,8 +1349,9 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   assert(matchSource.includes('function resetCurrentMatchData(keepOpponent=false){state.matchId=createMatchId()'), 'Un nouveau match doit recevoir une identité distincte.');
   assert(matchSource.includes('event.eventId=stableMatchEventId(state.matchId'), 'Chaque événement doit recevoir un identifiant stable dès sa création.');
   assert(matchSource.includes("String(m.matchId||m.id)===String(snap.matchId)"), 'Une sauvegarde répétée doit remplacer le même match local au lieu de le dupliquer.');
-  assert(appSource.includes("firebaseFns.doc(db, 'matches', match.matchId)"), 'Firestore doit utiliser matchId comme identifiant de document idempotent.');
-  assert(appSource.includes("firebaseFns.doc(db, 'matchEvents', event.eventId)"), 'Firestore doit utiliser eventId comme identifiant de document idempotent.');
+  assert(appSource.includes("firebaseFns.doc(db, 'matches', matchId)"), 'Firestore doit utiliser matchId comme identifiant de document idempotent.');
+  assert(appSource.includes("firebaseFns.doc(db, 'matchEvents', eventId)"), 'Firestore doit utiliser eventId comme identifiant de document idempotent.');
+  assert(appSource.includes('eventsRevision:eventsRevision + 1'), 'Toute écriture événementielle doit incrémenter atomiquement eventsRevision.');
   assert(appSource.includes("firebaseFns.where('teamId', '==', teamId)"), 'La récupération des matchs doit rester ciblée par équipe.');
   assert(appSource.includes("Array.isArray(stats?.savedMatches) ? stats.savedMatches"), 'Les matchs locaux historiques doivent être récupérables par la migration non destructive.');
   assert(appSource.includes("Array.isArray(m.log) ? m.log"), 'Le fil réel du match doit alimenter matchEvents.');
