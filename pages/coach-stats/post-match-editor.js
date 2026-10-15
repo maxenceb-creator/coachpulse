@@ -12,6 +12,7 @@
     ['recupAdv','Récupérations adv.'],['duelWonAdv','Duels gagnés adv.'],['duelLostAdv','Duels perdus adv.']
   ];
   const STORE_KEY = 'coachStatsPostMatchDraftV1';
+  const LEGACY_LIVE_DRAFT_KEY = 'coachStatsLiveManualDraftV1';
   let editor = {draft:null, baseline:null, selectedPlayer:'', dirty:false, conflict:null, mode:'collective'};
 
   function clone(value){ return JSON.parse(JSON.stringify(value)); }
@@ -27,6 +28,21 @@
   function loadDraft(){
     const saved=global.CoachStatsStorage?.getJson(STORE_KEY,null);
     if(saved?.draft) editor={...editor,...saved};
+  }
+  function legacyLiveDraftRaw(){ return global.CoachStatsStorage?.get(LEGACY_LIVE_DRAFT_KEY, '') || ''; }
+  function legacyLiveDraftNotice(){
+    if(!legacyLiveDraftRaw()) return '';
+    return `<div class="card postMatchNotice warn" id="legacyLiveDraftNotice"><b>Ancien brouillon Live manuel détecté.</b> Il est conservé localement et ne sera pas supprimé automatiquement. Exportez-le avant de nettoyer le stockage, ou ouvrez sa copie dans l’éditeur Après-match.<div class="postMatchToolbar" style="margin-top:8px"><button type="button" id="legacyLiveDraftExport">Exporter le brouillon</button><button type="button" class="warn" id="legacyLiveDraftRecover">Ouvrir une copie Après-match</button></div></div>`;
+  }
+  function exportLegacyLiveDraft(){
+    const raw=legacyLiveDraftRaw(); if(!raw)return;
+    if(typeof download==='function')download(`coachpulse-brouillon-live-manuel-${new Date().toISOString().slice(0,10)}.json`,raw,'application/json;charset=utf-8');
+  }
+  async function recoverLegacyLiveDraft(){
+    let saved;
+    try{saved=JSON.parse(legacyLiveDraftRaw());}catch(_error){notify('error','Le brouillon Live local est illisible. Exportez-le pour diagnostic.');return;}
+    if(!saved?.draft){notify('error','Aucune donnée de match récupérable dans ce brouillon.');return;}
+    await confirmReplace(()=>{openDraft(saved.draft);editor.dirty=true;persistDraft();render();notify('info','Une copie du brouillon Live est ouverte en Après-match. Le brouillon original reste conservé.');});
   }
   function sourceFor(playerName,key){
     return editor.draft?.statsProvenance?.players?.[playerName]?.[key] || editor.draft?.statsSource || (editor.draft?.entryMode==='LIVE'?'LIVE':'MANUAL');
@@ -120,7 +136,7 @@
   }
   function render(){
     const root=document.getElementById('post-match-editor'); if(!root||!editor.draft)return;
-    root.innerHTML=`<div class="postMatchToolbar"><button type="button" class="good" id="postMatchNew">➕ Ajouter un match sans Live</button><select id="postMatchExisting"><option value="">Modifier un match terminé…</option>${currentMatches().slice().reverse().map(match=>`<option value="${esc(match.matchId||match.id)}">${esc((match.date||match.createdAt||'').slice(0,10))} · ${esc(match.team||'')} ${esc(match.scoreUs??'—')}-${esc(match.scoreThem??'—')} ${esc(match.opponent||'Adversaire')}</option>`).join('')}</select><span id="postMatchStatus" class="postMatchStatus"></span></div><div id="postMatchConflict" class="card postMatchNotice warn hide"><b>Conflit de révision.</b> Vos modifications restent dans ce brouillon.<div class="postMatchToolbar" style="margin-top:8px"><button type="button" id="postMatchReload">Recharger la version distante</button><button type="button" class="warn" id="postMatchKeep">Conserver le brouillon</button></div></div>${metaHTML()}<div class="card"><div class="postMatchToolbar"><button type="button" class="${editor.mode==='collective'?'good':'ghost'}" data-mode="collective">Tableau collectif</button><button type="button" class="${editor.mode==='individual'?'good':'ghost'}" data-mode="individual">Fiche individuelle</button></div></div><div id="postMatchWorkspace">${editor.mode==='collective'?collectiveHTML():individualHTML()}</div><div class="postMatchActions"><button type="button" class="good" id="postMatchSave">💾 Enregistrer les statistiques</button><button type="button" class="ghost" id="postMatchDiscard">Annuler les modifications</button></div>`;
+    root.innerHTML=`${legacyLiveDraftNotice()}<div class="postMatchToolbar"><button type="button" class="good" id="postMatchNew">➕ Ajouter un match sans Live</button><select id="postMatchExisting"><option value="">Modifier un match terminé…</option>${currentMatches().slice().reverse().map(match=>`<option value="${esc(match.matchId||match.id)}">${esc((match.date||match.createdAt||'').slice(0,10))} · ${esc(match.team||'')} ${esc(match.scoreUs??'—')}-${esc(match.scoreThem??'—')} ${esc(match.opponent||'Adversaire')}</option>`).join('')}</select><span id="postMatchStatus" class="postMatchStatus"></span></div><div id="postMatchConflict" class="card postMatchNotice warn hide"><b>Conflit de révision.</b> Vos modifications restent dans ce brouillon.<div class="postMatchToolbar" style="margin-top:8px"><button type="button" id="postMatchReload">Recharger la version distante</button><button type="button" class="warn" id="postMatchKeep">Conserver le brouillon</button></div></div>${metaHTML()}<div class="card"><div class="postMatchToolbar"><button type="button" class="${editor.mode==='collective'?'good':'ghost'}" data-mode="collective">Tableau collectif</button><button type="button" class="${editor.mode==='individual'?'good':'ghost'}" data-mode="individual">Fiche individuelle</button></div></div><div id="postMatchWorkspace">${editor.mode==='collective'?collectiveHTML():individualHTML()}</div><div class="postMatchActions"><button type="button" class="good" id="postMatchSave">💾 Enregistrer les statistiques</button><button type="button" class="ghost" id="postMatchDiscard">Annuler les modifications</button></div>`;
     bind(); renderStatus();
   }
   function renderOriginsOnly(){ document.querySelectorAll('[data-player][data-stat]').forEach(input=>{const badge=input.parentElement?.querySelector('.statOrigin');if(badge){const source=sourceFor(input.dataset.player,input.dataset.stat);badge.textContent=source;badge.className=`statOrigin ${source}`;}}); }
@@ -138,6 +154,8 @@
     document.getElementById('postMatchDiscard')?.addEventListener('click',()=>{if(editor.baseline)openDraft(editor.baseline);});
     document.getElementById('postMatchReload')?.addEventListener('click',reloadRemote);
     document.getElementById('postMatchKeep')?.addEventListener('click',()=>{editor.conflict=null;persistDraft();renderStatus();});
+    document.getElementById('legacyLiveDraftExport')?.addEventListener('click',exportLegacyLiveDraft);
+    document.getElementById('legacyLiveDraftRecover')?.addEventListener('click',recoverLegacyLiveDraft);
     const search=document.getElementById('postMatchPlayerSearch'); if(search){search.addEventListener('input',renderSearch);document.getElementById('postMatchAddFirst')?.addEventListener('click',()=>{const first=searchMatches(search.value)[0];if(first)addPlayer(first);});renderSearch();}
   }
   function searchMatches(term){const needle=String(term||'').trim().toLowerCase();return currentPlayers().filter(player=>!editor.draft.called.includes(player.name)&&(!needle||[player.name,player.team,player.category,player.subCategory].join(' ').toLowerCase().includes(needle))).slice(0,8);}

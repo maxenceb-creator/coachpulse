@@ -35,7 +35,7 @@ function mockFirestore({match=null, events=[], fail=null, beforeCommit=null}={})
       if(fail === 'commit') throw Object.assign(new Error('commit failed'), {code:'aborted'});
       if(result?.ok){
         pending.forEach(write => {
-          if(write.ref.collection === 'matches') store.match = {...(store.match || {}), ...write.data};
+          if(write.ref.collection === 'matches') store.match = write.options?.merge ? {...(store.match || {}), ...write.data} : {...write.data};
           else if(write.type === 'delete') store.events.delete(write.ref.id);
           else store.events.set(write.ref.id, {...(store.events.get(write.ref.id) || {}), ...write.data});
         });
@@ -134,14 +134,6 @@ test('liste vide non exhaustive sans suppression', async () => {
   assert.equal(mock.store.events.has('keep'), true);
 });
 
-test('suppression Live explicite preserve les evenements concurrents non charges', async () => {
-  const mock = mockFirestore({events:[{eventId:'delete-me',matchId:'match-1'},{eventId:'live-concurrent',matchId:'match-1'}]});
-  const result = await save(mock,{nextEvents:[],nextEventsComplete:false,removedEventIds:['delete-me']});
-  assert.equal(result.events.removed,1);
-  assert.equal(mock.store.events.has('delete-me'),false);
-  assert.equal(mock.store.events.has('live-concurrent'),true);
-});
-
 test('erreur transaction et absence ecriture partielle', async () => {
   const mock = mockFirestore({events:[{eventId:'old',matchId:'match-1'}],fail:'commit'});
   const before = structuredClone([...mock.store.events]);
@@ -189,12 +181,23 @@ test('operation trop grande refuse toute ecriture', async () => {
   assert.equal(mock.commits.length,0);
 });
 
-test('service transactionnel partage avec les corrections manuelles Live', async () => {
+test('service reserve aux parcours apres-match et non au Live', async () => {
   const mock = mockFirestore();
   const result = await save(mock,{matchSnapshot:{...baseMatch,entryMode:'LIVE'}});
+  assert.equal(result.code,'INVALID_ENTRY_MODE');
+  assert.equal(mock.commits.length,0);
+});
+
+test('evenements exclus du document match et conserves dans matchEvents', async () => {
+  const event={eventId:'e1',matchId:'match-1',action:'But'};
+  const mock = mockFirestore({match:{...baseMatch,revision:0,legacy:{kept:true},log:[event],events:[event],actions:[event]}});
+  const result=await save(mock,{matchSnapshot:{...baseMatch,log:[event],events:[event],actions:[event]},nextEvents:[event],nextEventsComplete:true});
   assert.equal(result.ok,true);
-  assert.equal(mock.store.match.entryMode,'LIVE');
-  assert.equal(mock.commits.length,1);
+  assert.equal(Object.hasOwn(mock.store.match,'log'),false);
+  assert.equal(Object.hasOwn(mock.store.match,'events'),false);
+  assert.equal(Object.hasOwn(mock.store.match,'actions'),false);
+  assert.deepEqual(mock.store.match.legacy,{kept:true});
+  assert.equal(mock.store.events.get('e1').action,'But');
 });
 
 (async () => {

@@ -8,9 +8,14 @@ const root = path.resolve(__dirname, '..');
 const editor = fs.readFileSync(path.join(root, 'pages/coach-stats/post-match-editor.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'pages/coach-stats.html'), 'utf8');
 
-assert.match(html, /post-match-editor\.js\?v=235/);
+assert.match(html, /post-match-editor\.js\?v=237/);
 assert.match(html, /CoachPulsePostMatchEditor\.editMatch/);
+assert.doesNotMatch(html, /live-manual-editor|live-manual-statistics-service/);
 assert.match(editor, /beforeunload/);
+assert.match(editor, /coachStatsLiveManualDraftV1/);
+assert.match(editor, /Exporter le brouillon/);
+assert.match(editor, /Ouvrir une copie Après-match/);
+assert.doesNotMatch(editor, /remove\(LEGACY_LIVE_DRAFT_KEY\)/);
 assert.match(editor, /nextEventsComplete:true/);
 assert.match(editor, /event\.eventId=event\.eventId\|\|event\.id/);
 assert.doesNotMatch(editor, /log\.push\([^)]*(?:stat|manual)/i);

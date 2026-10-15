@@ -4970,15 +4970,17 @@ async function matchSaveToFirestore(raw={}){
     return {matchId:match.matchId, status:'cloud-newer', events:0};
   }
   const updatedAtIso = new Date().toISOString();
-  const matchData = {...match};
+  const matchData = {...(existing.exists() ? existing.data() : {}), ...match};
   delete matchData.events;
+  delete matchData.log;
+  delete matchData.actions;
   await firebaseFns.setDoc(matchRef, {
     ...firestoreSafeData(matchData),
     updatedAt:firebaseFns.serverTimestamp(),
     updatedAtIso,
     updatedBy:currentUser.uid,
     updatedByEmail:currentUser.email || ''
-  }, {merge:true});
+  });
   const writes = match.events.map(event => firebaseFns.setDoc(firebaseFns.doc(db, 'matchEvents', event.eventId), {
     ...firestoreSafeData(event),
     updatedAt:firebaseFns.serverTimestamp(),
@@ -5011,7 +5013,6 @@ async function matchSavePostMatchTransactional(raw={}, options={}){
     matchSnapshot,
     nextEvents:normalized.events.map(event => firestoreSafeData(event)),
     nextEventsComplete:options.nextEventsComplete === true,
-    removedEventIds:Array.isArray(options.removedEventIds) ? options.removedEventIds : [],
     deletionStrategy:options.deletionStrategy || raw.deletionStrategy || 'PHYSICAL'
   });
   if(!result?.ok){

@@ -1,9 +1,8 @@
-// Transactional persistence shared by manual Live corrections and post-match entry.
+// Transactional persistence reserved for post-match and retroactive entry modes.
 
 (function(global){
   const MAX_TRANSACTION_WRITES = 500;
   const MAX_DOCUMENT_BYTES = 1_000_000;
-  const EDITOR_MODES = Object.freeze(['LIVE', 'QUICK_POST_MATCH', 'FULL_POST_MATCH']);
   const POST_MATCH_MODES = Object.freeze(['QUICK_POST_MATCH', 'FULL_POST_MATCH']);
 
   function dependency(name, commonJsPath){
@@ -60,7 +59,7 @@
   }
 
   function normalizedMatchSnapshot(matchSnapshot, matchId, nextRevision, serverTimestamp){
-    // Manual forms must preserve unknown values instead of silently
+    // Post-match forms must preserve unknown values instead of silently
     // manufacturing zeroes for counters that were never entered.
     const players = Statistics.normalizePlayers(matchSnapshot.players || {}, {unknown:'preserve'});
     const opponentSource = matchSnapshot.opp || matchSnapshot.opponent || {};
@@ -75,6 +74,11 @@
       updatedAt:serverTimestamp
     };
     delete normalized.revisionState;
+    // Events live in matchEvents. Keeping another copy in matches duplicates data,
+    // makes snapshots grow with match duration and can exceed Firestore's 1 MiB limit.
+    delete normalized.log;
+    delete normalized.events;
+    delete normalized.actions;
     return normalized;
   }
 
@@ -93,16 +97,15 @@
   function validateRequest(input){
     const matchId = text(input.matchId);
     if(!matchId) return failure('INVALID_MATCH_ID', 'Un matchId stable est obligatoire.');
-    if(!EDITOR_MODES.includes(input.matchSnapshot?.entryMode)){
-      return failure('INVALID_ENTRY_MODE', 'Mode de saisie manuelle inconnu.');
+    if(!POST_MATCH_MODES.includes(input.matchSnapshot?.entryMode)){
+      return failure('INVALID_ENTRY_MODE', 'Ce service accepte uniquement les modes Apres-match.');
     }
     if(!text(input.matchSnapshot?.teamId)){
-      return failure('INVALID_TEAM_SCOPE', 'Un teamId canonique est obligatoire pour une sauvegarde manuelle.');
+      return failure('INVALID_TEAM_SCOPE', 'Un teamId canonique est obligatoire pour une sauvegarde Apres-match.');
     }
     const expected = Persistence.revisionInfo(input.expectedRevision);
     if(!expected.valid) return failure('INVALID_EXPECTED_REVISION', 'La revision attendue est invalide.');
     if(!Array.isArray(input.nextEvents)) return failure('INVALID_EVENTS', 'nextEvents doit etre une liste.');
-    if(input.removedEventIds != null && !Array.isArray(input.removedEventIds)) return failure('INVALID_REMOVED_EVENTS', 'removedEventIds doit etre une liste.');
     if(input.deletionStrategy && !Persistence.DELETION_STRATEGIES.includes(input.deletionStrategy)){
       return failure('INVALID_DELETION_STRATEGY', 'La strategie de suppression est invalide.');
     }
@@ -155,24 +158,13 @@
           deletionStrategy:input.deletionStrategy || 'PHYSICAL',
           nextEventsComplete:input.nextEventsComplete === true
         });
-        const explicitRemovedIds = new Set((input.removedEventIds || []).map(text).filter(Boolean));
-        if(input.nextEventsComplete !== true && explicitRemovedIds.size){
-          const nextIds = new Set(input.nextEvents.map(Persistence.eventIdentifier));
-          remoteEvents.forEach(event => {
-            const eventId=Persistence.eventIdentifier(event);
-            if(!explicitRemovedIds.has(eventId)||nextIds.has(eventId))return;
-            reconciliation.removed.push((input.deletionStrategy || 'PHYSICAL') === 'LOGICAL'
-              ? {eventId,strategy:'LOGICAL',before:event,tombstone:{...event,deleted:true}}
-              : {eventId,strategy:'PHYSICAL',before:event});
-          });
-        }
         const writes = 1 + reconciliation.added.length + reconciliation.modified.length + reconciliation.removed.length;
         if(writes > MAX_TRANSACTION_WRITES){
           return failure('TRANSACTION_TOO_LARGE', `La sauvegarde exige ${writes} ecritures, au-dela de la limite de ${MAX_TRANSACTION_WRITES}.`, {writes});
         }
 
         const timestamp = firestore.serverTimestamp();
-        const canonicalMatch = normalizedMatchSnapshot(input.matchSnapshot, matchId, comparison.nextRevision, timestamp);
+        const canonicalMatch = normalizedMatchSnapshot({...remoteMatch,...input.matchSnapshot}, matchId, comparison.nextRevision, timestamp);
         assertDocumentSize('Le snapshot du match', canonicalMatch);
         const eventWrites = [...reconciliation.added, ...reconciliation.modified].map(change => {
           const source = change.event || change.after;
@@ -188,7 +180,9 @@
           return {...change, data};
         });
 
-        transaction.set(matchRef, canonicalMatch, {merge:true});
+        // Replace the match document so legacy embedded event arrays are actually
+        // removed; remote-only metadata was folded into canonicalMatch above.
+        transaction.set(matchRef, canonicalMatch);
         eventWrites.forEach(write => transaction.set(
           firestore.doc(input.db, 'matchEvents', write.eventId), write.data, {merge:true}
         ));
@@ -221,7 +215,7 @@
     }
   }
 
-  const service = {MAX_TRANSACTION_WRITES, MAX_DOCUMENT_BYTES, EDITOR_MODES, POST_MATCH_MODES, savePostMatchTransactional};
+  const service = {MAX_TRANSACTION_WRITES, MAX_DOCUMENT_BYTES, POST_MATCH_MODES, savePostMatchTransactional};
   global.CoachPulsePostMatchTransactionalPersistence = service;
   if(typeof module !== 'undefined' && module.exports) module.exports = service;
 })(typeof window !== 'undefined' ? window : globalThis);
