@@ -1343,7 +1343,9 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
 
   assert(matchSource.includes("syncStatus:'pendingSync'"), 'Un match doit être marqué en attente avant toute tentative cloud.');
-  assert(matchSource.includes("window.CoachStatsStorage.setJson('coachStatsV170',state"), 'La sauvegarde locale doit rester la première protection hors ligne.');
+  assert(matchSource.includes("window.CoachStatsStorage.setJson('coachStatsV170',storageSnapshot()"), 'La sauvegarde locale compacte doit rester la première protection hors ligne.');
+  assert(matchSource.includes("match?.syncStatus==='synced'?compactSyncedMatchForStorage(match):match"), 'Seuls les matchs déjà synchronisés peuvent être réduits à une référence cloud.');
+  assert(matchSource.includes("if(error?.upgradeRequired===true&&!silent"), 'La préparation historique doit être proposée sur le parcours de réessai explicite, jamais pendant la réconciliation silencieuse.');
   assert(matchSource.includes("window.addEventListener('online',()=>syncPendingMatches"), 'Les matchs locaux doivent être retentés au retour du réseau.');
   assert(matchSource.includes('state.matchId=state.matchId||createMatchId()'), 'Le matchId doit être créé une seule fois et conservé pendant le match.');
   assert(matchSource.includes('function resetCurrentMatchData(keepOpponent=false){state.matchId=createMatchId()'), 'Un nouveau match doit recevoir une identité distincte.');
