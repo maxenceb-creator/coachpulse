@@ -89,8 +89,8 @@
     }).filter(([, seconds]) => seconds > 0));
   }
 
-  function normalizePlayers(players={}){
-    return Object.fromEntries(Object.entries(players || {}).map(([name, player]) => [name, normalizePlayerStats(player || {})]));
+  function normalizePlayers(players={}, options={}){
+    return Object.fromEntries(Object.entries(players || {}).map(([name, player]) => [name, normalizePlayerStats(player || {}, options)]));
   }
 
   function sumPlayerCounter(players={}, playerRefs=Object.keys(players || {}), key=''){
