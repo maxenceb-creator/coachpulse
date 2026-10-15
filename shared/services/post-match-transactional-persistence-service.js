@@ -58,7 +58,7 @@
     return null;
   }
 
-  function normalizedMatchSnapshot(matchSnapshot, matchId, nextRevision, serverTimestamp){
+  function normalizedMatchSnapshot(matchSnapshot, matchId, nextRevision, nextEventsRevision, serverTimestamp){
     // Post-match forms must preserve unknown values instead of silently
     // manufacturing zeroes for counters that were never entered.
     const players = Statistics.normalizePlayers(matchSnapshot.players || {}, {unknown:'preserve'});
@@ -71,6 +71,7 @@
       ...(Object.prototype.hasOwnProperty.call(matchSnapshot, 'opponent') ? {opponent:Statistics.normalizeOpponentStats(opponentSource, {unknown:'preserve'})} : {}),
       schemaVersion:Persistence.SCHEMA_VERSION,
       revision:nextRevision,
+      eventsRevision:nextEventsRevision,
       updatedAt:serverTimestamp
     };
     delete normalized.revisionState;
@@ -105,6 +106,10 @@
     }
     const expected = Persistence.revisionInfo(input.expectedRevision);
     if(!expected.valid) return failure('INVALID_EXPECTED_REVISION', 'La revision attendue est invalide.');
+    if(input.expectedEventsRevision !== undefined){
+      const expectedEvents = Persistence.revisionInfo(input.expectedEventsRevision);
+      if(!expectedEvents.valid) return failure('INVALID_EXPECTED_EVENTS_REVISION', 'La revision des evenements attendue est invalide.');
+    }
     if(!Array.isArray(input.nextEvents)) return failure('INVALID_EVENTS', 'nextEvents doit etre une liste.');
     if(input.deletionStrategy && !Persistence.DELETION_STRATEGIES.includes(input.deletionStrategy)){
       return failure('INVALID_DELETION_STRATEGY', 'La strategie de suppression est invalide.');
@@ -136,12 +141,19 @@
       // the scoped event references first, then re-read every document inside the
       // transaction so their contents participate in conflict detection.
       const discoveredEvents = queryDocuments(await firestore.getDocs(eventsQuery));
+      const eventRefs = new Map();
+      discoveredEvents.forEach(snapshot => {
+        const eventId = text(snapshot.id) || Persistence.eventIdentifier(documentData(snapshot) || {});
+        if(eventId) eventRefs.set(eventId, snapshot.ref || firestore.doc(input.db, 'matchEvents', eventId));
+      });
+      input.nextEvents.forEach(event => {
+        const eventId = Persistence.eventIdentifier(event);
+        if(eventId && !eventRefs.has(eventId)) eventRefs.set(eventId, firestore.doc(input.db, 'matchEvents', eventId));
+      });
       return await firestore.runTransaction(input.db, async transaction => {
         // Firestore requires every read before the first write in a transaction.
         const remoteMatchSnapshot = await transaction.get(matchRef);
-        const remoteEventSnapshots = await Promise.all(discoveredEvents.map(snapshot => transaction.get(
-          snapshot.ref || firestore.doc(input.db, 'matchEvents', text(snapshot.id))
-        )));
+        const remoteEventSnapshots = await Promise.all([...eventRefs.values()].map(ref => transaction.get(ref)));
         const remoteMatch = documentExists(remoteMatchSnapshot) ? (documentData(remoteMatchSnapshot) || {}) : {};
         const comparison = Persistence.compareRevisions(input.expectedRevision, remoteMatch.revision);
         if(!comparison.ok) return failure(comparison.code, comparison.message, {
@@ -149,6 +161,28 @@
           expectedRevision:comparison.expectedRevision,
           remoteRevision:comparison.remoteRevision
         });
+
+        const remoteEventsRevisionInfo = Persistence.revisionInfo(remoteMatch.eventsRevision, {
+          present:Object.prototype.hasOwnProperty.call(remoteMatch, 'eventsRevision')
+        });
+        if(!remoteEventsRevisionInfo.valid){
+          return failure('INVALID_REMOTE_EVENTS_REVISION', 'La revision distante des evenements est invalide.');
+        }
+        if(documentExists(remoteMatchSnapshot) && input.nextEventsComplete === true && remoteEventsRevisionInfo.state === 'ABSENT'){
+          return failure('EVENTS_REVISION_REQUIRED', "Ce match historique ne possede pas de revision d'evenements fiable. La sauvegarde exhaustive est bloquee. Rechargez tous les evenements puis effectuez d'abord une synchronisation non destructive pour initialiser la revision.", {conflict:true, upgradeRequired:true});
+        }
+        const expectedEventsRevisionInfo = Persistence.revisionInfo(input.expectedEventsRevision, {
+          present:input.expectedEventsRevision !== undefined
+        });
+        if(input.expectedEventsRevision !== undefined && expectedEventsRevisionInfo.revision !== remoteEventsRevisionInfo.revision){
+          return failure('EVENTS_REVISION_CONFLICT', `Les evenements du match ont change depuis leur chargement (revision attendue ${expectedEventsRevisionInfo.revision}, revision distante ${remoteEventsRevisionInfo.revision}). Rechargez les donnees avant de corriger.`, {
+            conflict:true, expectedEventsRevision:expectedEventsRevisionInfo.revision, remoteEventsRevision:remoteEventsRevisionInfo.revision
+          });
+        }
+        if(input.nextEventsComplete === true && input.expectedEventsRevision === undefined){
+          return failure('EXPECTED_EVENTS_REVISION_REQUIRED', "La liste exhaustive ne peut pas etre prouvee sans revision d'evenements attendue.", {conflict:true});
+        }
+        const nextEventsRevision = remoteEventsRevisionInfo.revision + 1;
 
         const remoteEvents = remoteEventSnapshots.filter(documentExists).map(snapshot => ({
           ...(documentData(snapshot) || {}),
@@ -164,7 +198,7 @@
         }
 
         const timestamp = firestore.serverTimestamp();
-        const canonicalMatch = normalizedMatchSnapshot({...remoteMatch,...input.matchSnapshot}, matchId, comparison.nextRevision, timestamp);
+        const canonicalMatch = normalizedMatchSnapshot({...remoteMatch,...input.matchSnapshot}, matchId, comparison.nextRevision, nextEventsRevision, timestamp);
         assertDocumentSize('Le snapshot du match', canonicalMatch);
         const eventWrites = [...reconciliation.added, ...reconciliation.modified].map(change => {
           const source = change.event || change.after;
@@ -199,6 +233,8 @@
           matchId,
           previousRevision:comparison.remoteRevision,
           revision:comparison.nextRevision,
+          previousEventsRevision:remoteEventsRevisionInfo.revision,
+          eventsRevision:nextEventsRevision,
           writes,
           events:{
             added:reconciliation.added.length,

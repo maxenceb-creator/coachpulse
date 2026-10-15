@@ -4,7 +4,7 @@ const Service = require('../shared/services/post-match-transactional-persistence
 const baseProfile = {status:'ACTIVE', permissionLevel:'SAISIE', allowedModules:['stats'], authorizedTeamIds:['team-u13']};
 const baseMatch = {matchId:'match-1', teamId:'team-u13', entryMode:'FULL_POST_MATCH', players:{Alice:{but:1}}};
 
-function mockFirestore({match=null, events=[], fail=null, beforeCommit=null}={}){
+function mockFirestore({match=null, events=[], fail=null, beforeCommit=null, afterDiscovery=null}={}){
   const store = {match:match && structuredClone(match), events:new Map(events.map(event => [event.eventId, structuredClone(event)]))};
   const commits = [];
   const adapter = {
@@ -13,9 +13,11 @@ function mockFirestore({match=null, events=[], fail=null, beforeCommit=null}={})
     where(field, operator, value){ return {field,operator,value}; },
     query(collection, ...conditions){ return {kind:'query',collection:collection.collection,conditions}; },
     async getDocs(){
-      return {docs:[...store.events.entries()].map(([id,data]) => ({
+      const result = {docs:[...store.events.entries()].map(([id,data]) => ({
         id, ref:{kind:'doc',collection:'matchEvents',id}, data:() => structuredClone(data)
       }))};
+      if(afterDiscovery) await afterDiscovery({store});
+      return result;
     },
     serverTimestamp(){ return {__serverTimestamp:true}; },
     async runTransaction(_db, callback){
@@ -49,7 +51,7 @@ function mockFirestore({match=null, events=[], fail=null, beforeCommit=null}={})
 
 async function save(mock, overrides={}){
   return Service.savePostMatchTransactional({
-    db:{}, firestore:mock.adapter, profile:baseProfile, matchId:'match-1', expectedRevision:0,
+    db:{}, firestore:mock.adapter, profile:baseProfile, matchId:'match-1', expectedRevision:0, expectedEventsRevision:0,
     matchSnapshot:baseMatch, nextEvents:[], ...overrides
   });
 }
@@ -91,6 +93,59 @@ test('conflit entre deux educateurs', async () => {
   const stale = await save(mock,{expectedRevision:1});
   assert.equal(stale.code, 'REVISION_CONFLICT');
   assert.equal(mock.store.match.revision, 2);
+});
+
+test('ajout concurrent apres decouverte refuse la sauvegarde exhaustive et conserve evenement', async () => {
+  const mock = mockFirestore({
+    match:{...baseMatch,revision:2,eventsRevision:4},
+    events:[{eventId:'e1',matchId:'match-1',value:1}],
+    afterDiscovery:({store}) => {
+      store.events.set('concurrent-add',{eventId:'concurrent-add',matchId:'match-1',value:9});
+      store.match.eventsRevision=5;
+    }
+  });
+  const result = await save(mock,{expectedRevision:2,expectedEventsRevision:4,nextEvents:[{eventId:'e1',value:1}],nextEventsComplete:true});
+  assert.equal(result.code,'EVENTS_REVISION_CONFLICT');
+  assert.equal(mock.store.events.has('concurrent-add'),true);
+  assert.equal(mock.commits.length,0);
+});
+
+test('modification concurrente apres decouverte refuse tout ecrasement', async () => {
+  const mock = mockFirestore({
+    match:{...baseMatch,revision:1,eventsRevision:7},
+    events:[{eventId:'e1',matchId:'match-1',value:1}],
+    afterDiscovery:({store}) => { store.events.get('e1').value=3; store.match.eventsRevision=8; }
+  });
+  const result = await save(mock,{expectedRevision:1,expectedEventsRevision:7,nextEvents:[{eventId:'e1',value:2}],nextEventsComplete:true});
+  assert.equal(result.code,'EVENTS_REVISION_CONFLICT');
+  assert.equal(mock.store.events.get('e1').value,3);
+});
+
+test('suppression concurrente apres decouverte est detectee', async () => {
+  const mock = mockFirestore({
+    match:{...baseMatch,revision:1,eventsRevision:2},
+    events:[{eventId:'e1',matchId:'match-1'}],
+    afterDiscovery:({store}) => { store.events.delete('e1'); store.match.eventsRevision=3; }
+  });
+  const result = await save(mock,{expectedRevision:1,expectedEventsRevision:2,nextEvents:[],nextEventsComplete:true});
+  assert.equal(result.code,'EVENTS_REVISION_CONFLICT');
+  assert.equal(mock.commits.length,0);
+});
+
+test('match historique sans eventsRevision bloque une suppression exhaustive', async () => {
+  const mock = mockFirestore({match:{...baseMatch,revision:0},events:[{eventId:'legacy',matchId:'match-1'}]});
+  const result = await save(mock,{nextEvents:[],nextEventsComplete:true,expectedEventsRevision:undefined});
+  assert.equal(result.code,'EVENTS_REVISION_REQUIRED');
+  assert.equal(result.upgradeRequired,true);
+  assert.equal(mock.store.events.has('legacy'),true);
+});
+
+test('match historique peut initialiser eventsRevision sans suppression avec une liste partielle', async () => {
+  const mock = mockFirestore({match:{...baseMatch,revision:0},events:[{eventId:'legacy',matchId:'match-1'}]});
+  const result = await save(mock,{nextEvents:[],nextEventsComplete:false,expectedEventsRevision:undefined});
+  assert.equal(result.ok,true);
+  assert.equal(result.eventsRevision,1);
+  assert.equal(mock.store.events.has('legacy'),true);
 });
 
 test('evenement ajoute', async () => {
@@ -191,7 +246,7 @@ test('service accepte explicitement les provenances Live et Apres-match', async 
 
 test('evenements exclus du document match et conserves dans matchEvents', async () => {
   const event={eventId:'e1',matchId:'match-1',action:'But'};
-  const mock = mockFirestore({match:{...baseMatch,revision:0,legacy:{kept:true},log:[event],events:[event],actions:[event]}});
+  const mock = mockFirestore({match:{...baseMatch,revision:0,eventsRevision:0,legacy:{kept:true},log:[event],events:[event],actions:[event]}});
   const result=await save(mock,{matchSnapshot:{...baseMatch,log:[event],events:[event],actions:[event]},nextEvents:[event],nextEventsComplete:true});
   assert.equal(result.ok,true);
   assert.equal(Object.hasOwn(mock.store.match,'log'),false);

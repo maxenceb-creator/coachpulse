@@ -627,7 +627,7 @@ function permissionsService(){
   return window.CoachPulsePermissionsService || null;
 }
 function firestoreServiceContext(options={}){
-  return {firebaseFns, db, user:currentUser, ...options};
+  return {firebaseFns, db, user:currentUser, writeMatchEvent:matchEventMergeWithRevision, ...options};
 }
 function sortPlayersForApp(players){
   const service = playersService();
@@ -2145,8 +2145,17 @@ async function pushCentralDocsToFirestore(docs){
   const writes = [];
   FIRESTORE_COLLECTIONS.forEach(collection => {
     (docs[collection] || new Map()).forEach((data, id) => {
+      if(collection === 'matchEvents'){
+        writes.push(matchEventMergeWithRevision(id, data));
+        return;
+      }
+      const safeData = {...data};
+      if(collection === 'matches'){
+        delete safeData.revision;
+        delete safeData.eventsRevision;
+      }
       writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collection, id), {
-        ...data,
+        ...safeData,
         updatedAt:firebaseFns.serverTimestamp(),
         updatedBy:currentUser.uid,
         updatedByEmail:currentUser.email || ''
@@ -3901,11 +3910,16 @@ async function adminRepairTeamIds(){
       }
       if(!patch) return;
       updated++;
-      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
+      const write = collectionName === 'matchEvents' ? matchEventMergeWithRevision(docSnap.id, {
         ...patch,
         updatedAt:firebaseFns.serverTimestamp(),
         updatedAtIso:new Date().toISOString()
-      }, {merge:true}));
+      }) : firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
+        ...patch,
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:new Date().toISOString()
+      }, {merge:true});
+      writes.push(write);
     });
   }
   await Promise.all(writes);
@@ -4081,7 +4095,9 @@ async function updatePlayerRefsInCollection(collectionName, fromPlayerId, toPlay
       if(directMatch) patch.playerId = toPlayerId;
       if(snapshotMatch) patch.playerSnapshot = {...data.playerSnapshot, playerId:toPlayerId};
       if(arrayMatch) patch.playerIds = data.playerIds.map(id => id === fromPlayerId ? toPlayerId : id);
-      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), patch, {merge:true}));
+      writes.push(collectionName === 'matchEvents'
+        ? matchEventMergeWithRevision(docSnap.id, patch)
+        : firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), patch, {merge:true}));
     }
   });
   await Promise.all(writes);
@@ -4957,38 +4973,33 @@ function normalizeMatchForFirestore(raw={}){
   };
 }
 async function matchSaveToFirestore(raw={}){
-  if(!db || !currentUser) throw new Error('Connexion Firebase requise. Le match reste sauvegardé localement.');
-  if(!navigator.onLine) throw new Error('Hors ligne. Le match reste en attente de synchronisation.');
-  if(!canEditModule('stats')) throw new Error('Droits insuffisants pour synchroniser les matchs.');
-  const match = normalizeMatchForFirestore(raw);
-  if(!match.teamId) throw new Error('Équipe non identifiée. Le match reste en attente de synchronisation.');
-  const matchRef = firebaseFns.doc(db, 'matches', match.matchId);
-  const existing = await firebaseFns.getDoc(matchRef);
-  const localVersion = Date.parse(match.updatedAtIso || match.createdAt || match.date || 0) || 0;
-  const cloudVersion = existing.exists() ? (Date.parse(existing.data().updatedAtIso || existing.data().createdAt || existing.data().date || 0) || 0) : 0;
-  if(existing.exists() && cloudVersion > localVersion){
-    return {matchId:match.matchId, status:'cloud-newer', events:0};
-  }
-  const updatedAtIso = new Date().toISOString();
-  const matchData = {...(existing.exists() ? existing.data() : {}), ...match};
-  delete matchData.events;
-  delete matchData.log;
-  delete matchData.actions;
-  await firebaseFns.setDoc(matchRef, {
-    ...firestoreSafeData(matchData),
-    updatedAt:firebaseFns.serverTimestamp(),
-    updatedAtIso,
-    updatedBy:currentUser.uid,
-    updatedByEmail:currentUser.email || ''
+  return matchSavePostMatchTransactional(raw, {entryMode:raw.entryMode || 'LIVE', nextEventsComplete:false});
+}
+
+async function matchEventMergeWithRevision(eventId, patch={}){
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const eventRef = firebaseFns.doc(db, 'matchEvents', eventId);
+  return firebaseFns.runTransaction(db, async transaction => {
+    const eventSnapshot = await transaction.get(eventRef);
+    const currentEvent = eventSnapshot.exists() ? (eventSnapshot.data() || {}) : {};
+    const matchId = String(patch.matchId || currentEvent.matchId || '').trim();
+    if(!matchId) throw Object.assign(new Error('matchId obligatoire pour modifier un événement.'), {code:'INVALID_MATCH_ID'});
+    const matchRef = firebaseFns.doc(db, 'matches', matchId);
+    const matchSnapshot = await transaction.get(matchRef);
+    const currentMatch = matchSnapshot.exists() ? (matchSnapshot.data() || {}) : {};
+    const revision = Object.hasOwn(currentMatch, 'revision') ? currentMatch.revision : 0;
+    const eventsRevision = Object.hasOwn(currentMatch, 'eventsRevision') ? currentMatch.eventsRevision : 0;
+    if(!Number.isSafeInteger(revision) || revision < 0 || !Number.isSafeInteger(eventsRevision) || eventsRevision < 0){
+      throw Object.assign(new Error('Les revisions du match sont invalides.'), {code:'INVALID_REMOTE_REVISION'});
+    }
+    const timestamp = firebaseFns.serverTimestamp();
+    transaction.set(matchRef, {matchId, revision:revision + 1, eventsRevision:eventsRevision + 1, updatedAt:timestamp}, {merge:true});
+    transaction.set(eventRef, {
+      ...firestoreSafeData(patch), eventId, matchId, updatedAt:timestamp,
+      updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''
+    }, {merge:true});
+    return {eventId, matchId, revision:revision + 1, eventsRevision:eventsRevision + 1};
   });
-  const writes = match.events.map(event => firebaseFns.setDoc(firebaseFns.doc(db, 'matchEvents', event.eventId), {
-    ...firestoreSafeData(event),
-    updatedAt:firebaseFns.serverTimestamp(),
-    updatedAtIso,
-    updatedBy:currentUser.uid
-  }, {merge:true}));
-  await Promise.all(writes);
-  return {matchId:match.matchId, status:'synced', events:writes.length, updatedAtIso};
 }
 async function matchSavePostMatchTransactional(raw={}, options={}){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise. Le match reste sauvegardé localement.');
@@ -5010,6 +5021,7 @@ async function matchSavePostMatchTransactional(raw={}, options={}){
     profile:currentProfile || {uid:currentUser.uid, email:currentUser.email || '', role:currentUserRole, status:'ACTIVE'},
     matchId:normalized.matchId,
     expectedRevision:Number.isSafeInteger(raw.revision) ? raw.revision : 0,
+    expectedEventsRevision:Number.isSafeInteger(raw.eventsRevision) ? raw.eventsRevision : undefined,
     matchSnapshot,
     nextEvents:normalized.events.map(event => firestoreSafeData(event)),
     nextEventsComplete:options.nextEventsComplete === true,

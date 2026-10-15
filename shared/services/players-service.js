@@ -689,9 +689,9 @@
           if(directMatch) patch.playerId = toPlayerId;
           if(snapshotMatch) patch.playerSnapshot = {...data.playerSnapshot, playerId:toPlayerId};
           if(Array.isArray(data.playerIds)) patch.playerIds = data.playerIds.map(id => id === fromPlayerId ? toPlayerId : id);
-          writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
-            ...patch
-          }, {merge:true}));
+          writes.push(collectionName === 'matchEvents' && typeof ctx.writeMatchEvent === 'function'
+            ? ctx.writeMatchEvent(docSnap.id, patch)
+            : firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {...patch}, {merge:true}));
         }
       });
       await Promise.all(writes);
