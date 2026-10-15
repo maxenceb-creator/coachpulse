@@ -48,7 +48,7 @@ test('invalid revision is rejected rather than treated as absent', () => {
   assert.equal(Persistence.compareRevisions(-1, 0).code, 'INVALID_EXPECTED_REVISION');
 });
 
-test('event reconciliation identifies added modified removed and unchanged events', () => {
+test('partial event list keeps added modified and unchanged events without preparing removals', () => {
   const previous = [
     {eventId:'same', type:'shot'},
     {eventId:'changed', type:'shot', value:1},
@@ -62,9 +62,77 @@ test('event reconciliation identifies added modified removed and unchanged event
   const result = Persistence.reconcileEvents(previous, next);
   assert.deepEqual(result.added.map(item => item.eventId), ['added']);
   assert.deepEqual(result.modified.map(item => item.eventId), ['changed']);
-  assert.deepEqual(result.removed.map(item => item.eventId), ['removed']);
+  assert.deepEqual(result.removed, []);
   assert.deepEqual(result.unchanged.map(item => item.eventId), ['same']);
-  assert.equal(result.removed[0].strategy, 'PHYSICAL');
+  assert.equal(result.nextEventsComplete, false);
+});
+
+test('explicitly partial event list never prepares removals', () => {
+  const result = Persistence.reconcileEvents(
+    [{eventId:'loaded'},{eventId:'not-loaded'}],
+    [{eventId:'loaded'}],
+    {nextEventsComplete:false}
+  );
+  assert.deepEqual(result.removed, []);
+  assert.equal(result.nextEventsComplete, false);
+});
+
+test('explicitly complete event list detects missing events', () => {
+  const result = Persistence.reconcileEvents(
+    [{eventId:'kept'},{eventId:'removed'}],
+    [{eventId:'kept'}],
+    {nextEventsComplete:true}
+  );
+  assert.deepEqual(result.removed.map(item => item.eventId), ['removed']);
+  assert.equal(result.nextEventsComplete, true);
+});
+
+test('complete event list prepares physical removals', () => {
+  const result = Persistence.reconcileEvents([{eventId:'removed'}], [], {
+    nextEventsComplete:true,
+    deletionStrategy:'PHYSICAL'
+  });
+  assert.deepEqual(result.removed, [{eventId:'removed',strategy:'PHYSICAL',before:{eventId:'removed'}}]);
+});
+
+test('complete event list prepares logical removals', () => {
+  const result = Persistence.reconcileEvents([{eventId:'removed'}], [], {
+    nextEventsComplete:true,
+    deletionStrategy:'LOGICAL'
+  });
+  assert.deepEqual(result.removed, [{
+    eventId:'removed', strategy:'LOGICAL', before:{eventId:'removed'},
+    tombstone:{eventId:'removed',deleted:true}
+  }]);
+});
+
+test('empty partial event list does not remove previous events', () => {
+  const result = Persistence.reconcileEvents([{eventId:'not-loaded'}], []);
+  assert.deepEqual(result.removed, []);
+  assert.equal(result.nextEventsComplete, false);
+});
+
+test('empty explicitly complete event list removes previous events', () => {
+  const result = Persistence.reconcileEvents([{eventId:'removed'}], [], {nextEventsComplete:true});
+  assert.deepEqual(result.removed.map(item => item.eventId), ['removed']);
+  assert.equal(result.nextEventsComplete, true);
+});
+
+test('partial event list preserves additions and modifications', () => {
+  const result = Persistence.reconcileEvents(
+    [{eventId:'modified',value:1},{eventId:'not-loaded'}],
+    [{eventId:'modified',value:2},{eventId:'added',value:1}]
+  );
+  assert.deepEqual(result.added.map(item => item.eventId), ['added']);
+  assert.deepEqual(result.modified.map(item => item.eventId), ['modified']);
+  assert.deepEqual(result.removed, []);
+});
+
+test('duplicate event identifiers are rejected explicitly', () => {
+  assert.throws(
+    () => Persistence.reconcileEvents([], [{eventId:'duplicate'},{eventId:'duplicate'}]),
+    /duplicate identifier duplicate/
+  );
 });
 
 test('stable event identifiers are preserved', () => {
@@ -84,7 +152,7 @@ test('manual statistics do not create synthetic events', () => {
 
 test('logical deletion is explicit and leaves the source event unchanged', () => {
   const previous = Object.freeze([Object.freeze({eventId:'retired', value:1})]);
-  const result = Persistence.reconcileEvents(previous, [], {deletionStrategy:'LOGICAL'});
+  const result = Persistence.reconcileEvents(previous, [], {deletionStrategy:'LOGICAL',nextEventsComplete:true});
   assert.deepEqual(result.removed[0].tombstone, {eventId:'retired',value:1,deleted:true});
   assert.equal(previous[0].deleted, undefined);
 });

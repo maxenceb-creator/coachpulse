@@ -113,7 +113,7 @@
     return index;
   }
 
-  function reconcileEvents(previousEvents=[], nextEvents=[], {deletionStrategy='PHYSICAL'}={}){
+  function reconcileEvents(previousEvents=[], nextEvents=[], {deletionStrategy='PHYSICAL', nextEventsComplete=false}={}){
     if(!DELETION_STRATEGIES.includes(deletionStrategy)) throw new TypeError('Unknown event deletion strategy.');
     const previous = indexedEvents(previousEvents, 'Previous');
     const next = indexedEvents(nextEvents, 'Next');
@@ -124,14 +124,16 @@
       else if(equalValue(previous.get(eventId), event)) unchanged.push({eventId, event:clone(event)});
       else modified.push({eventId, before:clone(previous.get(eventId)), after:clone(event)});
     });
-    previous.forEach((event, eventId) => {
-      if(next.has(eventId)) return;
-      removed.push(deletionStrategy === 'LOGICAL'
-        ? {eventId, strategy:'LOGICAL', before:clone(event), tombstone:{...clone(event), deleted:true}}
-        : {eventId, strategy:'PHYSICAL', before:clone(event)});
-    });
+    if(nextEventsComplete === true){
+      previous.forEach((event, eventId) => {
+        if(next.has(eventId)) return;
+        removed.push(deletionStrategy === 'LOGICAL'
+          ? {eventId, strategy:'LOGICAL', before:clone(event), tombstone:{...clone(event), deleted:true}}
+          : {eventId, strategy:'PHYSICAL', before:clone(event)});
+      });
+    }
 
-    return {added, modified, removed, unchanged, deletionStrategy};
+    return {added, modified, removed, unchanged, deletionStrategy, nextEventsComplete:nextEventsComplete === true};
   }
 
   function createChangeRecord({field, oldValue, newValue, author, changedAt, reason='', initialRevision, resultingRevision, targetType='STAT_TOTAL', eventId=null}={}){
