@@ -582,13 +582,13 @@ async function main() {
     await assertFails(getDocs(collection(unsupportedAllPlayersDb, 'players')));
     process.stdout.write('Checking team-scoped match and event queries\n');
     const matchesByTeamId = await assertSucceeds(getDocs(query(collection(db, 'matches'), where('teamId', '==', 'U11'))));
-    assert.deepEqual(matchesByTeamId.docs.map(snapshot => snapshot.id), ['mU11']);
+    assert.deepEqual(matchesByTeamId.docs.map(snapshot => snapshot.id).sort(), ['mAssistant', 'mHistorical', 'mU11']);
     const matchesByTeamIds = await assertSucceeds(getDocs(query(collection(db, 'matches'), where('teamIds', 'array-contains', 'U11'))));
     assert.deepEqual(matchesByTeamIds.docs.map(snapshot => snapshot.id), ['mTeamIdsOnly']);
     await assertFails(getDocs(query(collection(db, 'matches'), where('teamId', 'in', ['U11', 'U13']))));
     await assertFails(getDocs(collection(db, 'matches')));
     const eventsByTeamId = await assertSucceeds(getDocs(query(collection(db, 'matchEvents'), where('teamId', '==', 'U11'))));
-    assert.deepEqual(eventsByTeamId.docs.map(snapshot => snapshot.id), ['eU11']);
+    assert.deepEqual(eventsByTeamId.docs.map(snapshot => snapshot.id).sort(), ['eHistorical', 'eU11']);
     const eventsByTeamIds = await assertSucceeds(getDocs(query(collection(db, 'matchEvents'), where('teamIds', 'array-contains', 'U11'))));
     assert.deepEqual(eventsByTeamIds.docs.map(snapshot => snapshot.id).sort(), ['eTeamIdsOnly', 'eU11']);
     await assertFails(getDocs(query(collection(db, 'matchEvents'), where('teamId', 'in', ['U11', 'U13']))));
