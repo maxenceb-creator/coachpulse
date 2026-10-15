@@ -124,7 +124,8 @@
     const positionedSeconds = Object.values(player.positionSeconds || player.positions || {})
       .reduce((total, value) => total + Math.max(0, Number(value) || 0), 0);
     const status = String(player.participationStatus || player.status || '').trim().toUpperCase();
-    return seconds > 0 || positionedSeconds > 0 || player.entered === true || player.played === true || player.participated === true
+    const hasPositiveStat = PLAYER_COUNTER_KEYS.some(key => numberOrUnknown(player[key]) > 0);
+    return seconds > 0 || positionedSeconds > 0 || hasPositiveStat || player.entered === true || player.played === true || player.participated === true
       || ['PLAYED', 'PARTICIPATED', 'ENTERED'].includes(status);
   }
 

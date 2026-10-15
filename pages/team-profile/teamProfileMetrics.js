@@ -5,7 +5,7 @@
   function pct(value, total){ return total ? Math.round((value / total) * 100) : 0; }
   function sum(rows, getter){ return rows.reduce((total, row) => total + n(getter(row)), 0); }
   function matchDate(match){ return Data.dateOf(match); }
-  function eventAction(row){ return String(row.action || row.type || row.eventType || row.name || '').toLowerCase(); }
+  function eventAction(row){ return String(row.action || row.type || row.eventType || row.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
   function isOpponent(row){ return /adv|adverse|opponent|contre/.test(String(row.side || row.teamSide || row.owner || row.sourceSide || '').toLowerCase()) || row.isOpponent === true; }
   function actionMatches(row, keys=[]){ const action = eventAction(row); return keys.some(key => action.includes(key)); }
   function xgValue(row={}, keys=[]){
@@ -93,42 +93,76 @@
       away:`${away.filter(m => m.resultCode === 'win').length}V ${away.filter(m => m.resultCode === 'draw').length}N ${away.filter(m => m.resultCode === 'loss').length}D`
     };
   }
-  function collectiveStats(events=[]){
-    const teamEvents = events.filter(row => !isOpponent(row));
-    const advEvents = events.filter(isOpponent);
-    const count = (rows, keys) => rows.filter(row => actionMatches(row, keys)).length;
-    const shots = count(teamEvents, ['tir']);
-    const shotsOn = count(teamEvents, ['cadr']);
-    const advShots = count(advEvents, ['tir']);
-    const advShotsOn = count(advEvents, ['cadr']);
-    const goals = count(teamEvents, ['but']);
+  const EVENT_KEYS = Object.freeze({
+    but:['but'],passe:['passe decisive','assist'],tirCadre:['tir cadre'],tirNonCadre:['tir non cadre'],centre:['centre'],
+    progression:['progression'],entree20:['entree20','20m'],recup:['recup'],duelWon:['duel gagne'],duelLost:['duel perdu'],
+    butAdv:['but'],tirCadreAdv:['tir cadre'],tirNonCadreAdv:['tir non cadre'],centreAdv:['centre'],progressionAdv:['progression'],
+    entree20Adv:['entree20','20m'],recupAdv:['recup'],duelWonAdv:['duel gagne'],duelLostAdv:['duel perdu']
+  });
+  function nullableSum(rows, key){
+    const values=rows.map(row=>row?.[key]).filter(value=>value!==''&&value!=null&&Number.isFinite(Number(value)));
+    return values.length?values.reduce((total,value)=>total+Number(value),0):null;
+  }
+  function matchEvents(match, events){const id=match.matchId||match.id;return events.filter(row=>String(row.matchId||'')===String(id||''));}
+  function provenanceUsesSnapshot(match,key,playerName=''){
+    const rows=match.statsProvenance?.players||{};
+    if(playerName)return ['MANUAL','CORRECTED'].includes(rows[playerName]?.[key]);
+    return Object.values(rows).some(row=>['MANUAL','CORRECTED'].includes(row?.[key]));
+  }
+  function canonicalMetric(match, events, key, {opponent=false,playerName=''}={}){
+    const scoped=matchEvents(match,events).filter(row=>isOpponent(row)===opponent).filter(row=>!playerName||row.player===playerName||row.playerName===playerName||row.playerId===match.players?.[playerName]?.playerId);
+    const eventValue=scoped.filter(row=>actionMatches(row,EVENT_KEYS[key]||[key])).length;
+    const manual=opponent?nullableSum([match.opp||match.opponent||{}],key):nullableSum(playerName?[match.players?.[playerName]||{}]:Object.values(match.players||{}),key);
+    const source=match.statsSource||(match.entryMode==='LIVE'?'EVENTS':(match.entryMode?'MANUAL':''));
+    if(source==='MANUAL')return manual;
+    if(source==='EVENTS')return eventValue;
+    if(provenanceUsesSnapshot(match,key,playerName))return manual;
+    return eventValue>0?eventValue:manual;
+  }
+  function totalMetric(matches,events,key,options){
+    const values=matches.map(match=>canonicalMetric(match,events,key,options)).filter(value=>value!=null);
+    return values.length?values.reduce((total,value)=>total+value,0):null;
+  }
+  function collectiveStats(events=[],matches=[]){
+    if(!matches.length){
+      const synthetic={matchId:'__all__',entryMode:'LIVE',statsSource:'EVENTS'};
+      events=events.map(row=>({...row,matchId:'__all__'}));matches=[synthetic];
+    }
+    const count=(key,options)=>totalMetric(matches,events,key,options);
+    const teamEvents=events.filter(row=>!isOpponent(row)),advEvents=events.filter(isOpponent);
+    const rawCount=(rows,keys)=>rows.filter(row=>actionMatches(row,keys)).length;
+    const shotsOn=count('tirCadre');
+    const shotsOff=count('tirNonCadre');
+    const shots=shotsOn==null&&shotsOff==null?null:n(shotsOn)+n(shotsOff);
+    const advShotsOn=count('tirCadreAdv',{opponent:true});
+    const advShotsOff=count('tirNonCadreAdv',{opponent:true});
+    const advShots=advShotsOn==null&&advShotsOff==null?null:n(advShotsOn)+n(advShotsOff);
+    const goals=count('but');
     return {
       attack:{
-        shots, shotsOn, shotsOff:Math.max(0, shots - shotsOn), shotAccuracy:pct(shotsOn, shots), conversion:pct(goals, shots),
-        chances:count(teamEvents, ['occasion']), goals, assists:count(teamEvents, ['passe decisive', 'assist']),
-        crosses:count(teamEvents, ['centre']), successfulCrosses:count(teamEvents, ['centre reussi']),
-        entries20:count(teamEvents, ['entree20', '20m']), dribblesWon:count(teamEvents, ['1v1', 'duel gagne']),
-        progressions:count(teamEvents, ['progression']), turnovers:count(teamEvents, ['perte'])
+        shots, shotsOn, shotsOff, shotAccuracy:shots==null?null:pct(shotsOn, shots), conversion:shots==null?null:pct(goals, shots),
+        chances:rawCount(teamEvents,['occasion']), goals, assists:count('passe'), crosses:count('centre'), successfulCrosses:rawCount(teamEvents,['centre reussi']),
+        entries20:count('entree20'), dribblesWon:count('duelWon'), progressions:count('progression'), turnovers:rawCount(teamEvents,['perte'])
       },
       defense:{
-        advShots, advShotsOn, goalsAgainst:count(advEvents, ['but']), saves:count(teamEvents, ['arret']),
-        saveRate:pct(count(teamEvents, ['arret']), advShotsOn), recoveries:count(teamEvents, ['recup']),
-        defensiveDuelsWon:count(teamEvents, ['duel defensif gagne']), defensiveDuelsLost:count(teamEvents, ['duel defensif perdu']),
-        interceptions:count(teamEvents, ['interception']), advEntries20:count(advEvents, ['entree20', '20m'])
+        advShots, advShotsOn, goalsAgainst:count('butAdv',{opponent:true}), saves:rawCount(teamEvents,['arret']), saveRate:advShotsOn==null?null:pct(rawCount(teamEvents,['arret']),advShotsOn), recoveries:count('recup'),
+        defensiveDuelsWon:count('duelWon'), defensiveDuelsLost:count('duelLost'), interceptions:rawCount(teamEvents,['interception']), advEntries20:count('entree20Adv',{opponent:true})
       },
       domination:{
-        shotRatio:advShots ? (shots / advShots).toFixed(2) : String(shots),
-        entriesRatio:count(advEvents, ['entree20', '20m']) ? (count(teamEvents, ['entree20', '20m']) / count(advEvents, ['entree20', '20m'])).toFixed(2) : String(count(teamEvents, ['entree20', '20m'])),
-        offensiveIndex:pct(shotsOn + count(teamEvents, ['entree20', '20m']) + goals, Math.max(1, shots + count(teamEvents, ['entree20', '20m']) + goals)),
+        shotRatio:advShots ? (n(shots) / advShots).toFixed(2) : (shots==null?null:String(shots)),
+        entriesRatio:count('entree20Adv',{opponent:true})?(n(count('entree20'))/count('entree20Adv',{opponent:true})).toFixed(2):(count('entree20')==null?null:String(count('entree20'))),
+        offensiveIndex:shots==null?null:pct(n(shotsOn)+n(count('entree20'))+n(goals),Math.max(1,n(shots)+n(count('entree20'))+n(goals))),
         intensity:teamEvents.length,
-        performanceIndex:pct(goals + shotsOn + count(teamEvents, ['recup']), Math.max(1, teamEvents.length))
+        performanceIndex:pct(n(goals)+n(shotsOn)+n(count('recup')),Math.max(1,teamEvents.length))
       }
     };
   }
   function xgStats(matches=[], events=[]){
-    const rows = [...matches, ...events];
-    const team = rows.map(row => xgValue(row, ['xg','xG','expectedGoals','xgFor'])).filter(value => value != null);
-    const against = rows.map(row => xgValue(row, ['xgAgainst','xGA','xgAdv','opponentXg'])).filter(value => value != null);
+    const usedEventIds=new Set();
+    const canonical=(match,keys)=>{const aggregate=xgValue(match,keys);if(aggregate!=null)return aggregate;const rows=matchEvents(match,events);rows.forEach(row=>usedEventIds.add(row.eventId||row.id));const values=rows.map(row=>xgValue(row,keys)).filter(value=>value!=null);return values.length?values.reduce((a,b)=>a+b,0):null;};
+    const team = matches.map(match=>canonical(match,['xg','xG','expectedGoals','xgFor'])).filter(value=>value!=null);
+    const against = matches.map(match=>canonical(match,['xgAgainst','xGA','xgAdv','opponentXg'])).filter(value=>value!=null);
+    events.filter(row=>!usedEventIds.has(row.eventId||row.id)&&!matches.some(match=>String(match.matchId||match.id)===String(row.matchId))).forEach(row=>{const value=xgValue(row,['xg','xG','expectedGoals','xgFor']);if(value!=null)team.push(value);const againstValue=xgValue(row,['xgAgainst','xGA','xgAdv','opponentXg']);if(againstValue!=null)against.push(againstValue);});
     if(!team.length && !against.length) return {available:false, message:'Données xG insuffisantes'};
     const teamTotal = team.reduce((a,b) => a + b, 0);
     const againstTotal = against.reduce((a,b) => a + b, 0);
@@ -210,15 +244,21 @@
       injuredAvgPerEvent:Math.round(avg(eventStats.map(stat => stat.injured)))
     };
   }
-  function squad(players=[], attendance=[], events=[]){
+  function squad(players=[], attendance=[], events=[], matches=[]){
     return players.map(player => {
       const playerId = player.playerId || player.id;
       const rows = attendance.filter(row => row.playerId === playerId);
       const ev = events.filter(row => row.playerId === playerId);
       const minutes = sum(rows, row => row.minutes || row.duration);
-      const goals = ev.filter(row => actionMatches(row, ['but'])).length;
-      const assists = ev.filter(row => actionMatches(row, ['passe decisive', 'assist'])).length;
-      return {player, playerId, minutes, appearances:rows.length, goals, assists, shots:ev.filter(row => actionMatches(row, ['tir'])).length};
+      const names=[player.name,player.displayName,player.playerName].filter(Boolean);
+      const relevant=matches.filter(match=>names.some(name=>match.players?.[name])||Object.values(match.players||{}).some(row=>row?.playerId===playerId));
+      const playerNameFor=match=>names.find(name=>match.players?.[name])||Object.keys(match.players||{}).find(name=>match.players[name]?.playerId===playerId)||'';
+      const metric=key=>{const values=relevant.map(match=>canonicalMetric(match,events,key,{playerName:playerNameFor(match)})).filter(value=>value!=null);return values.length?values.reduce((a,b)=>a+b,0):null;};
+      const goals = relevant.length?metric('but'):ev.filter(row => actionMatches(row, ['but'])).length;
+      const assists = relevant.length?metric('passe'):ev.filter(row => actionMatches(row, ['passe decisive', 'assist'])).length;
+      const shotsOn=relevant.length?metric('tirCadre'):ev.filter(row => actionMatches(row, ['tir cadre'])).length;
+      const shotsOff=relevant.length?metric('tirNonCadre'):ev.filter(row => actionMatches(row, ['tir non cadre'])).length;
+      return {player, playerId, minutes, appearances:rows.length, goals, assists, shots:shotsOn==null&&shotsOff==null?null:n(shotsOn)+n(shotsOff)};
     }).sort((a,b) => b.minutes - a.minutes || b.goals - a.goals);
   }
   function autoSummary(kpis, stats, xg){
@@ -253,7 +293,7 @@
     const technicalTests = Filters.filterRows(collections.technicalTests || [], state);
     const physicalTests = Filters.filterRows(collections.physicalTests || [], state);
     const injuries = Filters.filterRows(collections.injuries || [], state);
-    const stats = collectiveStats(events);
+    const stats = collectiveStats(events, periodMatches);
     const attendanceStats = attendanceAverages(attendance);
     const kpis = {
       ...computeKpis(periodMatches),
@@ -272,7 +312,7 @@
     return {
       team, period, matches:periodMatches, events, players, sessions, attendance, technicalTests, physicalTests, injuries,
       kpis, stats, xg,
-      squad:squad(players, attendance, events),
+      squad:squad(players, attendance, events, periodMatches),
       heatmaps:{
         offensive:heatmap(events, row => !isOpponent(row)),
         shots:heatmap(events, row => !isOpponent(row) && actionMatches(row, ['tir'])),

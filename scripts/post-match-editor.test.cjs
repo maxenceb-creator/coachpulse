@@ -18,6 +18,10 @@ assert.match(editor, /Ouvrir une copie Après-match/);
 assert.doesNotMatch(editor, /remove\(LEGACY_LIVE_DRAFT_KEY\)/);
 assert.match(editor, /nextEventsComplete:true/);
 assert.match(editor, /event\.eventId=event\.eventId\|\|event\.id/);
+assert.doesNotMatch(editor, /draft\.entryMode=draft\.entryMode==='LIVE'\?'FULL_POST_MATCH'/);
+assert.match(editor, /participated:true,seconds:null/);
+assert.match(editor, /adjustEventEffect\(event,-1\)/);
+assert.match(editor, /SCORE_EVENTS_MISMATCH/);
 assert.doesNotMatch(editor, /log\.push\([^)]*(?:stat|manual)/i);
 
 const normalized = statistics.normalizePlayers({Alice:{but:null,recup:'',seconds:null}}, {unknown:'preserve'});

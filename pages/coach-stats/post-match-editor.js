@@ -45,7 +45,9 @@
     await confirmReplace(()=>{openDraft(saved.draft);editor.dirty=true;persistDraft();render();notify('info','Une copie du brouillon Live est ouverte en Après-match. Le brouillon original reste conservé.');});
   }
   function sourceFor(playerName,key){
-    return editor.draft?.statsProvenance?.players?.[playerName]?.[key] || editor.draft?.statsSource || (editor.draft?.entryMode==='LIVE'?'LIVE':'MANUAL');
+    const explicit=editor.draft?.statsProvenance?.players?.[playerName]?.[key];if(explicit)return explicit;
+    if(editor.draft?.statsSource==='MIXED')return editor.draft?.entryMode==='LIVE'?'EVENTS':'MANUAL';
+    return editor.draft?.statsSource || (editor.draft?.entryMode==='LIVE'?'EVENTS':'MANUAL');
   }
   function markOrigin(playerName,key){
     const draft=editor.draft;
@@ -77,7 +79,7 @@
     draft.players=draft.players||{}; draft.opp=draft.opp||{}; draft.called=draft.called||Object.keys(draft.players);
     draft.lineup=draft.lineup||{}; draft.bench=draft.bench||[]; draft.log=clone(draft.log||draft.events||[]);
     draft.log.forEach((event,index)=>{event.eventId=event.eventId||event.id||stableMatchEventId(draft.matchId,event,index);});
-    draft.entryMode=draft.entryMode==='LIVE'?'FULL_POST_MATCH':(draft.entryMode||'FULL_POST_MATCH');
+    draft.entryMode=draft.entryMode||'FULL_POST_MATCH';
     draft.statsSource=draft.statsSource||(raw?.entryMode==='LIVE'?'EVENTS':'MANUAL');
     draft.statsProvenance=draft.statsProvenance||{players:{},opponent:{}};
     draft.revision=Number.isSafeInteger(draft.revision)?draft.revision:0;
@@ -90,7 +92,7 @@
   function addPlayer(player){
     if(!editor.draft||!player?.name)return;
     const name=player.name; if(!editor.draft.players[name]){
-      editor.draft.players[name]={playerId:player.playerId||player.id||'',playerName:name,teamId:player.teamId||editor.draft.teamId||'',team:player.team||editor.draft.team||'',playerSnapshot:{playerId:player.playerId||player.id||'',playerName:name,displayName:name,teamId:player.teamId||editor.draft.teamId||'',team:player.team||editor.draft.team||''}};
+      editor.draft.players[name]={playerId:player.playerId||player.id||'',playerName:name,teamId:player.teamId||editor.draft.teamId||'',team:player.team||editor.draft.team||'',participated:true,seconds:null,playerSnapshot:{playerId:player.playerId||player.id||'',playerName:name,displayName:name,teamId:player.teamId||editor.draft.teamId||'',team:player.team||editor.draft.team||''}};
     }
     if(!editor.draft.called.includes(name))editor.draft.called.push(name);
     editor.selectedPlayer=name; markDirty(); render();
@@ -106,6 +108,31 @@
     player[key]=key==='seconds'&&value!==''?finiteOrNull(value)*60:finiteOrNull(value); markOrigin(name,key); markDirty(); renderOriginsOnly();
   }
   function displayStat(player,key){ const value=player?.[key]; if(value==null)return''; return key==='seconds'?Math.round(value/60):value; }
+  function eventStatKey(event={}){
+    const value=String(event.key||event.action||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    if(/passe decisive|assist/.test(value))return'passe';
+    if(/tir.*non.*cadr|non.*cadre/.test(value))return'tirNonCadre';
+    if(/tir.*cadr/.test(value))return'tirCadre';
+    if(/but/.test(value))return'but';
+    if(/centre/.test(value))return'centre';
+    if(/progression/.test(value))return'progression';
+    if(/entree20|20m/.test(value))return'entree20';
+    if(/recup/.test(value))return'recup';
+    if(/duel.*gagn|duelwon/.test(value))return'duelWon';
+    if(/duel.*perd|duellost/.test(value))return'duelLost';
+    return'';
+  }
+  function adjustEventEffect(event,delta){
+    const key=eventStatKey(event);if(!key)return;
+    const name=event.player||Object.keys(editor.draft.players||{}).find(playerName=>editor.draft.players[playerName]?.playerId&&editor.draft.players[playerName].playerId===event.playerId);
+    if(!name||!editor.draft.players[name]||sourceFor(name,key)!=='EVENTS')return;
+    const current=Number(editor.draft.players[name][key]);editor.draft.players[name][key]=Math.max(0,(Number.isFinite(current)?current:0)+delta);
+  }
+  function refreshConsistency(){
+    const eventGoals=(editor.draft.log||[]).filter(event=>eventStatKey(event)==='but'&&!/adv|adverse|opponent/i.test(String(event.side||event.teamSide||event.player||''))).length;
+    const score=editor.draft.scoreUs==null?null:Number(editor.draft.scoreUs);editor.draft.consistencyConflicts=Number.isFinite(score)&&score!==eventGoals&&editor.draft.statsSource!=='MANUAL'?[{code:'SCORE_EVENTS_MISMATCH',score,eventGoals}]:[];
+  }
+  function consistencyNotice(){return editor.draft.consistencyConflicts?.length?'<div class="card postMatchNotice warn"><b>Incohérence détectée.</b> Le score ne correspond plus aux événements But. Le score n’a pas été modifié automatiquement.</div>':'';}
   function updateMeta(key,value){
     if(['scoreUs','scoreThem','duration'].includes(key))editor.draft[key]=finiteOrNull(value);
     else editor.draft[key]=value;
@@ -136,7 +163,7 @@
   }
   function render(){
     const root=document.getElementById('post-match-editor'); if(!root||!editor.draft)return;
-    root.innerHTML=`${legacyLiveDraftNotice()}<div class="postMatchToolbar"><button type="button" class="good" id="postMatchNew">➕ Ajouter un match sans Live</button><select id="postMatchExisting"><option value="">Modifier un match terminé…</option>${currentMatches().slice().reverse().map(match=>`<option value="${esc(match.matchId||match.id)}">${esc((match.date||match.createdAt||'').slice(0,10))} · ${esc(match.team||'')} ${esc(match.scoreUs??'—')}-${esc(match.scoreThem??'—')} ${esc(match.opponent||'Adversaire')}</option>`).join('')}</select><span id="postMatchStatus" class="postMatchStatus"></span></div><div id="postMatchConflict" class="card postMatchNotice warn hide"><b>Conflit de révision.</b> Vos modifications restent dans ce brouillon.<div class="postMatchToolbar" style="margin-top:8px"><button type="button" id="postMatchReload">Recharger la version distante</button><button type="button" class="warn" id="postMatchKeep">Conserver le brouillon</button></div></div>${metaHTML()}<div class="card"><div class="postMatchToolbar"><button type="button" class="${editor.mode==='collective'?'good':'ghost'}" data-mode="collective">Tableau collectif</button><button type="button" class="${editor.mode==='individual'?'good':'ghost'}" data-mode="individual">Fiche individuelle</button></div></div><div id="postMatchWorkspace">${editor.mode==='collective'?collectiveHTML():individualHTML()}</div><div class="postMatchActions"><button type="button" class="good" id="postMatchSave">💾 Enregistrer les statistiques</button><button type="button" class="ghost" id="postMatchDiscard">Annuler les modifications</button></div>`;
+    root.innerHTML=`${legacyLiveDraftNotice()}<div class="postMatchToolbar"><button type="button" class="good" id="postMatchNew">➕ Ajouter un match sans Live</button><select id="postMatchExisting"><option value="">Modifier un match terminé…</option>${currentMatches().slice().reverse().map(match=>`<option value="${esc(match.matchId||match.id)}">${esc((match.date||match.createdAt||'').slice(0,10))} · ${esc(match.team||'')} ${esc(match.scoreUs??'—')}-${esc(match.scoreThem??'—')} ${esc(match.opponent||'Adversaire')}</option>`).join('')}</select><span id="postMatchStatus" class="postMatchStatus"></span></div><div id="postMatchConflict" class="card postMatchNotice warn hide"><b>Conflit de révision.</b> Vos modifications restent dans ce brouillon.<div class="postMatchToolbar" style="margin-top:8px"><button type="button" id="postMatchReload">Recharger la version distante</button><button type="button" class="warn" id="postMatchKeep">Conserver le brouillon</button></div></div>${consistencyNotice()}${metaHTML()}<div class="card"><div class="postMatchToolbar"><button type="button" class="${editor.mode==='collective'?'good':'ghost'}" data-mode="collective">Tableau collectif</button><button type="button" class="${editor.mode==='individual'?'good':'ghost'}" data-mode="individual">Fiche individuelle</button></div></div><div id="postMatchWorkspace">${editor.mode==='collective'?collectiveHTML():individualHTML()}</div><div class="postMatchActions"><button type="button" class="good" id="postMatchSave">💾 Enregistrer les statistiques</button><button type="button" class="ghost" id="postMatchDiscard">Annuler les modifications</button></div>`;
     bind(); renderStatus();
   }
   function renderOriginsOnly(){ document.querySelectorAll('[data-player][data-stat]').forEach(input=>{const badge=input.parentElement?.querySelector('.statOrigin');if(badge){const source=sourceFor(input.dataset.player,input.dataset.stat);badge.textContent=source;badge.className=`statOrigin ${source}`;}}); }
@@ -146,8 +173,8 @@
     document.querySelectorAll('[data-select-player]').forEach(button=>button.addEventListener('click',()=>{editor.selectedPlayer=button.dataset.selectPlayer;editor.mode='individual';persistDraft();render();}));
     document.querySelectorAll('[data-remove-player]').forEach(button=>button.addEventListener('click',async()=>{if(await global.CoachStatsNotify.ask(`Retirer ${button.dataset.removePlayer} de ce match ?`,{danger:true,confirmLabel:'Retirer'}))removePlayer(button.dataset.removePlayer);}));
     document.querySelectorAll('[data-mode]').forEach(button=>button.addEventListener('click',()=>{editor.mode=button.dataset.mode;render();}));
-    document.querySelectorAll('[data-event-index][data-event-field]').forEach(input=>input.addEventListener('input',()=>{const event=editor.draft.log[Number(input.dataset.eventIndex)];event[input.dataset.eventField]=input.value;event.correctionSource='CORRECTED';markDirty();}));
-    document.querySelectorAll('[data-delete-event]').forEach(button=>button.addEventListener('click',async()=>{if(await global.CoachStatsNotify.ask('Supprimer cet événement ? Cette action sera atomique avec la sauvegarde.',{danger:true,confirmLabel:'Supprimer'})){editor.draft.log.splice(Number(button.dataset.deleteEvent),1);markDirty();render();}}));
+    document.querySelectorAll('[data-event-index][data-event-field]').forEach(input=>input.addEventListener('input',()=>{const event=editor.draft.log[Number(input.dataset.eventIndex)];adjustEventEffect(event,-1);event[input.dataset.eventField]=input.value;event.correctionSource='CORRECTED';adjustEventEffect(event,1);refreshConsistency();markDirty();}));
+    document.querySelectorAll('[data-delete-event]').forEach(button=>button.addEventListener('click',async()=>{if(await global.CoachStatsNotify.ask('Supprimer cet événement ? Cette action sera atomique avec la sauvegarde.',{danger:true,confirmLabel:'Supprimer'})){const[event]=editor.draft.log.splice(Number(button.dataset.deleteEvent),1);adjustEventEffect(event,-1);refreshConsistency();markDirty();render();}}));
     document.getElementById('postMatchNew')?.addEventListener('click',()=>confirmReplace(()=>openDraft(newDraft())));
     document.getElementById('postMatchExisting')?.addEventListener('change',event=>{const match=currentMatches().find(item=>String(item.matchId||item.id)===event.target.value);if(match)confirmReplace(()=>openDraft(match));});
     document.getElementById('postMatchSave')?.addEventListener('click',saveDraft);
@@ -165,10 +192,10 @@
   function localUpsert(draft){const snapshot=clone(draft);snapshot.log=clone(draft.log||[]);snapshot.events=undefined;snapshot.updatedAtIso=new Date().toISOString();ensureSavedMatchIdentity(snapshot);const index=state.savedMatches.findIndex(match=>String(match.matchId||match.id)===String(snapshot.matchId));if(index>=0)state.savedMatches[index]=snapshot;else state.savedMatches.push(snapshot);save();renderAll();return snapshot;}
   async function saveDraft(){
     const errors=validate();if(errors.length){notify('error',errors[0]);return;}
-    const api=typeof matchCloudApi==='function'?matchCloudApi():null; const snapshot=clone(editor.draft); snapshot.updatedAtIso=new Date().toISOString(); snapshot.createdAt=snapshot.createdAt||`${snapshot.date||new Date().toISOString().slice(0,10)}T12:00:00.000Z`; snapshot.status='COMPLETED'; snapshot.entryMode='FULL_POST_MATCH';
+    const api=typeof matchCloudApi==='function'?matchCloudApi():null; const snapshot=clone(editor.draft); snapshot.updatedAtIso=new Date().toISOString(); snapshot.createdAt=snapshot.createdAt||`${snapshot.date||new Date().toISOString().slice(0,10)}T12:00:00.000Z`; snapshot.status='COMPLETED'; snapshot.entryMode=snapshot.entryMode||'FULL_POST_MATCH';
     if(!api?.matchSavePostMatchTransactional||!navigator.onLine){snapshot.syncStatus='pendingSync';editor.draft=localUpsert(snapshot);editor.baseline=clone(editor.draft);editor.dirty=false;persistDraft();render();notify('warn','Match enregistré localement. La synchronisation cloud sera proposée au retour en ligne.');return;}
     try{
-      const result=await api.matchSavePostMatchTransactional(snapshot,{entryMode:'FULL_POST_MATCH',nextEventsComplete:true,deletionStrategy:snapshot.deletionStrategy||'PHYSICAL'});
+      const result=await api.matchSavePostMatchTransactional(snapshot,{entryMode:snapshot.entryMode,nextEventsComplete:true,deletionStrategy:snapshot.deletionStrategy||'PHYSICAL'});
       snapshot.revision=result.revision;snapshot.syncStatus='synced';snapshot.syncedAt=new Date().toISOString();editor.draft=localUpsert(snapshot);editor.baseline=clone(editor.draft);editor.dirty=false;editor.conflict=null;persistDraft();render();notify('success','Match et statistiques enregistrés atomiquement ✅');
     }catch(error){
       snapshot.syncStatus=error?.conflict?'conflict':'syncError';snapshot.syncError=String(error?.message||error);editor.draft=localUpsert(snapshot);editor.dirty=true;editor.conflict=error?.conflict?{expectedRevision:error.expectedRevision,remoteRevision:error.remoteRevision,message:error.message}:null;persistDraft();render();notify(error?.conflict?'warn':'error',error?.conflict?'Conflit détecté : le brouillon local a été conservé.':'Échec de la sauvegarde cloud. Le brouillon local est conservé.');

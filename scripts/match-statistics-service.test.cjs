@@ -29,6 +29,11 @@ test('playing time with zero actions is participation', () => {
   assert.equal(Stats.playerHasParticipation({seconds:420,but:0,recup:0}), true);
 });
 
+test('positive individual statistic proves legacy participation with unknown time', () => {
+  assert.equal(Stats.playerHasParticipation({seconds:null,but:2,tirCadre:3}), true);
+  assert.equal(Stats.playerHasParticipation({seconds:null,but:0,tirCadre:0}), false);
+});
+
 test('called player who never entered is not participation', () => {
   const match = {called:['Alice'],playerIds:['player-alice'],players:{Alice:{playerId:'player-alice',seconds:0,positionSeconds:{}}}};
   assert.equal(Stats.matchHasPlayerParticipation(match, ['player-alice']), false);

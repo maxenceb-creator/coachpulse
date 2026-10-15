@@ -448,6 +448,8 @@ async function main() {
     assert.equal(before.savedMatches.length, 1);
     assert.equal(saved.matchId, before.matchId);
     assert.equal(saved.syncStatus, 'pendingSync');
+    assert.equal(saved.entryMode, 'LIVE');
+    assert.equal(saved.statsSource, 'EVENTS');
     assert.deepEqual(saved.log.map(event => event.eventId), before.log.map(event => event.eventId));
     assert(saved.players['TEST BEA'].playerId);
     assert.equal(saved.lineup.BU, 'TEST BEA');

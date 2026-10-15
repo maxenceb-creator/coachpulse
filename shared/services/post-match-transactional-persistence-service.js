@@ -3,7 +3,7 @@
 (function(global){
   const MAX_TRANSACTION_WRITES = 500;
   const MAX_DOCUMENT_BYTES = 1_000_000;
-  const POST_MATCH_MODES = Object.freeze(['QUICK_POST_MATCH', 'FULL_POST_MATCH']);
+  const POST_MATCH_MODES = Object.freeze(['LIVE', 'QUICK_POST_MATCH', 'FULL_POST_MATCH']);
 
   function dependency(name, commonJsPath){
     if(global[name]) return global[name];
@@ -98,7 +98,7 @@
     const matchId = text(input.matchId);
     if(!matchId) return failure('INVALID_MATCH_ID', 'Un matchId stable est obligatoire.');
     if(!POST_MATCH_MODES.includes(input.matchSnapshot?.entryMode)){
-      return failure('INVALID_ENTRY_MODE', 'Ce service accepte uniquement les modes Apres-match.');
+      return failure('INVALID_ENTRY_MODE', 'Le mode de saisie du match est invalide.');
     }
     if(!text(input.matchSnapshot?.teamId)){
       return failure('INVALID_TEAM_SCOPE', 'Un teamId canonique est obligatoire pour une sauvegarde Apres-match.');
