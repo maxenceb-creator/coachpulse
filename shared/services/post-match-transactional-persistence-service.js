@@ -60,14 +60,16 @@
   }
 
   function normalizedMatchSnapshot(matchSnapshot, matchId, nextRevision, serverTimestamp){
-    const players = Statistics.normalizePlayers(matchSnapshot.players || {});
+    // Post-match forms must preserve unknown values instead of silently
+    // manufacturing zeroes for counters that were never entered.
+    const players = Statistics.normalizePlayers(matchSnapshot.players || {}, {unknown:'preserve'});
     const opponentSource = matchSnapshot.opp || matchSnapshot.opponent || {};
     const normalized = {
       ...matchSnapshot,
       matchId,
       players,
-      ...(Object.prototype.hasOwnProperty.call(matchSnapshot, 'opp') ? {opp:Statistics.normalizeOpponentStats(opponentSource)} : {}),
-      ...(Object.prototype.hasOwnProperty.call(matchSnapshot, 'opponent') ? {opponent:Statistics.normalizeOpponentStats(opponentSource)} : {}),
+      ...(Object.prototype.hasOwnProperty.call(matchSnapshot, 'opp') ? {opp:Statistics.normalizeOpponentStats(opponentSource, {unknown:'preserve'})} : {}),
+      ...(Object.prototype.hasOwnProperty.call(matchSnapshot, 'opponent') ? {opponent:Statistics.normalizeOpponentStats(opponentSource, {unknown:'preserve'})} : {}),
       schemaVersion:Persistence.SCHEMA_VERSION,
       revision:nextRevision,
       updatedAt:serverTimestamp
