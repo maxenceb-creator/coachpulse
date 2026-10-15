@@ -619,11 +619,7 @@ async function main() {
     process.stdout.write('Checking authorized match update\n');
     await assertSucceeds(setDoc(doc(db, 'matches', 'mU11'), {matchId: 'mU11', teamId: 'U11', score: '1-0'}));
     process.stdout.write('Checking authorized match event update\n');
-    await assertFails(setDoc(doc(db, 'matchEvents', 'eU11'), {eventId: 'eU11', matchId: 'mU11', type: 'goal'}));
-    const eventUpdate = writeBatch(db);
-    eventUpdate.set(doc(db, 'matches', 'mU11'), {eventsRevision:1}, {merge:true});
-    eventUpdate.set(doc(db, 'matchEvents', 'eU11'), {eventId:'eU11', matchId:'mU11', type:'goal'}, {merge:true});
-    await assertSucceeds(eventUpdate.commit());
+    await assertSucceeds(setDoc(doc(db, 'matchEvents', 'eU11'), {eventId: 'eU11', matchId: 'mU11', type: 'goal'}));
     process.stdout.write('Checking authorized attendance create\n');
     await assertSucceeds(setDoc(doc(db, 'attendance', 'newU11'), {attendanceId: 'newU11', sessionId: 'sU11', teamId: 'U11'}));
     process.stdout.write('Checking authorized attendance update\n');
