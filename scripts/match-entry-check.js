@@ -4,6 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const firestoreQueries = require('../shared/services/firestore-query-service.js');
 const matchStatistics = require('../shared/services/match-statistics-service.js');
+const postMatchPersistence = require('../shared/services/post-match-transactional-persistence-service.js');
 
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -91,7 +92,9 @@ function firestoreHarness() {
   const reads = [];
   const sandbox = {
     Date, JSON, Math, Set, Map, Promise,
-    db: {}, currentUser: {uid: 'fixture-coach', email: 'coach@example.test'},
+    db: {}, currentUser: {uid: 'fixture-coach', email: 'coach@example.test'}, currentUserRole:'ENTRAINEUR_ADJOINT',
+    currentProfile:{uid:'fixture-coach',email:'coach@example.test',role:'ENTRAINEUR_ADJOINT',permissionLevel:'SAISIE',status:'ACTIVE',allowedModules:['stats'],authorizedTeamIds:['team-u13-a']},
+    CoachPulsePostMatchTransactionalPersistence:postMatchPersistence,
     navigator: {onLine: true},
     canEditModule: () => true, canViewModule: () => true,
     getCurrentPermissionLevel: () => 'SAISIE', getCurrentUserRole: () => 'ENTRAINEUR_ADJOINT',
@@ -111,23 +114,40 @@ function firestoreHarness() {
       serverTimestamp: () => 'fixture-server-timestamp',
       collection: (_db, name) => name,
       where: (field, operator, value) => ({field, operator, value}),
-      query: (collection, filter) => ({collection, filter}),
+      query: (collection, ...filters) => ({collection, filters, filter:filters[0]}),
       getDocs: async query => {
         reads.push(query);
         const collection = typeof query === 'string' ? query : query.collection;
-        const filter = typeof query === 'string' ? null : query.filter;
+        const filters = typeof query === 'string' ? [] : (query.filters || (query.filter ? [query.filter] : []));
         const rows = [...documents.entries()].filter(([ref, value]) =>
-          ref.startsWith(`${collection}/`) && (!filter || (filter.operator === 'array-contains'
+          ref.startsWith(`${collection}/`) && filters.every(filter => (filter.operator === 'array-contains'
             ? Array.isArray(value[filter.field]) && value[filter.field].includes(filter.value)
             : filter.operator === 'array-contains-any'
               ? Array.isArray(value[filter.field]) && filter.value.some(item => value[filter.field].includes(item))
               : filter.operator === 'in'
                 ? filter.value.includes(value[filter.field])
                 : value[filter.field] === filter.value)));
-        return {forEach: callback => rows.forEach(([ref, value]) => callback({id: ref.split('/')[1], data: () => value}))};
+        const docs = rows.map(([ref,value]) => ({id:ref.split('/')[1],ref,exists:()=>true,data:()=>value}));
+        return {docs,forEach: callback => docs.forEach(callback)};
+      },
+      runTransaction: async (_db, callback) => {
+        const pending = [];
+        const transaction = {
+          get: async ref => ({id:String(ref).split('/')[1],ref,exists:()=>documents.has(ref),data:()=>documents.get(ref)}),
+          set: (ref,value,options) => pending.push({type:'set',ref,value,options}),
+          delete: ref => pending.push({type:'delete',ref})
+        };
+        const result = await callback(transaction);
+        if(result?.ok) pending.forEach(write => {
+          writes.push(write);
+          if(write.type === 'delete') documents.delete(write.ref);
+          else documents.set(write.ref,{...documents.get(write.ref),...write.value});
+        });
+        return result;
       }
     }
   };
+  sandbox.window = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(between(read('app.js'), 'function matchDocumentId(', 'function playerForSeason('), sandbox);
   return {sandbox, documents, writes, reads};
@@ -458,15 +478,15 @@ async function main() {
     assert.equal(h.state().savedMatches[0].matchTypeLabel, 'Tournoi');
     h.run("state.savedMatches[0].playerIds=['legacy-oversized-id'];save();");
     h.sandbox.parent.CoachPulseCentralData = {
-      matchSaveToFirestore: async match => {
+      matchSavePostMatchTransactional: async (match, options) => {
         const local = JSON.parse(h.storage.get('coachStatsV170'));
         assert.equal(local.savedMatches[0].syncStatus, 'pendingSync');
         assert.equal(local.savedMatches[0].matchId, match.matchId);
-        return cloud.sandbox.matchSaveToFirestore(match);
+        return cloud.sandbox.matchSavePostMatchTransactional(match, options);
       },
       matchListFromFirestore: cloud.sandbox.matchListFromFirestore
     };
-    assert.equal(await h.run('syncSavedMatch(state.savedMatches[0],{silent:true})'), true);
+    assert.equal(await h.run('syncSavedMatch(state.savedMatches[0],{silent:true})'), true, h.state().savedMatches[0].syncError);
     assert.equal(h.state().savedMatches[0].syncStatus, 'synced');
     const firstRefs = [...cloud.documents.keys()];
     await h.run('syncSavedMatch(state.savedMatches[0],{silent:true})');
@@ -501,7 +521,7 @@ async function main() {
 
     const otherDevice = matchHarness();
     otherDevice.sandbox.parent.CoachPulseCentralData = {
-      matchSaveToFirestore: cloud.sandbox.matchSaveToFirestore,
+      matchSavePostMatchTransactional: cloud.sandbox.matchSavePostMatchTransactional,
       matchListFromFirestore: cloud.sandbox.matchListFromFirestore
     };
     await otherDevice.run('reconcileMatchesWithCloud()');
@@ -511,10 +531,10 @@ async function main() {
 
     const legacyLocal = matchHarness();
     legacyLocal.sandbox.parent.CoachPulseCentralData = {
-      matchSaveToFirestore: cloud.sandbox.matchSaveToFirestore,
+      matchSavePostMatchTransactional: cloud.sandbox.matchSavePostMatchTransactional,
       matchListFromFirestore: cloud.sandbox.matchListFromFirestore
     };
-    legacyLocal.run(`state.savedMatches=[{...${JSON.stringify(h.state().savedMatches[0])},id:'legacy-local-only',matchId:'legacy-local-only',syncStatus:'synced'}];save()`);
+    legacyLocal.run(`state.savedMatches=[{...${JSON.stringify(h.state().savedMatches[0])},id:'legacy-local-only',matchId:'legacy-local-only',revision:0,syncStatus:'synced'}];save()`);
     await legacyLocal.run('reconcileMatchesWithCloud()');
     assert.equal(legacyLocal.state().savedMatches.find(match => match.matchId === 'legacy-local-only').syncStatus, 'synced');
     assert(cloud.documents.has('matches/legacy-local-only'));
