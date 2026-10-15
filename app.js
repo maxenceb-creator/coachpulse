@@ -5011,6 +5011,7 @@ async function matchSavePostMatchTransactional(raw={}, options={}){
     matchSnapshot,
     nextEvents:normalized.events.map(event => firestoreSafeData(event)),
     nextEventsComplete:options.nextEventsComplete === true,
+    removedEventIds:Array.isArray(options.removedEventIds) ? options.removedEventIds : [],
     deletionStrategy:options.deletionStrategy || raw.deletionStrategy || 'PHYSICAL'
   });
   if(!result?.ok){
