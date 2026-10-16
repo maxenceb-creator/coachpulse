@@ -1,0 +1,97 @@
+name: Deploy production Firestore Rules only
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DEPLOY_FIRESTORE_RULES to authorize the production Rules change"
+        required: true
+        type: string
+      expected_active_sha256:
+        description: "SHA-256 of the currently active compatibility Rules"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-firestore-rules
+  cancel-in-progress: false
+
+jobs:
+  validate_and_deploy_rules:
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'DEPLOY_FIRESTORE_RULES'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Reject an invalid authorization context
+        env:
+          EXPECTED_ACTIVE_SHA256: ${{ inputs.expected_active_sha256 }}
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "${{ inputs.confirmation }}" = "DEPLOY_FIRESTORE_RULES"
+          printf '%s' "$EXPECTED_ACTIVE_SHA256" | grep -Eq '^[a-f0-9]{64}$'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Validate CoachPulse
+        run: npm run check
+      - name: Validate match workflows
+        run: npm run test:match
+      - name: Validate Firestore access rules
+        run: npm run test:rules
+      - name: Prepare Firebase credentials
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_COACH_PULSE_EE6B0 }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+        run: printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
+      - name: Verify authorized active compatibility Rules
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          GOOGLE_CLOUD_PROJECT: coach-pulse-ee6b0
+          EXPECTED_ACTIVE_SHA256: ${{ inputs.expected_active_sha256 }}
+        run: node scripts/verify-active-firestore-rules.cjs --expected-sha256 "$EXPECTED_ACTIVE_SHA256"
+      - name: Inspect target Rules fingerprint
+        id: target_rules
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          GOOGLE_CLOUD_PROJECT: coach-pulse-ee6b0
+        run: node scripts/verify-active-firestore-rules.cjs firestore.rules --allow-mismatch
+      - name: Deploy Firestore Rules only
+        if: steps.target_rules.outputs.match == 'false'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          GOOGLE_CLOUD_PROJECT: coach-pulse-ee6b0
+        run: |
+          max_attempts=3
+          attempt=1
+          while true; do
+            set +e
+            npx firebase-tools@15.30.2 deploy --only firestore:rules --project coach-pulse-ee6b0 --non-interactive 2>&1 | tee "${RUNNER_TEMP}/firebase-rules-${attempt}.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -eq 0 ]; then break; fi
+            if grep -Eq 'HTTP Error: 409([^0-9]|$)' "${RUNNER_TEMP}/firebase-rules-${attempt}.log"; then
+              node scripts/verify-active-firestore-rules.cjs firestore.rules
+              break
+            fi
+            if ! grep -Eq 'HTTP Error: (429|500|502|503|504)([^0-9]|$)' "${RUNNER_TEMP}/firebase-rules-${attempt}.log"; then exit "$status"; fi
+            if [ "$attempt" -ge "$max_attempts" ]; then exit "$status"; fi
+            sleep_seconds=$((attempt * 10))
+            echo "Firebase Rules temporarily unavailable. Retry in ${sleep_seconds}s (${attempt}/${max_attempts})."
+            sleep "$sleep_seconds"
+            attempt=$((attempt + 1))
+          done
+      - name: Verify deployed Firestore Rules fingerprint
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+          GOOGLE_CLOUD_PROJECT: coach-pulse-ee6b0
+        run: node scripts/verify-active-firestore-rules.cjs firestore.rules

@@ -4999,6 +4999,9 @@ async function matchEventMergeWithRevision(eventId, patch={}){
   });
 }
 async function matchSavePostMatchTransactional(raw={}, options={}){
+  const protocol = window.CoachPulseClientWriteProtocol;
+  if(!protocol?.assertCompatible) throw Object.assign(new Error('Contrôle du protocole d’écriture indisponible. Le brouillon reste local.'), {code:'CLIENT_WRITE_PROTOCOL_CHECK_FAILED'});
+  await protocol.assertCompatible();
   if(!db || !currentUser) throw new Error('Connexion Firebase requise. Le match reste sauvegardé localement.');
   if(!navigator.onLine) throw new Error('Hors ligne. Le match reste en attente de synchronisation.');
   if(!canEditModule('stats')) throw new Error('Droits insuffisants pour synchroniser les matchs.');
@@ -5008,6 +5011,7 @@ async function matchSavePostMatchTransactional(raw={}, options={}){
   if(!normalized.teamId) throw new Error('Équipe non identifiée. Le match reste en attente de synchronisation.');
   const matchSnapshot = firestoreSafeData({
     ...normalized,
+    clientWriteProtocol:protocol.CURRENT_WRITE_PROTOCOL,
     events:undefined,
     entryMode:options.entryMode || raw.entryMode || 'FULL_POST_MATCH',
     statsSource:raw.statsSource || 'MIXED'
