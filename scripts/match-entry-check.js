@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const firestoreQueries = require('../shared/services/firestore-query-service.js');
+const matchStatistics = require('../shared/services/match-statistics-service.js');
+const postMatchPersistence = require('../shared/services/post-match-transactional-persistence-service.js');
 
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -55,6 +57,7 @@ function matchHarness() {
     CoachStatsNotify: {
       warn() {}, error() {}, success() {}, info() {}, ask: async () => true
     },
+    CoachPulseMatchStatistics: matchStatistics,
     PLAYER_DB: ['TEST ALICE', 'TEST BEA', 'TEST CLEO'].map((name, index) => ({
       name, playerId: `fixture-player-${index}`, team: 'U13 A', teamId: 'team-u13-a'
     }))
@@ -89,7 +92,10 @@ function firestoreHarness() {
   const reads = [];
   const sandbox = {
     Date, JSON, Math, Set, Map, Promise,
-    db: {}, currentUser: {uid: 'fixture-coach', email: 'coach@example.test'},
+    db: {}, currentUser: {uid: 'fixture-coach', email: 'coach@example.test'}, currentUserRole:'ENTRAINEUR_ADJOINT',
+    currentProfile:{uid:'fixture-coach',email:'coach@example.test',role:'ENTRAINEUR_ADJOINT',permissionLevel:'SAISIE',status:'ACTIVE',allowedModules:['stats'],authorizedTeamIds:['team-u13-a']},
+    CoachPulsePostMatchTransactionalPersistence:postMatchPersistence,
+    CoachPulseClientWriteProtocol:{CURRENT_WRITE_PROTOCOL:2,assertCompatible:async()=>({compatible:true,minimumWriteProtocol:2})},
     navigator: {onLine: true},
     canEditModule: () => true, canViewModule: () => true,
     getCurrentPermissionLevel: () => 'SAISIE', getCurrentUserRole: () => 'ENTRAINEUR_ADJOINT',
@@ -109,23 +115,40 @@ function firestoreHarness() {
       serverTimestamp: () => 'fixture-server-timestamp',
       collection: (_db, name) => name,
       where: (field, operator, value) => ({field, operator, value}),
-      query: (collection, filter) => ({collection, filter}),
+      query: (collection, ...filters) => ({collection, filters, filter:filters[0]}),
       getDocs: async query => {
         reads.push(query);
         const collection = typeof query === 'string' ? query : query.collection;
-        const filter = typeof query === 'string' ? null : query.filter;
+        const filters = typeof query === 'string' ? [] : (query.filters || (query.filter ? [query.filter] : []));
         const rows = [...documents.entries()].filter(([ref, value]) =>
-          ref.startsWith(`${collection}/`) && (!filter || (filter.operator === 'array-contains'
+          ref.startsWith(`${collection}/`) && filters.every(filter => (filter.operator === 'array-contains'
             ? Array.isArray(value[filter.field]) && value[filter.field].includes(filter.value)
             : filter.operator === 'array-contains-any'
               ? Array.isArray(value[filter.field]) && filter.value.some(item => value[filter.field].includes(item))
               : filter.operator === 'in'
                 ? filter.value.includes(value[filter.field])
                 : value[filter.field] === filter.value)));
-        return {forEach: callback => rows.forEach(([ref, value]) => callback({id: ref.split('/')[1], data: () => value}))};
+        const docs = rows.map(([ref,value]) => ({id:ref.split('/')[1],ref,exists:()=>true,data:()=>value}));
+        return {docs,forEach: callback => docs.forEach(callback)};
+      },
+      runTransaction: async (_db, callback) => {
+        const pending = [];
+        const transaction = {
+          get: async ref => ({id:String(ref).split('/')[1],ref,exists:()=>documents.has(ref),data:()=>documents.get(ref)}),
+          set: (ref,value,options) => pending.push({type:'set',ref,value,options}),
+          delete: ref => pending.push({type:'delete',ref})
+        };
+        const result = await callback(transaction);
+        if(result?.ok) pending.forEach(write => {
+          writes.push(write);
+          if(write.type === 'delete') documents.delete(write.ref);
+          else documents.set(write.ref,write.options?.merge?{...documents.get(write.ref),...write.value}:{...write.value});
+        });
+        return result;
       }
     }
   };
+  sandbox.window = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(between(read('app.js'), 'function matchDocumentId(', 'function playerForSeason('), sandbox);
   return {sandbox, documents, writes, reads};
@@ -426,6 +449,8 @@ async function main() {
     assert.equal(before.savedMatches.length, 1);
     assert.equal(saved.matchId, before.matchId);
     assert.equal(saved.syncStatus, 'pendingSync');
+    assert.equal(saved.entryMode, 'LIVE');
+    assert.equal(saved.statsSource, 'EVENTS');
     assert.deepEqual(saved.log.map(event => event.eventId), before.log.map(event => event.eventId));
     assert(saved.players['TEST BEA'].playerId);
     assert.equal(saved.lineup.BU, 'TEST BEA');
@@ -456,22 +481,23 @@ async function main() {
     assert.equal(h.state().savedMatches[0].matchTypeLabel, 'Tournoi');
     h.run("state.savedMatches[0].playerIds=['legacy-oversized-id'];save();");
     h.sandbox.parent.CoachPulseCentralData = {
-      matchSaveToFirestore: async match => {
+      matchSavePostMatchTransactional: async (match, options) => {
         const local = JSON.parse(h.storage.get('coachStatsV170'));
         assert.equal(local.savedMatches[0].syncStatus, 'pendingSync');
         assert.equal(local.savedMatches[0].matchId, match.matchId);
-        return cloud.sandbox.matchSaveToFirestore(match);
+        return cloud.sandbox.matchSavePostMatchTransactional(match, options);
       },
       matchListFromFirestore: cloud.sandbox.matchListFromFirestore
     };
-    assert.equal(await h.run('syncSavedMatch(state.savedMatches[0],{silent:true})'), true);
+    assert.equal(await h.run('syncSavedMatch(state.savedMatches[0],{silent:true})'), true, h.state().savedMatches[0].syncError);
     assert.equal(h.state().savedMatches[0].syncStatus, 'synced');
     const firstRefs = [...cloud.documents.keys()];
     await h.run('syncSavedMatch(state.savedMatches[0],{silent:true})');
     assert.deepEqual([...cloud.documents.keys()], firstRefs);
     assert.equal(firstRefs.filter(ref => ref.startsWith('matches/')).length, 1);
     assert.equal(firstRefs.filter(ref => ref.startsWith('matchEvents/')).length, 1);
-    assert(cloud.writes.every(write => write.options.merge === true));
+    assert(cloud.writes.filter(write => write.ref.startsWith('matchEvents/')).every(write => write.options?.merge === true));
+    assert(cloud.writes.filter(write => write.ref.startsWith('matches/')).every(write => write.options === undefined));
     const matchRef = firstRefs.find(ref => ref.startsWith('matches/'));
     assert.equal(cloud.documents.get(matchRef).matchType, 'tournament');
     assert.equal(cloud.documents.get(matchRef).matchTypeLabel, 'Tournoi');
@@ -499,7 +525,7 @@ async function main() {
 
     const otherDevice = matchHarness();
     otherDevice.sandbox.parent.CoachPulseCentralData = {
-      matchSaveToFirestore: cloud.sandbox.matchSaveToFirestore,
+      matchSavePostMatchTransactional: cloud.sandbox.matchSavePostMatchTransactional,
       matchListFromFirestore: cloud.sandbox.matchListFromFirestore
     };
     await otherDevice.run('reconcileMatchesWithCloud()');
@@ -509,10 +535,10 @@ async function main() {
 
     const legacyLocal = matchHarness();
     legacyLocal.sandbox.parent.CoachPulseCentralData = {
-      matchSaveToFirestore: cloud.sandbox.matchSaveToFirestore,
+      matchSavePostMatchTransactional: cloud.sandbox.matchSavePostMatchTransactional,
       matchListFromFirestore: cloud.sandbox.matchListFromFirestore
     };
-    legacyLocal.run(`state.savedMatches=[{...${JSON.stringify(h.state().savedMatches[0])},id:'legacy-local-only',matchId:'legacy-local-only',syncStatus:'synced'}];save()`);
+    legacyLocal.run(`state.savedMatches=[{...${JSON.stringify(h.state().savedMatches[0])},id:'legacy-local-only',matchId:'legacy-local-only',revision:0,eventsRevision:0,syncStatus:'synced'}];save()`);
     await legacyLocal.run('reconcileMatchesWithCloud()');
     assert.equal(legacyLocal.state().savedMatches.find(match => match.matchId === 'legacy-local-only').syncStatus, 'synced');
     assert(cloud.documents.has('matches/legacy-local-only'));
@@ -534,6 +560,52 @@ async function main() {
     assert.equal(h.state().savedMatches[0].syncStatus, 'synced');
     assert.equal(h.state().savedMatches[0].syncError, '');
     assert.deepEqual([...cloud.documents.keys()], refsAfterLegacyRecovery);
+  });
+
+  await test('historical retry initializes safely, reloads events and preserves the local draft', async () => {
+    const h = matchHarness();
+    const cloud = firestoreHarness();
+    h.run("recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();");
+    const local = h.state().savedMatches[0];
+    const remoteOnlyEvent = {eventId:'remote-only',matchId:local.matchId,teamId:'team-u13-a',teamIds:['team-u13-a'],key:'recup',player:'TEST ALICE',ts:1};
+    cloud.documents.set(`matches/${local.matchId}`, {matchId:local.matchId,teamId:'team-u13-a',teamIds:['team-u13-a'],revision:0,entryMode:'LIVE',createdAt:local.createdAt});
+    cloud.documents.set('matchEvents/remote-only', remoteOnlyEvent);
+    h.sandbox.parent.CoachPulseCentralData = {
+      matchSavePostMatchTransactional: cloud.sandbox.matchSavePostMatchTransactional,
+      matchPrepareHistoricalEventsRevision: cloud.sandbox.matchPrepareHistoricalEventsRevision,
+      matchListFromFirestore: cloud.sandbox.matchListFromFirestore
+    };
+    await h.run('reconcileMatchesWithCloud()');
+    assert(h.state().savedMatches[0].log.some(event => event.eventId === local.log[0].eventId), 'La réconciliation silencieuse doit conserver le brouillon local non synchronisé.');
+    assert.equal(await h.run('syncSavedMatch(state.savedMatches[0],{silent:false})'), true);
+    const saved = h.state().savedMatches[0];
+    assert.equal(saved.syncStatus, 'synced');
+    assert.equal(saved.eventsRevision, 1);
+    assert(saved.log.some(event => event.eventId === 'remote-only'));
+    assert(saved.log.some(event => event.eventId === local.log[0].eventId));
+    assert(cloud.documents.has('matchEvents/remote-only'));
+    assert.equal(cloud.writes.filter(write => write.type === 'delete').length, 0);
+  });
+
+  await test('local storage compacts synced history but retains unsynchronized matches losslessly', async () => {
+    const h = matchHarness();
+    h.run("recordPlayerAction(state.selected,'tirCadre',4);saveCurrentMatch();state.savedMatches.push({...JSON.parse(JSON.stringify(state.savedMatches[0])),id:'synced-large',matchId:'synced-large',syncStatus:'synced',revision:4,eventsRevision:3,log:Array.from({length:200},(_,i)=>({eventId:'e-'+i,payload:'x'.repeat(200)}))});save();");
+    const runtime = h.state();
+    const storedRaw = h.storage.get('coachStatsV170');
+    const stored = JSON.parse(storedRaw);
+    const pending = stored.savedMatches.find(match => match.syncStatus === 'pendingSync');
+    const synced = stored.savedMatches.find(match => match.matchId === 'synced-large');
+    assert.deepEqual(pending.log, runtime.savedMatches.find(match => match.syncStatus === 'pendingSync').log);
+    assert.equal(synced.cloudReference, true);
+    assert.equal(Object.hasOwn(synced, 'log'), false);
+    assert.equal(Object.hasOwn(synced, 'players'), false);
+    const fullBytes=Buffer.byteLength(JSON.stringify(runtime));
+    const storedBytes=Buffer.byteLength(storedRaw);
+    assert(storedBytes < fullBytes / 2);
+    console.log(`  storage fixture: ${fullBytes} bytes -> ${storedBytes} bytes (${Math.round((1-storedBytes/fullBytes)*100)}% reduction)`);
+    h.run("load();state.matchId='untouched-current';state.log=[];navigator.onLine=false");
+    await h.run("restoreSavedMatch('synced-large')");
+    assert.equal(h.state().matchId, 'untouched-current');
   });
 
   await test('team-scoped match runtime returns old and recent matches with grouped authorized events', async () => {

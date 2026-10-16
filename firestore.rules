@@ -564,6 +564,79 @@ service cloud.firestore {
         && (level == 'ADMIN' || canAccessMatchEventScope(after, teams));
     }
 
+    function canDeleteMatchEventData(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['SAISIE', 'EDITEUR', 'ADMIN']
+        && moduleAllowedFrom(modules, level, staffRole, 'stats')
+        && (level == 'ADMIN' || canAccessMatchEventScope(data, teams));
+    }
+
+    function hasValidRevision(data, field) {
+      return data.keys().hasAny([field])
+        && data[field] is int
+        && data[field] >= 0;
+    }
+
+    function matchRevisionAdvancesForEvent(matchId) {
+      let matchPath = /databases/$(database)/documents/matches/$(matchId);
+      let before = get(matchPath).data;
+      let after = getAfter(matchPath).data;
+      return exists(matchPath)
+        && hasValidRevision(before, 'revision')
+        && hasValidRevision(after, 'revision')
+        && after.revision == before.revision + 1
+        && hasValidRevision(after, 'eventsRevision')
+        && (
+          (hasValidRevision(before, 'eventsRevision')
+            && after.eventsRevision == before.eventsRevision + 1)
+          || (!before.keys().hasAny(['eventsRevision'])
+            && after.eventsRevision == 1)
+        );
+    }
+
+    function eventWriteUsesAtomicMatchRevision(before, after) {
+      return after.keys().hasAny(['matchId'])
+        && after.matchId is string
+        && after.matchId != ''
+        && (!before.keys().hasAny(['matchId']) || before.matchId == after.matchId)
+        && matchRevisionAdvancesForEvent(after.matchId);
+    }
+
+    function eventDeleteUsesAtomicMatchRevision(before) {
+      return before.keys().hasAny(['matchId'])
+        && before.matchId is string
+        && before.matchId != ''
+        && matchRevisionAdvancesForEvent(before.matchId);
+    }
+
+    function validEventsRevisionTransition(before, after) {
+      let beforeHasRevision = before.keys().hasAny(['eventsRevision']);
+      let afterHasRevision = after.keys().hasAny(['eventsRevision']);
+      return (!beforeHasRevision && !afterHasRevision)
+        || (!beforeHasRevision && hasValidRevision(after, 'eventsRevision')
+          && after.eventsRevision in [0, 1]
+          && hasValidRevision(before, 'revision')
+          && hasValidRevision(after, 'revision')
+          && after.revision == before.revision + 1)
+        || (beforeHasRevision
+          && hasValidRevision(before, 'eventsRevision')
+          && hasValidRevision(after, 'eventsRevision')
+          && (
+            after.eventsRevision == before.eventsRevision
+            || (after.eventsRevision == before.eventsRevision + 1
+              && hasValidRevision(before, 'revision')
+              && hasValidRevision(after, 'revision')
+              && after.revision == before.revision + 1)
+          ));
+    }
+
     function canAccessAttendanceScope(data, teams, allPlayers) {
       return allPlayers
         || (hasScopeFields(data) && scopedTeams(data).hasAny(teams))
@@ -870,8 +943,12 @@ service cloud.firestore {
         && (canAccessModule('stats') || canAccessModule('playerProfile'))
         && canAccessDirectData(resource.data);
       allow list: if canListMatchRecords(resource.data);
-      allow create: if canWriteDirectModuleData('stats', request.resource.data, request.resource.data);
-      allow update: if canWriteDirectModuleData('stats', resource.data, request.resource.data);
+      allow create: if canWriteDirectModuleData('stats', request.resource.data, request.resource.data)
+        && (!request.resource.data.keys().hasAny(['eventsRevision'])
+          || (hasValidRevision(request.resource.data, 'eventsRevision')
+            && request.resource.data.eventsRevision == 0));
+      allow update: if canWriteDirectModuleData('stats', resource.data, request.resource.data)
+        && validEventsRevisionTransition(resource.data, request.resource.data);
       allow delete: if noDelete();
     }
 
@@ -879,9 +956,12 @@ service cloud.firestore {
       allow get: if (canReadData() && canAccessModule('stats') && canAccessMatchScopedData(resource.data))
         || (canReadData() && canAccessModule('playerProfile') && canAccessMatchScopedData(resource.data));
       allow list: if canListMatchEventRecords(resource.data);
-      allow create: if canWriteMatchEventData(request.resource.data, request.resource.data);
-      allow update: if canWriteMatchEventData(resource.data, request.resource.data);
-      allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessMatchScopedDataForModule(resource.data, 'stats');
+      allow create: if canWriteMatchEventData(request.resource.data, request.resource.data)
+        && eventWriteUsesAtomicMatchRevision({}, request.resource.data);
+      allow update: if canWriteMatchEventData(resource.data, request.resource.data)
+        && eventWriteUsesAtomicMatchRevision(resource.data, request.resource.data);
+      allow delete: if canDeleteMatchEventData(resource.data)
+        && eventDeleteUsesAtomicMatchRevision(resource.data);
     }
 
     match /sessions/{sessionId} {

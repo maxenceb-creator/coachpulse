@@ -855,16 +855,19 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(presencePageSource.includes('await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);'), 'Les suppressions historiques doivent être réconciliées au chargement du calendrier.');
   assert(presencePageSource.indexOf('await deletePresenceEventFromCloud(event);') < presencePageSource.indexOf('await markPresenceEventDeleted(eventId, {event, syncCloud:true});'), 'Le calendrier ne doit masquer une séance qu’après confirmation de Firebase.');
   const mergeWorkflowSource = fs.readFileSync('.github/workflows/firebase-hosting-merge.yml', 'utf8');
-  assert(mergeWorkflowSource.includes('deploy --only firestore:rules'), 'Le merge sur main doit publier les règles Firestore avant le site.');
-  assert(mergeWorkflowSource.includes('max_attempts=3'), 'Le déploiement Rules doit limiter les nouvelles tentatives.');
-  assert(mergeWorkflowSource.includes("HTTP Error: (429|500|502|503|504)"), 'Seules les erreurs HTTP transitoires prévues doivent relancer le déploiement Rules.');
-  assert(mergeWorkflowSource.includes('verify-active-firestore-rules.cjs firestore.rules --allow-mismatch'), 'Le déploiement PROD doit comparer les empreintes avant tout appel de compilation Rules.');
-  assert(mergeWorkflowSource.includes("if: steps.rules_fingerprint.outputs.match == 'false'"), 'Les Rules ne doivent être déployées que lorsque les empreintes diffèrent.');
-  assert(mergeWorkflowSource.includes("HTTP Error: 409([^0-9]|$)"), 'Un HTTP 409 doit déclencher une vérification stricte des Rules actives.');
-  assert(mergeWorkflowSource.match(/node scripts\/verify-active-firestore-rules\.cjs firestore\.rules/g)?.length >= 3, 'Les Rules doivent être revérifiées strictement après déploiement ou HTTP 409.');
-  assert(mergeWorkflowSource.includes('name: Deploy Firebase Hosting\n        if: success()'), 'Hosting ne doit être exécuté qu’après satisfaction de tous les contrôles Rules.');
+  assert(!mergeWorkflowSource.includes('deploy --only firestore:rules'), 'Le merge sur main ne doit jamais publier les Rules Firestore.');
+  assert(mergeWorkflowSource.includes('--expected-sha256-file firestore.compat.sha256'), 'Hosting doit exiger l’empreinte du ruleset de compatibilité.');
+  assert(mergeWorkflowSource.includes('name: Deploy Firebase Hosting only'), 'Le workflow main doit rester Hosting-only.');
+  const rulesWorkflowSource = fs.readFileSync('.github/workflows/firebase-firestore-rules-production.yml', 'utf8');
+  assert(rulesWorkflowSource.includes('workflow_dispatch:'), 'Le déploiement Rules doit être explicitement manuel.');
+  assert(rulesWorkflowSource.includes("inputs.confirmation == 'DEPLOY_FIRESTORE_RULES'"), 'Le déploiement Rules doit exiger une confirmation explicite.');
+  assert(rulesWorkflowSource.includes('expected_active_sha256'), 'Le ruleset actif autorisé doit être fourni avant le déploiement Rules.');
+  assert(rulesWorkflowSource.includes('max_attempts=3'), 'Le déploiement Rules doit limiter les nouvelles tentatives.');
+  assert(rulesWorkflowSource.includes("HTTP Error: (429|500|502|503|504)"), 'Seules les erreurs HTTP transitoires prévues doivent relancer le déploiement Rules.');
+  assert(rulesWorkflowSource.includes("HTTP Error: 409([^0-9]|$)"), 'Un HTTP 409 doit déclencher une vérification stricte des Rules actives.');
+  assert(!rulesWorkflowSource.includes('action-hosting-deploy'), 'Le workflow Rules-only ne doit jamais publier Hosting.');
   const previewWorkflowSource = fs.readFileSync('.github/workflows/firebase-hosting-pull-request.yml', 'utf8');
-  assert(previewWorkflowSource.includes('verify-active-firestore-rules.cjs firestore.rules'), 'La preview doit comparer les Rules attendues aux Rules actives avant Hosting.');
+  assert(previewWorkflowSource.includes('--expected-sha256-file firestore.compat.sha256'), 'La preview doit comparer le ruleset actif au checkpoint de compatibilité avant Hosting.');
   assert(previewWorkflowSource.includes("Channel URL[^:]*:"), 'La preview doit extraire explicitement la Channel URL Firebase.');
   assert(!previewWorkflowSource.includes("grep -E 'web\\.app|firebaseapp\\.com' | head -n 1"), 'La preview ne doit jamais prendre la première URL Hosting, qui peut être le site live.');
   assert(appSource.includes("moduleId:'tests-athletiques'"), 'Les Tests athlétiques doivent demander les joueuses dans leur scope module.');
@@ -1343,19 +1346,23 @@ function testMatchCloudSyncIsOfflineFirstAndIdempotent(){
   const rulesSource = fs.readFileSync('firestore.rules', 'utf8');
 
   assert(matchSource.includes("syncStatus:'pendingSync'"), 'Un match doit être marqué en attente avant toute tentative cloud.');
-  assert(matchSource.includes("window.CoachStatsStorage.setJson('coachStatsV170',state"), 'La sauvegarde locale doit rester la première protection hors ligne.');
+  assert(matchSource.includes("window.CoachStatsStorage.setJson('coachStatsV170',storageSnapshot()"), 'La sauvegarde locale compacte doit rester la première protection hors ligne.');
+  assert(matchSource.includes("match?.syncStatus==='synced'?compactSyncedMatchForStorage(match):match"), 'Seuls les matchs déjà synchronisés peuvent être réduits à une référence cloud.');
+  assert(matchSource.includes("if(error?.upgradeRequired===true&&!silent"), 'La préparation historique doit être proposée sur le parcours de réessai explicite, jamais pendant la réconciliation silencieuse.');
   assert(matchSource.includes("window.addEventListener('online',()=>syncPendingMatches"), 'Les matchs locaux doivent être retentés au retour du réseau.');
   assert(matchSource.includes('state.matchId=state.matchId||createMatchId()'), 'Le matchId doit être créé une seule fois et conservé pendant le match.');
   assert(matchSource.includes('function resetCurrentMatchData(keepOpponent=false){state.matchId=createMatchId()'), 'Un nouveau match doit recevoir une identité distincte.');
   assert(matchSource.includes('event.eventId=stableMatchEventId(state.matchId'), 'Chaque événement doit recevoir un identifiant stable dès sa création.');
   assert(matchSource.includes("String(m.matchId||m.id)===String(snap.matchId)"), 'Une sauvegarde répétée doit remplacer le même match local au lieu de le dupliquer.');
-  assert(appSource.includes("firebaseFns.doc(db, 'matches', match.matchId)"), 'Firestore doit utiliser matchId comme identifiant de document idempotent.');
-  assert(appSource.includes("firebaseFns.doc(db, 'matchEvents', event.eventId)"), 'Firestore doit utiliser eventId comme identifiant de document idempotent.');
+  assert(appSource.includes("firebaseFns.doc(db, 'matches', matchId)"), 'Firestore doit utiliser matchId comme identifiant de document idempotent.');
+  assert(appSource.includes("firebaseFns.doc(db, 'matchEvents', eventId)"), 'Firestore doit utiliser eventId comme identifiant de document idempotent.');
+  assert(appSource.includes('eventsRevision:eventsRevision + 1'), 'Toute écriture événementielle doit incrémenter atomiquement eventsRevision.');
   assert(appSource.includes("firebaseFns.where('teamId', '==', teamId)"), 'La récupération des matchs doit rester ciblée par équipe.');
   assert(appSource.includes("Array.isArray(stats?.savedMatches) ? stats.savedMatches"), 'Les matchs locaux historiques doivent être récupérables par la migration non destructive.');
   assert(appSource.includes("Array.isArray(m.log) ? m.log"), 'Le fil réel du match doit alimenter matchEvents.');
   assert(rulesSource.includes('match /matches/{matchId}') && rulesSource.includes('match /matchEvents/{eventId}'), 'Les règles doivent couvrir matches et matchEvents.');
-  assert(rulesSource.includes("allow delete: if canWriteSportData() && canAccessModule('stats') && canAccessMatchScopedDataForModule(resource.data, 'stats');"), 'La suppression d’un événement Match doit utiliser les permissions du module Match.');
+  assert(rulesSource.includes('allow delete: if canDeleteMatchEventData(resource.data)')
+    && rulesSource.includes('&& eventDeleteUsesAtomicMatchRevision(resource.data);'), 'La suppression d’un événement Match doit utiliser les permissions du module Match et une révision atomique.');
 }
 
 function testLoadingIndicatorCannotReplaceFirebaseDataApi(){
@@ -1546,6 +1553,7 @@ function testPresenceRuntimeSaveGuards(){
   }});
   vm.runInContext(`${sources}\nthis.result = buildBoundedAutoBackupPayload({items:{ordinary:'x'.repeat(4096)}}, 2048);`, backupContext);
   assert(backupContext.result.backup.maxBytes === 2048 && autoBackupTestBytes(backupContext.result) <= 2048, 'autoBackup:v6 doit rester borné.');
+  assert.equal(backupContext.result.items.ordinary, undefined, 'Les données ordinaires reconstructibles ne doivent plus être dupliquées dans autoBackup:v6.');
   assert.equal(backupContext.result.items['coachpulse:pendingSync'], '1', 'Le marqueur pending doit être conservé en priorité.');
   assert.match(backupContext.result.items['coachpulse:presenceEvents:pendingBackup:v1'], /1789649129080/, 'Les présences offline non synchronisées doivent être conservées.');
   assert(!backupContext.result.items['coachpulse:presenceEvents:pendingBackup:v1'].includes('presence-event-synced'), 'Les copies de présences déjà synchronisées ne doivent pas gonfler le backup.');
@@ -1560,7 +1568,7 @@ function autoBackupTestBytes(value){
 
 function testFirebasePreviewWorkflowReportsExactStage(){
   const workflow = fs.readFileSync('.github/workflows/firebase-hosting-pull-request.yml', 'utf8');
-  const fingerprintIndex = workflow.indexOf('- name: Verify active Firestore Rules fingerprint');
+  const fingerprintIndex = workflow.indexOf('- name: Verify active compatibility Rules fingerprint');
   const buildIndex = workflow.indexOf('- name: Build public assets');
   const deployIndex = workflow.indexOf('- name: Deploy PR preview channel');
 

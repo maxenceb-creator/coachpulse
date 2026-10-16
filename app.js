@@ -69,7 +69,7 @@ const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20260920-release-v93';
+const APP_SHELL_VERSION = '20261015-release-v94';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -627,7 +627,7 @@ function permissionsService(){
   return window.CoachPulsePermissionsService || null;
 }
 function firestoreServiceContext(options={}){
-  return {firebaseFns, db, user:currentUser, ...options};
+  return {firebaseFns, db, user:currentUser, writeMatchEvent:matchEventMergeWithRevision, ...options};
 }
 function sortPlayersForApp(players){
   const service = playersService();
@@ -1428,7 +1428,9 @@ function autoBackupItemSizes(items={}){
   return Object.entries(items).map(([key, value]) => ({key, bytes:autoBackupBytes(value)})).sort((a,b) => b.bytes - a.bytes);
 }
 function collectAutoBackupItems(payload={}){
-  const items = {...(payload.items || {})};
+  const criticalKey = key => /(?:draft|pending|offline|unsynced)/i.test(key)
+    || ['coachStatsPostMatchDraftV1','coachStatsLiveManualDraftV1'].includes(key);
+  const items = Object.fromEntries(Object.entries(payload.items || {}).filter(([key]) => criticalKey(key)));
   ['coachpulse:pendingSync', 'coachpulse:technicalTestsPending', 'coachpulse:technicalTestsPendingBackup'].forEach(key => {
     const value = storage.get(key, '');
     if(value) items[key] = value;
@@ -1507,7 +1509,13 @@ function snapshotLocalData(options={}){
       if(Array.isArray(events) && pending.length < events.length) storage.setJson(presenceKey, pending);
       storage.remove('coachpulse:technicalPlayerFootHints');
     }});
-    if(!stored) console.warn('[CoachPulse AutoBackup Diagnostic]', backupDiagnostic);
+    if(!stored){
+      console.warn('[CoachPulse AutoBackup Diagnostic]', backupDiagnostic);
+      updateSyncState('Stockage local saturé · sauvegarde durable non confirmée');
+    }else if(backupPayload.backup.omittedKeys.some(key => /(?:draft|pending|offline|unsynced)/i.test(key))){
+      console.warn('[CoachPulse AutoBackup Diagnostic]', {...backupDiagnostic, omittedKeys:backupPayload.backup.omittedKeys});
+      updateSyncState('Sauvegarde locale partielle · export du brouillon conseillé');
+    }
     setLocalStorageWithQuotaRecovery('coachpulse:lastAutoSave', payload.savedAt);
   }catch(e){
     console.warn('Sauvegarde locale indisponible', e);
@@ -2145,8 +2153,17 @@ async function pushCentralDocsToFirestore(docs){
   const writes = [];
   FIRESTORE_COLLECTIONS.forEach(collection => {
     (docs[collection] || new Map()).forEach((data, id) => {
+      if(collection === 'matchEvents'){
+        writes.push(matchEventMergeWithRevision(id, data));
+        return;
+      }
+      const safeData = {...data};
+      if(collection === 'matches'){
+        delete safeData.revision;
+        delete safeData.eventsRevision;
+      }
       writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collection, id), {
-        ...data,
+        ...safeData,
         updatedAt:firebaseFns.serverTimestamp(),
         updatedBy:currentUser.uid,
         updatedByEmail:currentUser.email || ''
@@ -2436,7 +2453,7 @@ async function playerProfileLoadData(options={}){
   const teamMatches = optionalMatches.values.matches;
   const playerMatches = teamMatches.filter(match => {
     const rows = Object.entries(match.players || {}).map(([playerName, value]) => ({...(value || {}), playerName}));
-    return rowsMatchingProfileAliases(rows, aliases).some(matchPlayerHasParticipation);
+    return rowsMatchingProfileAliases(rows, aliases).some(row => globalThis.CoachPulseMatchStatistics?.playerHasParticipation?.(row) || matchPlayerHasParticipation(row));
   });
   const matches = mergeRows(playerMatches, row => row.matchId || row.id);
   if(!hasGlobalDataAccess() && selectedTeamIds.length){
@@ -3768,10 +3785,7 @@ async function adminArchivePlayer(playerId, archived=true){
   return {changed:true, playerId, status:nextStatus};
 }
 function isPlayerReference(data={}, playerId=''){
-  return data.playerId === playerId
-    || (Array.isArray(data.playerIds) && data.playerIds.includes(playerId))
-    || (data.playerSnapshot && typeof data.playerSnapshot === 'object' && data.playerSnapshot.playerId === playerId)
-    || (data.player && typeof data.player === 'object' && (data.player.playerId === playerId || data.player.id === playerId));
+  return playersService()?.isPlayerReference?.(data, playerId) || false;
 }
 function purgeDeletedPlayerFromLocalCaches(playerId=''){
   const id = String(playerId || '').trim();
@@ -3787,19 +3801,11 @@ function purgeDeletedPlayerFromLocalCaches(playerId=''){
   });
 }
 async function deletePlayerReferences(playerId){
-  const refCounts = {};
-  for(const collectionName of adminPlayerRefCollections()){
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, collectionName));
-    const deletes = [];
-    snap.forEach(docSnap => {
-      if(isPlayerReference(docSnap.data() || {}, playerId)){
-        deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, collectionName, docSnap.id)));
-      }
-    });
-    await Promise.all(deletes);
-    refCounts[collectionName] = deletes.length;
-  }
-  return refCounts;
+  const service = playersService();
+  if(!service?.deletePlayerReferences) throw new Error('Service de suppression securisee indisponible.');
+  const result = await service.deletePlayerReferences({playerId, collections:adminPlayerRefCollections()}, firestoreServiceContext());
+  if(!result?.ok) throw Object.assign(new Error('Les references de la joueuse n ont pas toutes ete traitees.'), result || {});
+  return result.refCounts;
 }
 async function adminDeletePlayer(playerId, confirmation=''){
   if(!guardAdminAction()) return;
@@ -3901,11 +3907,16 @@ async function adminRepairTeamIds(){
       }
       if(!patch) return;
       updated++;
-      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
+      const write = collectionName === 'matchEvents' ? matchEventMergeWithRevision(docSnap.id, {
         ...patch,
         updatedAt:firebaseFns.serverTimestamp(),
         updatedAtIso:new Date().toISOString()
-      }, {merge:true}));
+      }) : firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
+        ...patch,
+        updatedAt:firebaseFns.serverTimestamp(),
+        updatedAtIso:new Date().toISOString()
+      }, {merge:true});
+      writes.push(write);
     });
   }
   await Promise.all(writes);
@@ -4081,7 +4092,9 @@ async function updatePlayerRefsInCollection(collectionName, fromPlayerId, toPlay
       if(directMatch) patch.playerId = toPlayerId;
       if(snapshotMatch) patch.playerSnapshot = {...data.playerSnapshot, playerId:toPlayerId};
       if(arrayMatch) patch.playerIds = data.playerIds.map(id => id === fromPlayerId ? toPlayerId : id);
-      writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), patch, {merge:true}));
+      writes.push(collectionName === 'matchEvents'
+        ? matchEventMergeWithRevision(docSnap.id, patch)
+        : firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), patch, {merge:true}));
     }
   });
   await Promise.all(writes);
@@ -4957,36 +4970,87 @@ function normalizeMatchForFirestore(raw={}){
   };
 }
 async function matchSaveToFirestore(raw={}){
+  return matchSavePostMatchTransactional(raw, {entryMode:raw.entryMode || 'LIVE', nextEventsComplete:false});
+}
+
+async function matchEventMergeWithRevision(eventId, patch={}){
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const eventRef = firebaseFns.doc(db, 'matchEvents', eventId);
+  return firebaseFns.runTransaction(db, async transaction => {
+    const eventSnapshot = await transaction.get(eventRef);
+    const currentEvent = eventSnapshot.exists() ? (eventSnapshot.data() || {}) : {};
+    const matchId = String(patch.matchId || currentEvent.matchId || '').trim();
+    if(!matchId) throw Object.assign(new Error('matchId obligatoire pour modifier un événement.'), {code:'INVALID_MATCH_ID'});
+    const matchRef = firebaseFns.doc(db, 'matches', matchId);
+    const matchSnapshot = await transaction.get(matchRef);
+    const currentMatch = matchSnapshot.exists() ? (matchSnapshot.data() || {}) : {};
+    const revision = Object.hasOwn(currentMatch, 'revision') ? currentMatch.revision : 0;
+    const eventsRevision = Object.hasOwn(currentMatch, 'eventsRevision') ? currentMatch.eventsRevision : 0;
+    if(!Number.isSafeInteger(revision) || revision < 0 || !Number.isSafeInteger(eventsRevision) || eventsRevision < 0){
+      throw Object.assign(new Error('Les revisions du match sont invalides.'), {code:'INVALID_REMOTE_REVISION'});
+    }
+    const timestamp = firebaseFns.serverTimestamp();
+    transaction.set(matchRef, {matchId, revision:revision + 1, eventsRevision:eventsRevision + 1, updatedAt:timestamp}, {merge:true});
+    transaction.set(eventRef, {
+      ...firestoreSafeData(patch), eventId, matchId, updatedAt:timestamp,
+      updatedAtIso:new Date().toISOString(), updatedBy:currentUser.uid, updatedByEmail:currentUser.email || ''
+    }, {merge:true});
+    return {eventId, matchId, revision:revision + 1, eventsRevision:eventsRevision + 1};
+  });
+}
+async function matchSavePostMatchTransactional(raw={}, options={}){
+  const protocol = window.CoachPulseClientWriteProtocol;
+  if(!protocol?.assertCompatible) throw Object.assign(new Error('Contrôle du protocole d’écriture indisponible. Le brouillon reste local.'), {code:'CLIENT_WRITE_PROTOCOL_CHECK_FAILED'});
+  await protocol.assertCompatible();
   if(!db || !currentUser) throw new Error('Connexion Firebase requise. Le match reste sauvegardé localement.');
   if(!navigator.onLine) throw new Error('Hors ligne. Le match reste en attente de synchronisation.');
   if(!canEditModule('stats')) throw new Error('Droits insuffisants pour synchroniser les matchs.');
-  const match = normalizeMatchForFirestore(raw);
-  if(!match.teamId) throw new Error('Équipe non identifiée. Le match reste en attente de synchronisation.');
-  const matchRef = firebaseFns.doc(db, 'matches', match.matchId);
-  const existing = await firebaseFns.getDoc(matchRef);
-  const localVersion = Date.parse(match.updatedAtIso || match.createdAt || match.date || 0) || 0;
-  const cloudVersion = existing.exists() ? (Date.parse(existing.data().updatedAtIso || existing.data().createdAt || existing.data().date || 0) || 0) : 0;
-  if(existing.exists() && cloudVersion > localVersion){
-    return {matchId:match.matchId, status:'cloud-newer', events:0};
+  const service = window.CoachPulsePostMatchTransactionalPersistence;
+  if(!service?.savePostMatchTransactional) throw new Error('Service transactionnel Après-match indisponible.');
+  const normalized = normalizeMatchForFirestore(raw);
+  if(!normalized.teamId) throw new Error('Équipe non identifiée. Le match reste en attente de synchronisation.');
+  const matchSnapshot = firestoreSafeData({
+    ...normalized,
+    clientWriteProtocol:protocol.CURRENT_WRITE_PROTOCOL,
+    events:undefined,
+    entryMode:options.entryMode || raw.entryMode || 'FULL_POST_MATCH',
+    statsSource:raw.statsSource || 'MIXED'
+  });
+  const result = await service.savePostMatchTransactional({
+    db,
+    firestore:firebaseFns,
+    profile:currentProfile || {uid:currentUser.uid, email:currentUser.email || '', role:currentUserRole, status:'ACTIVE'},
+    matchId:normalized.matchId,
+    expectedRevision:Number.isSafeInteger(raw.revision) ? raw.revision : 0,
+    expectedEventsRevision:Number.isSafeInteger(raw.eventsRevision) ? raw.eventsRevision : undefined,
+    matchSnapshot,
+    nextEvents:normalized.events.map(event => firestoreSafeData(event)),
+    nextEventsComplete:options.nextEventsComplete === true,
+    deletionStrategy:options.deletionStrategy || raw.deletionStrategy || 'PHYSICAL'
+  });
+  if(!result?.ok){
+    const error = Object.assign(new Error(result?.message || 'La sauvegarde transactionnelle Après-match a échoué.'), result || {});
+    throw error;
   }
-  const updatedAtIso = new Date().toISOString();
-  const matchData = {...match};
-  delete matchData.events;
-  await firebaseFns.setDoc(matchRef, {
-    ...firestoreSafeData(matchData),
-    updatedAt:firebaseFns.serverTimestamp(),
-    updatedAtIso,
-    updatedBy:currentUser.uid,
-    updatedByEmail:currentUser.email || ''
-  }, {merge:true});
-  const writes = match.events.map(event => firebaseFns.setDoc(firebaseFns.doc(db, 'matchEvents', event.eventId), {
-    ...firestoreSafeData(event),
-    updatedAt:firebaseFns.serverTimestamp(),
-    updatedAtIso,
-    updatedBy:currentUser.uid
-  }, {merge:true}));
-  await Promise.all(writes);
-  return {matchId:match.matchId, status:'synced', events:writes.length, updatedAtIso};
+  return {...result, status:'synced', updatedAtIso:new Date().toISOString()};
+}
+async function matchPrepareHistoricalEventsRevision(raw={}){
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise. Le brouillon reste conservé localement.');
+  if(!navigator.onLine) throw new Error('Hors ligne. La préparation sera possible au retour de la connexion.');
+  if(!canEditModule('stats')) throw Object.assign(new Error('Droits insuffisants pour préparer ce match.'), {code:'PERMISSION_DENIED'});
+  const service = window.CoachPulsePostMatchTransactionalPersistence;
+  if(!service?.initializeHistoricalEventsRevision) throw new Error("Service d'initialisation historique indisponible.");
+  const normalized = normalizeMatchForFirestore(raw);
+  const result = await service.initializeHistoricalEventsRevision({
+    db,
+    firestore:firebaseFns,
+    profile:currentProfile || {uid:currentUser.uid,email:currentUser.email || '',role:currentUserRole,status:'ACTIVE'},
+    matchId:normalized.matchId,
+    expectedRevision:Number.isSafeInteger(raw.revision) ? raw.revision : 0,
+    matchSnapshot:firestoreSafeData(normalized)
+  });
+  if(!result?.ok) throw Object.assign(new Error(result?.message || 'La préparation sécurisée a échoué.'), result || {});
+  return result;
 }
 async function matchListFromFirestore(filters={}){
   if(!db || !currentUser || !canViewModule('stats')) return [];
@@ -6503,13 +6567,13 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
-Object.assign(window.CoachPulseCentralData, {technicalDataStatus, accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchSavePostMatchTransactional, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+Object.assign(window.CoachPulseCentralData, {matchPrepareHistoricalEventsRevision, technicalDataStatus, accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 function instrumentCentralDataBoundaries(){
   const operations = {
     listPlayers:['players:load','sync','players'], listTeams:['teams:load','sync','teams'], getPlayer:['player:load','loading','player-profile'],
     playerProfileLoadData:['player-profile:load','loading','player-profile'], teamProfileLoadData:['team-profile:load','loading','team-profile'],
-    matchSaveToFirestore:['matches:save','sync','stats'], matchListFromFirestore:['matches:load','sync','stats'],
+    matchSaveToFirestore:['matches:save','sync','stats'], matchSavePostMatchTransactional:['matches:post-match-save','sync','stats'], matchListFromFirestore:['matches:load','sync','stats'],
     playerMeasurementsList:['measurements:load','sync','player-profile'], playerMeasurementsAdd:['measurements:save','sync','player-profile'], playerMeasurementsUpdate:['measurements:save','sync','player-profile'], playerMeasurementsDelete:['measurements:delete','sync','player-profile'],
     medicalListPlayers:['medical:players','sync','medical'], medicalListData:['medical:load','sync','medical'], medicalSaveInjury:['medical:save','sync','medical'], medicalAddUpdate:['medical:save','sync','medical'], medicalDeleteInjuries:['medical:delete','sync','medical'],
     athleticListData:['athletic-tests:load','sync','tests-athletiques'], athleticSaveTest:['athletic-tests:save','sync','tests-athletiques'], athleticDeleteTest:['athletic-tests:delete','sync','tests-athletiques'],

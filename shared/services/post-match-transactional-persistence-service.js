@@ -1,0 +1,304 @@
+// Transactional persistence reserved for post-match and retroactive entry modes.
+
+(function(global){
+  const MAX_TRANSACTION_WRITES = 500;
+  const MAX_DOCUMENT_BYTES = 1_000_000;
+  const POST_MATCH_MODES = Object.freeze(['LIVE', 'QUICK_POST_MATCH', 'FULL_POST_MATCH']);
+
+  function dependency(name, commonJsPath){
+    if(global[name]) return global[name];
+    if(typeof require === 'function') return require(commonJsPath);
+    return null;
+  }
+
+  const Persistence = dependency('CoachPulseMatchPersistence', './match-persistence-service.js');
+  const Statistics = dependency('CoachPulseMatchStatistics', './match-statistics-service.js');
+  const Permissions = dependency('CoachPulsePermissionsService', './permissions-service.js');
+
+  function failure(code, message, details={}){
+    return {ok:false, status:'REJECTED', code, message, ...details};
+  }
+
+  function text(value){ return String(value || '').trim(); }
+
+  function documentData(snapshot){
+    return snapshot && typeof snapshot.data === 'function' ? snapshot.data() : null;
+  }
+
+  function documentExists(snapshot){
+    return Boolean(snapshot && (typeof snapshot.exists === 'function' ? snapshot.exists() : snapshot.exists));
+  }
+
+  function queryDocuments(snapshot){
+    return Array.isArray(snapshot?.docs) ? snapshot.docs : [];
+  }
+
+  function byteSize(value){
+    const json = JSON.stringify(value);
+    if(typeof TextEncoder !== 'undefined') return new TextEncoder().encode(json).length;
+    return typeof Buffer !== 'undefined' ? Buffer.byteLength(json, 'utf8') : json.length * 2;
+  }
+
+  function assertDocumentSize(label, value){
+    const bytes = byteSize(value);
+    if(bytes > MAX_DOCUMENT_BYTES){
+      throw Object.assign(new Error(`${label} depasse la taille documentaire autorisee.`), {code:'DOCUMENT_TOO_LARGE', bytes});
+    }
+  }
+
+  function authorize(profile, matchSnapshot){
+    if(!Permissions?.canEditModule(profile, {id:'stats', active:true})){
+      return failure('PERMISSION_DENIED', 'Le profil ne peut pas modifier le module stats.');
+    }
+    const teamIds = [matchSnapshot?.teamId, ...(Array.isArray(matchSnapshot?.teamIds) ? matchSnapshot.teamIds : [])]
+      .map(text).filter(Boolean);
+    if(!teamIds.length || !teamIds.some(teamId => Permissions.canAccessTeam(profile, teamId))){
+      return failure('TEAM_SCOPE_DENIED', "Le profil n'est autorise pour aucune equipe du match.");
+    }
+    return null;
+  }
+
+  function normalizedMatchSnapshot(matchSnapshot, matchId, nextRevision, nextEventsRevision, serverTimestamp){
+    // Post-match forms must preserve unknown values instead of silently
+    // manufacturing zeroes for counters that were never entered.
+    const players = Statistics.normalizePlayers(matchSnapshot.players || {}, {unknown:'preserve'});
+    const opponentSource = matchSnapshot.opp || matchSnapshot.opponent || {};
+    const normalized = {
+      ...matchSnapshot,
+      matchId,
+      players,
+      ...(Object.prototype.hasOwnProperty.call(matchSnapshot, 'opp') ? {opp:Statistics.normalizeOpponentStats(opponentSource, {unknown:'preserve'})} : {}),
+      ...(Object.prototype.hasOwnProperty.call(matchSnapshot, 'opponent') ? {opponent:Statistics.normalizeOpponentStats(opponentSource, {unknown:'preserve'})} : {}),
+      schemaVersion:Persistence.SCHEMA_VERSION,
+      revision:nextRevision,
+      eventsRevision:nextEventsRevision,
+      updatedAt:serverTimestamp
+    };
+    delete normalized.revisionState;
+    // Events live in matchEvents. Keeping another copy in matches duplicates data,
+    // makes snapshots grow with match duration and can exceed Firestore's 1 MiB limit.
+    delete normalized.log;
+    delete normalized.events;
+    delete normalized.actions;
+    return normalized;
+  }
+
+  function normalizeEvent(event, matchId, matchSnapshot, serverTimestamp){
+    const eventId = Persistence.eventIdentifier(event);
+    return {
+      ...event,
+      eventId,
+      matchId,
+      teamId:matchSnapshot.teamId,
+      ...(Array.isArray(matchSnapshot.teamIds) ? {teamIds:matchSnapshot.teamIds} : {}),
+      updatedAt:serverTimestamp
+    };
+  }
+
+  function validateRequest(input){
+    const matchId = text(input.matchId);
+    if(!matchId) return failure('INVALID_MATCH_ID', 'Un matchId stable est obligatoire.');
+    if(!POST_MATCH_MODES.includes(input.matchSnapshot?.entryMode)){
+      return failure('INVALID_ENTRY_MODE', 'Le mode de saisie du match est invalide.');
+    }
+    if(!text(input.matchSnapshot?.teamId)){
+      return failure('INVALID_TEAM_SCOPE', 'Un teamId canonique est obligatoire pour une sauvegarde Apres-match.');
+    }
+    const expected = Persistence.revisionInfo(input.expectedRevision);
+    if(!expected.valid) return failure('INVALID_EXPECTED_REVISION', 'La revision attendue est invalide.');
+    if(input.expectedEventsRevision !== undefined){
+      const expectedEvents = Persistence.revisionInfo(input.expectedEventsRevision);
+      if(!expectedEvents.valid) return failure('INVALID_EXPECTED_EVENTS_REVISION', 'La revision des evenements attendue est invalide.');
+    }
+    if(!Array.isArray(input.nextEvents)) return failure('INVALID_EVENTS', 'nextEvents doit etre une liste.');
+    if(input.deletionStrategy && !Persistence.DELETION_STRATEGIES.includes(input.deletionStrategy)){
+      return failure('INVALID_DELETION_STRATEGY', 'La strategie de suppression est invalide.');
+    }
+    return null;
+  }
+
+  async function initializeHistoricalEventsRevision(input={}){
+    const matchId = text(input.matchId);
+    if(!matchId) return failure('INVALID_MATCH_ID', 'Un matchId stable est obligatoire.');
+    if(!text(input.matchSnapshot?.teamId)) return failure('INVALID_TEAM_SCOPE', 'Un teamId canonique est obligatoire.');
+    const expected = Persistence.revisionInfo(input.expectedRevision);
+    if(!expected.valid) return failure('INVALID_EXPECTED_REVISION', 'La revision attendue est invalide.');
+    const denied = authorize(input.profile, input.matchSnapshot);
+    if(denied) return denied;
+    const firestore = input.firestore || {};
+    const required = ['runTransaction','doc','serverTimestamp'];
+    const missing = required.filter(name => typeof firestore[name] !== 'function');
+    if(missing.length) return failure('INVALID_FIRESTORE_ADAPTER', `Adaptateur Firestore incomplet: ${missing.join(', ')}.`);
+
+    const matchRef = firestore.doc(input.db, 'matches', matchId);
+    try{
+      return await firestore.runTransaction(input.db, async transaction => {
+        const remoteSnapshot = await transaction.get(matchRef);
+        if(!documentExists(remoteSnapshot)) return failure('MATCH_NOT_FOUND', 'Le match historique est introuvable.');
+        const remoteMatch = documentData(remoteSnapshot) || {};
+        const comparison = Persistence.compareRevisions(input.expectedRevision, remoteMatch.revision);
+        if(!comparison.ok) return failure(comparison.code, comparison.message, {
+          conflict:comparison.conflict, expectedRevision:comparison.expectedRevision, remoteRevision:comparison.remoteRevision
+        });
+        const remoteEventsRevision = Persistence.revisionInfo(remoteMatch.eventsRevision, {
+          present:Object.prototype.hasOwnProperty.call(remoteMatch, 'eventsRevision')
+        });
+        if(!remoteEventsRevision.valid) return failure('INVALID_REMOTE_EVENTS_REVISION', 'La revision distante des evenements est invalide.');
+        if(remoteEventsRevision.state !== 'ABSENT'){
+          return {ok:true,status:'READY',code:'EVENTS_REVISION_ALREADY_READY',matchId,revision:comparison.remoteRevision,eventsRevision:remoteEventsRevision.revision,writes:0};
+        }
+        // Deliberately update version markers only. No event is queried, rewritten,
+        // recreated or deleted by this preparation transaction.
+        const timestamp = firestore.serverTimestamp();
+        transaction.set(matchRef, {
+          matchId,
+          revision:comparison.nextRevision,
+          eventsRevision:0,
+          eventsRevisionInitializedAt:timestamp,
+          updatedAt:timestamp
+        }, {merge:true});
+        return {ok:true,status:'INITIALIZED',code:'EVENTS_REVISION_INITIALIZED',matchId,previousRevision:comparison.remoteRevision,revision:comparison.nextRevision,eventsRevision:0,writes:1};
+      });
+    }catch(error){
+      return failure(error?.code || 'TRANSACTION_FAILED', error?.message || "L'initialisation transactionnelle a echoue.", {cause:error});
+    }
+  }
+
+  async function savePostMatchTransactional(input={}){
+    const invalid = validateRequest(input);
+    if(invalid) return invalid;
+    const denied = authorize(input.profile, input.matchSnapshot);
+    if(denied) return denied;
+
+    const firestore = input.firestore || {};
+    const required = ['runTransaction','doc','collection','query','where','getDocs','serverTimestamp'];
+    const missing = required.filter(name => typeof firestore[name] !== 'function');
+    if(missing.length) return failure('INVALID_FIRESTORE_ADAPTER', `Adaptateur Firestore incomplet: ${missing.join(', ')}.`);
+
+    const matchId = text(input.matchId);
+    const matchRef = firestore.doc(input.db, 'matches', matchId);
+    const eventsQuery = firestore.query(
+      firestore.collection(input.db, 'matchEvents'),
+      firestore.where('matchId', '==', matchId),
+      firestore.where('teamId', '==', input.matchSnapshot.teamId)
+    );
+
+    try{
+      // The Web Firestore Transaction API reads DocumentReferences only. Discover
+      // the scoped event references first, then re-read every document inside the
+      // transaction so their contents participate in conflict detection.
+      const discoveredEvents = queryDocuments(await firestore.getDocs(eventsQuery));
+      const eventRefs = new Map();
+      discoveredEvents.forEach(snapshot => {
+        const eventId = text(snapshot.id) || Persistence.eventIdentifier(documentData(snapshot) || {});
+        if(eventId) eventRefs.set(eventId, snapshot.ref || firestore.doc(input.db, 'matchEvents', eventId));
+      });
+      input.nextEvents.forEach(event => {
+        const eventId = Persistence.eventIdentifier(event);
+        if(eventId && !eventRefs.has(eventId)) eventRefs.set(eventId, firestore.doc(input.db, 'matchEvents', eventId));
+      });
+      return await firestore.runTransaction(input.db, async transaction => {
+        // Firestore requires every read before the first write in a transaction.
+        const remoteMatchSnapshot = await transaction.get(matchRef);
+        const remoteEventSnapshots = await Promise.all([...eventRefs.values()].map(ref => transaction.get(ref)));
+        const remoteMatch = documentExists(remoteMatchSnapshot) ? (documentData(remoteMatchSnapshot) || {}) : {};
+        const comparison = Persistence.compareRevisions(input.expectedRevision, remoteMatch.revision);
+        if(!comparison.ok) return failure(comparison.code, comparison.message, {
+          conflict:comparison.conflict,
+          expectedRevision:comparison.expectedRevision,
+          remoteRevision:comparison.remoteRevision
+        });
+
+        const remoteEventsRevisionInfo = Persistence.revisionInfo(remoteMatch.eventsRevision, {
+          present:Object.prototype.hasOwnProperty.call(remoteMatch, 'eventsRevision')
+        });
+        if(!remoteEventsRevisionInfo.valid){
+          return failure('INVALID_REMOTE_EVENTS_REVISION', 'La revision distante des evenements est invalide.');
+        }
+        if(documentExists(remoteMatchSnapshot) && input.nextEventsComplete === true && remoteEventsRevisionInfo.state === 'ABSENT'){
+          return failure('EVENTS_REVISION_REQUIRED', "Ce match historique ne possede pas de revision d'evenements fiable. La sauvegarde exhaustive est bloquee. Rechargez tous les evenements puis effectuez d'abord une synchronisation non destructive pour initialiser la revision.", {conflict:true, upgradeRequired:true});
+        }
+        const expectedEventsRevisionInfo = Persistence.revisionInfo(input.expectedEventsRevision, {
+          present:input.expectedEventsRevision !== undefined
+        });
+        if(input.expectedEventsRevision !== undefined && expectedEventsRevisionInfo.revision !== remoteEventsRevisionInfo.revision){
+          return failure('EVENTS_REVISION_CONFLICT', `Les evenements du match ont change depuis leur chargement (revision attendue ${expectedEventsRevisionInfo.revision}, revision distante ${remoteEventsRevisionInfo.revision}). Rechargez les donnees avant de corriger.`, {
+            conflict:true, expectedEventsRevision:expectedEventsRevisionInfo.revision, remoteEventsRevision:remoteEventsRevisionInfo.revision
+          });
+        }
+        if(input.nextEventsComplete === true && input.expectedEventsRevision === undefined){
+          return failure('EXPECTED_EVENTS_REVISION_REQUIRED', "La liste exhaustive ne peut pas etre prouvee sans revision d'evenements attendue.", {conflict:true});
+        }
+        const nextEventsRevision = remoteEventsRevisionInfo.revision + 1;
+
+        const remoteEvents = remoteEventSnapshots.filter(documentExists).map(snapshot => ({
+          ...(documentData(snapshot) || {}),
+          eventId:Persistence.eventIdentifier(documentData(snapshot) || {}) || text(snapshot.id)
+        }));
+        const reconciliation = Persistence.reconcileEvents(remoteEvents, input.nextEvents, {
+          deletionStrategy:input.deletionStrategy || 'PHYSICAL',
+          nextEventsComplete:input.nextEventsComplete === true
+        });
+        const writes = 1 + reconciliation.added.length + reconciliation.modified.length + reconciliation.removed.length;
+        if(writes > MAX_TRANSACTION_WRITES){
+          return failure('TRANSACTION_TOO_LARGE', `La sauvegarde exige ${writes} ecritures, au-dela de la limite de ${MAX_TRANSACTION_WRITES}.`, {writes});
+        }
+
+        const timestamp = firestore.serverTimestamp();
+        const canonicalMatch = normalizedMatchSnapshot({...remoteMatch,...input.matchSnapshot}, matchId, comparison.nextRevision, nextEventsRevision, timestamp);
+        assertDocumentSize('Le snapshot du match', canonicalMatch);
+        const eventWrites = [...reconciliation.added, ...reconciliation.modified].map(change => {
+          const source = change.event || change.after;
+          const data = normalizeEvent(source, matchId, input.matchSnapshot, timestamp);
+          assertDocumentSize(`L'evenement ${change.eventId}`, data);
+          return {eventId:change.eventId, data};
+        });
+        const removals = reconciliation.removed.map(change => {
+          const data = change.strategy === 'LOGICAL'
+            ? normalizeEvent(change.tombstone, matchId, input.matchSnapshot, timestamp)
+            : null;
+          if(data) assertDocumentSize(`L'evenement ${change.eventId}`, data);
+          return {...change, data};
+        });
+
+        // Replace the match document so legacy embedded event arrays are actually
+        // removed; remote-only metadata was folded into canonicalMatch above.
+        transaction.set(matchRef, canonicalMatch);
+        eventWrites.forEach(write => transaction.set(
+          firestore.doc(input.db, 'matchEvents', write.eventId), write.data, {merge:true}
+        ));
+        removals.forEach(removal => {
+          const ref = firestore.doc(input.db, 'matchEvents', removal.eventId);
+          if(removal.strategy === 'LOGICAL') transaction.set(ref, removal.data, {merge:true});
+          else transaction.delete(ref);
+        });
+
+        return {
+          ok:true,
+          status:'SAVED',
+          code:'POST_MATCH_SAVED',
+          matchId,
+          previousRevision:comparison.remoteRevision,
+          revision:comparison.nextRevision,
+          previousEventsRevision:remoteEventsRevisionInfo.revision,
+          eventsRevision:nextEventsRevision,
+          writes,
+          events:{
+            added:reconciliation.added.length,
+            modified:reconciliation.modified.length,
+            removed:reconciliation.removed.length,
+            unchanged:reconciliation.unchanged.length,
+            deletionStrategy:reconciliation.deletionStrategy,
+            nextEventsComplete:reconciliation.nextEventsComplete
+          }
+        };
+      });
+    }catch(error){
+      return failure(error?.code || 'TRANSACTION_FAILED', error?.message || 'La transaction Firestore a echoue.', {cause:error});
+    }
+  }
+
+  const service = {MAX_TRANSACTION_WRITES, MAX_DOCUMENT_BYTES, POST_MATCH_MODES, initializeHistoricalEventsRevision, savePostMatchTransactional};
+  global.CoachPulsePostMatchTransactionalPersistence = service;
+  if(typeof module !== 'undefined' && module.exports) module.exports = service;
+})(typeof window !== 'undefined' ? window : globalThis);

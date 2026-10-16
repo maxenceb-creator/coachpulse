@@ -689,15 +689,122 @@
           if(directMatch) patch.playerId = toPlayerId;
           if(snapshotMatch) patch.playerSnapshot = {...data.playerSnapshot, playerId:toPlayerId};
           if(Array.isArray(data.playerIds)) patch.playerIds = data.playerIds.map(id => id === fromPlayerId ? toPlayerId : id);
-          writes.push(firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {
-            ...patch
-          }, {merge:true}));
+          writes.push(collectionName === 'matchEvents' && typeof ctx.writeMatchEvent === 'function'
+            ? ctx.writeMatchEvent(docSnap.id, patch)
+            : firebaseFns.setDoc(firebaseFns.doc(db, collectionName, docSnap.id), {...patch}, {merge:true}));
         }
       });
       await Promise.all(writes);
       refCounts[collectionName] = count;
     }
     return refCounts;
+  }
+
+  function isPlayerReference(data={}, playerId=''){
+    return data.playerId === playerId
+      || (Array.isArray(data.playerIds) && data.playerIds.includes(playerId))
+      || (data.playerSnapshot && typeof data.playerSnapshot === 'object' && data.playerSnapshot.playerId === playerId)
+      || (data.player && typeof data.player === 'object' && (data.player.playerId === playerId || data.player.id === playerId));
+  }
+
+  async function deleteMatchEventReferencesByMatch(playerId, documents, ctx={}){
+    const {firebaseFns, db} = firestoreContext(ctx);
+    if(typeof firebaseFns.runTransaction !== 'function') throw new Error('Transactions Firestore indisponibles.');
+    const byMatch = new Map();
+    for(const document of documents){
+      const data = document.data() || {};
+      const matchId = asText(data.matchId);
+      if(!matchId){
+        throw Object.assign(new Error(`L'evenement ${document.id} ne possede pas de matchId.`), {
+          code:'INVALID_MATCH_EVENT_REFERENCE', eventId:document.id
+        });
+      }
+      if(!byMatch.has(matchId)) byMatch.set(matchId, []);
+      byMatch.get(matchId).push(document.id);
+    }
+    for(const [matchId, eventIds] of byMatch){
+      if(eventIds.length > 499){
+        throw Object.assign(new Error(`Le match ${matchId} possede trop de references a supprimer en une transaction.`), {
+          code:'TRANSACTION_TOO_LARGE', matchId, eventCount:eventIds.length
+        });
+      }
+    }
+
+    const completedMatches = [];
+    let deleted = 0;
+    for(const [matchId, eventIds] of byMatch){
+      let result;
+      try{
+        result = await firebaseFns.runTransaction(db, async transaction => {
+        const matchRef = firebaseFns.doc(db, 'matches', matchId);
+        const eventRefs = eventIds.map(eventId => firebaseFns.doc(db, 'matchEvents', eventId));
+        const snapshots = await Promise.all([transaction.get(matchRef), ...eventRefs.map(ref => transaction.get(ref))]);
+        const matchSnapshot = snapshots[0];
+        if(!matchSnapshot.exists()){
+          throw Object.assign(new Error(`Le match ${matchId} est introuvable.`), {code:'MATCH_NOT_FOUND', matchId});
+        }
+        const match = matchSnapshot.data() || {};
+        const revision = Object.prototype.hasOwnProperty.call(match, 'revision') ? match.revision : 0;
+        const eventsRevision = Object.prototype.hasOwnProperty.call(match, 'eventsRevision') ? match.eventsRevision : 0;
+        if(!Number.isSafeInteger(revision) || revision < 0 || !Number.isSafeInteger(eventsRevision) || eventsRevision < 0){
+          throw Object.assign(new Error(`Les revisions du match ${matchId} sont invalides.`), {code:'INVALID_REMOTE_REVISION', matchId});
+        }
+        const deletions = snapshots.slice(1).map((snapshot, index) => ({snapshot, ref:eventRefs[index]}))
+          .filter(({snapshot}) => snapshot.exists() && isPlayerReference(snapshot.data() || {}, playerId));
+        if(!deletions.length) return {matchId, deleted:0, revision, eventsRevision};
+        const timestamp = firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined;
+        transaction.set(matchRef, {
+          matchId,
+          revision:revision + 1,
+          eventsRevision:eventsRevision + 1,
+          updatedAt:timestamp
+        }, {merge:true});
+        deletions.forEach(({ref}) => transaction.delete(ref));
+        return {matchId, deleted:deletions.length, revision:revision + 1, eventsRevision:eventsRevision + 1};
+        });
+      }catch(error){
+        error.completedMatches = [...completedMatches];
+        error.failedMatchId = matchId;
+        error.remainingMatchIds = [...byMatch.keys()].filter(id => id !== matchId && !completedMatches.some(item => item.matchId === id));
+        throw error;
+      }
+      completedMatches.push(result);
+      deleted += result.deleted;
+    }
+    return {deleted, completedMatches};
+  }
+
+  async function deletePlayerReferences({playerId, collections=PLAYER_REF_COLLECTIONS}={}, ctx={}){
+    if(!playerId) throw new Error('playerId manquant.');
+    const {firebaseFns, db} = firestoreContext(ctx);
+    const prepared = new Map();
+    for(const collectionName of collections){
+      const snapshot = await firebaseFns.getDocs(firebaseFns.collection(db, collectionName));
+      const documents = [];
+      snapshot.forEach(document => {
+        if(isPlayerReference(document.data() || {}, playerId)) documents.push(document);
+      });
+      prepared.set(collectionName, documents);
+    }
+
+    const refCounts = Object.fromEntries(collections.map(collectionName => [collectionName, 0]));
+    const completed = [];
+    const matchEvents = prepared.get('matchEvents') || [];
+    if(matchEvents.length){
+      const result = await deleteMatchEventReferencesByMatch(playerId, matchEvents, ctx);
+      refCounts.matchEvents = result.deleted;
+      completed.push(...result.completedMatches.map(item => ({collectionName:'matchEvents', ...item})));
+    }
+
+    for(const collectionName of collections){
+      if(collectionName === 'matchEvents') continue;
+      for(const document of prepared.get(collectionName) || []){
+        await firebaseFns.deleteDoc(firebaseFns.doc(db, collectionName, document.id));
+        refCounts[collectionName] += 1;
+        completed.push({collectionName, documentId:document.id, deleted:1});
+      }
+    }
+    return {ok:true, playerId, refCounts, completed};
   }
 
   async function mergePlayers({primaryPlayerId, duplicatePlayerId, collections}={}, ctx={}){
@@ -746,7 +853,7 @@
     normalizePlayer, normalizePlayerForWrite, identityKey, personKey, dedupePlayers,
     readCachedPlayers, writeCache, filterPlayers,
     listPlayers, readFirestorePlayers, getPlayer, savePlayer, archivePlayer, invalidatePlayersCache,
-    updatePlayerRefs, mergePlayers
+    updatePlayerRefs, deletePlayerReferences, deleteMatchEventReferencesByMatch, isPlayerReference, mergePlayers
   };
 
   global.CoachPulsePlayersService = service;
