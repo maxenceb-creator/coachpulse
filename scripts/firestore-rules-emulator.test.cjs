@@ -652,8 +652,12 @@ async function main() {
     deleteEvent.set(doc(db, 'matches', 'mU11'), {revision:4, eventsRevision:4}, {merge:true});
     deleteEvent.delete(doc(db, 'matchEvents', 'newU11'));
     await assertSucceeds(deleteEvent.commit());
+    const adminDeleteEvent = writeBatch(adminDb);
+    adminDeleteEvent.set(doc(adminDb, 'matches', 'mU11'), {matchId:'mU11', revision:5, eventsRevision:5}, {merge:true});
+    adminDeleteEvent.delete(doc(adminDb, 'matchEvents', 'secondU11'));
+    await assertSucceeds(adminDeleteEvent.commit());
     const accessLimitBatch = writeBatch(db);
-    accessLimitBatch.set(doc(db, 'matches', 'mU11'), {revision:5, eventsRevision:5}, {merge:true});
+    accessLimitBatch.set(doc(db, 'matches', 'mU11'), {revision:6, eventsRevision:6}, {merge:true});
     for(let index = 1; index <= 20; index += 1){
       const eventId = `accessLimitEvent${index}`;
       accessLimitBatch.set(doc(db, 'matchEvents', eventId), {eventId, matchId:'mU11', teamId:'U11'});

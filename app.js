@@ -3785,10 +3785,7 @@ async function adminArchivePlayer(playerId, archived=true){
   return {changed:true, playerId, status:nextStatus};
 }
 function isPlayerReference(data={}, playerId=''){
-  return data.playerId === playerId
-    || (Array.isArray(data.playerIds) && data.playerIds.includes(playerId))
-    || (data.playerSnapshot && typeof data.playerSnapshot === 'object' && data.playerSnapshot.playerId === playerId)
-    || (data.player && typeof data.player === 'object' && (data.player.playerId === playerId || data.player.id === playerId));
+  return playersService()?.isPlayerReference?.(data, playerId) || false;
 }
 function purgeDeletedPlayerFromLocalCaches(playerId=''){
   const id = String(playerId || '').trim();
@@ -3804,19 +3801,11 @@ function purgeDeletedPlayerFromLocalCaches(playerId=''){
   });
 }
 async function deletePlayerReferences(playerId){
-  const refCounts = {};
-  for(const collectionName of adminPlayerRefCollections()){
-    const snap = await firebaseFns.getDocs(firebaseFns.collection(db, collectionName));
-    const deletes = [];
-    snap.forEach(docSnap => {
-      if(isPlayerReference(docSnap.data() || {}, playerId)){
-        deletes.push(firebaseFns.deleteDoc(firebaseFns.doc(db, collectionName, docSnap.id)));
-      }
-    });
-    await Promise.all(deletes);
-    refCounts[collectionName] = deletes.length;
-  }
-  return refCounts;
+  const service = playersService();
+  if(!service?.deletePlayerReferences) throw new Error('Service de suppression securisee indisponible.');
+  const result = await service.deletePlayerReferences({playerId, collections:adminPlayerRefCollections()}, firestoreServiceContext());
+  if(!result?.ok) throw Object.assign(new Error('Les references de la joueuse n ont pas toutes ete traitees.'), result || {});
+  return result.refCounts;
 }
 async function adminDeletePlayer(playerId, confirmation=''){
   if(!guardAdminAction()) return;
