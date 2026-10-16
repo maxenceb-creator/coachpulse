@@ -5,6 +5,12 @@ const {GoogleAuth} = require('google-auth-library');
 const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'coach-pulse-ee6b0';
 const rulesPath = process.argv[2] || 'firestore.rules';
 const allowMismatch = process.argv.includes('--allow-mismatch');
+const expectedShaIndex = process.argv.indexOf('--expected-sha256');
+const expectedShaFileIndex = process.argv.indexOf('--expected-sha256-file');
+const expectedShaFile = expectedShaFileIndex >= 0 ? String(process.argv[expectedShaFileIndex + 1] || '').trim() : '';
+const expectedSha256 = expectedShaIndex >= 0
+  ? String(process.argv[expectedShaIndex + 1] || '').trim()
+  : (expectedShaFile ? String(fs.readFileSync(expectedShaFile, 'utf8')).trim() : '');
 const maxAttempts = Number(process.env.FIREBASE_RULES_VERIFY_MAX_ATTEMPTS || 3);
 const retryDelayMs = Number(process.env.FIREBASE_RULES_VERIFY_RETRY_DELAY_MS || 10000);
 
@@ -49,11 +55,12 @@ async function main(){
   const activeSource = ruleset.source?.files?.find(file => file.name === 'firestore.rules')?.content;
   if(typeof activeSource !== 'string') throw new Error('Source firestore.rules absente du ruleset actif.');
 
-  const expected = sha256(fs.readFileSync(rulesPath));
+  if(expectedSha256 && !/^[a-f0-9]{64}$/.test(expectedSha256)) throw new Error('Empreinte SHA-256 attendue invalide.');
+  const expected = expectedSha256 || sha256(fs.readFileSync(rulesPath));
   const active = sha256(activeSource);
   const match = expected === active;
   const lines = [
-    `- Rules attendues (${rulesPath}): \`${expected}\``,
+    `- Rules attendues (${expectedShaFile || (expectedSha256 ? 'empreinte autorisée' : rulesPath)}): \`${expected}\``,
     `- Rules Firebase actives: \`${active}\``,
     `- Ruleset actif: \`${release.rulesetName}\``,
     `- Empreintes identiques: **${match ? 'oui' : 'non'}**`

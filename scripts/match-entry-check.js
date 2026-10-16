@@ -95,6 +95,7 @@ function firestoreHarness() {
     db: {}, currentUser: {uid: 'fixture-coach', email: 'coach@example.test'}, currentUserRole:'ENTRAINEUR_ADJOINT',
     currentProfile:{uid:'fixture-coach',email:'coach@example.test',role:'ENTRAINEUR_ADJOINT',permissionLevel:'SAISIE',status:'ACTIVE',allowedModules:['stats'],authorizedTeamIds:['team-u13-a']},
     CoachPulsePostMatchTransactionalPersistence:postMatchPersistence,
+    CoachPulseClientWriteProtocol:{CURRENT_WRITE_PROTOCOL:2,assertCompatible:async()=>({compatible:true,minimumWriteProtocol:2})},
     navigator: {onLine: true},
     canEditModule: () => true, canViewModule: () => true,
     getCurrentPermissionLevel: () => 'SAISIE', getCurrentUserRole: () => 'ENTRAINEUR_ADJOINT',
