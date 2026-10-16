@@ -29,6 +29,10 @@ async function main() {
         status: 'ACTIVE', role: 'ENTRAINEUR_ADJOINT', permissionLevel: 'SAISIE',
         allowedModules: ['players', 'presences'], authorizedTeamIds: ['U11']
       });
+      await setDoc(doc(db, 'staff_members', 'statsAssistant'), {
+        status: 'ACTIVE', role: 'ENTRAINEUR_ADJOINT', permissionLevel: 'SAISIE',
+        allowedModules: ['stats'], authorizedTeamIds: ['U11']
+      });
       await setDoc(doc(db, 'staff_members', 'realAssistant'), {
         status: 'ACTIVE', role: 'ENTRAINEUR_ADJOINT', permissionLevel: 'EDITEUR',
         allowedModules: [
@@ -155,7 +159,7 @@ async function main() {
       for (const teamId of ['U11', 'U13']) {
         await setDoc(doc(db, 'teams', teamId), {teamId, name:teamId});
         await setDoc(doc(db, 'players', `p${teamId}`), {playerId: `p${teamId}`, teamId, status: 'ACTIVE'});
-        await setDoc(doc(db, 'matches', `m${teamId}`), {matchId: `m${teamId}`, teamId});
+        await setDoc(doc(db, 'matches', `m${teamId}`), {matchId: `m${teamId}`, teamId, revision: 0, eventsRevision: 0});
         await setDoc(doc(db, 'sessions', `s${teamId}`), {sessionId: `s${teamId}`, teamId, teamIds: [teamId], source: 'Présences', createdFromPresenceModule: true});
         await setDoc(doc(db, 'matchEvents', `e${teamId}`), {eventId: `e${teamId}`, matchId: `m${teamId}`, teamId, teamIds: [teamId]});
         await setDoc(doc(db, 'attendance', `a${teamId}`), {attendanceId: `a${teamId}`, sessionId: `s${teamId}`, teamId});
@@ -166,6 +170,9 @@ async function main() {
       await setDoc(doc(db, 'matchEvents', 'eTeamIdsOnly'), {
         eventId: 'eTeamIdsOnly', matchId: 'mTeamIdsOnly', teamIds: ['U11']
       });
+      await setDoc(doc(db, 'matches', 'mHistorical'), {matchId:'mHistorical', teamId:'U11', revision:4});
+      await setDoc(doc(db, 'matchEvents', 'eHistorical'), {eventId:'eHistorical', matchId:'mHistorical', teamId:'U11'});
+      await setDoc(doc(db, 'matches', 'mAssistant'), {matchId:'mAssistant', teamId:'U11', revision:0, eventsRevision:0});
       await setDoc(doc(db, 'players', 'pDual'), {
         playerId: 'pDual', teamId: 'U13', teamIds: ['U13', 'U11'], status: 'ACTIVE'
       });
@@ -332,6 +339,7 @@ async function main() {
     await assertFails(getDoc(doc(db, 'unexpected', 'record')));
     const readerDb = environment.authenticatedContext('reader').firestore();
     const assistantDb = environment.authenticatedContext('assistant').firestore();
+    const statsAssistantDb = environment.authenticatedContext('statsAssistant').firestore();
     const realAssistantDb = environment.authenticatedContext('realAssistant').firestore();
     const editorDb = environment.authenticatedContext('editor').firestore();
     const adminModuleEditorDb = environment.authenticatedContext('adminModuleEditor').firestore();
@@ -574,13 +582,13 @@ async function main() {
     await assertFails(getDocs(collection(unsupportedAllPlayersDb, 'players')));
     process.stdout.write('Checking team-scoped match and event queries\n');
     const matchesByTeamId = await assertSucceeds(getDocs(query(collection(db, 'matches'), where('teamId', '==', 'U11'))));
-    assert.deepEqual(matchesByTeamId.docs.map(snapshot => snapshot.id), ['mU11']);
+    assert.deepEqual(matchesByTeamId.docs.map(snapshot => snapshot.id).sort(), ['mAssistant', 'mHistorical', 'mU11']);
     const matchesByTeamIds = await assertSucceeds(getDocs(query(collection(db, 'matches'), where('teamIds', 'array-contains', 'U11'))));
     assert.deepEqual(matchesByTeamIds.docs.map(snapshot => snapshot.id), ['mTeamIdsOnly']);
     await assertFails(getDocs(query(collection(db, 'matches'), where('teamId', 'in', ['U11', 'U13']))));
     await assertFails(getDocs(collection(db, 'matches')));
     const eventsByTeamId = await assertSucceeds(getDocs(query(collection(db, 'matchEvents'), where('teamId', '==', 'U11'))));
-    assert.deepEqual(eventsByTeamId.docs.map(snapshot => snapshot.id), ['eU11']);
+    assert.deepEqual(eventsByTeamId.docs.map(snapshot => snapshot.id).sort(), ['eHistorical', 'eU11']);
     const eventsByTeamIds = await assertSucceeds(getDocs(query(collection(db, 'matchEvents'), where('teamIds', 'array-contains', 'U11'))));
     assert.deepEqual(eventsByTeamIds.docs.map(snapshot => snapshot.id).sort(), ['eTeamIdsOnly', 'eU11']);
     await assertFails(getDocs(query(collection(db, 'matchEvents'), where('teamId', 'in', ['U11', 'U13']))));
@@ -617,9 +625,55 @@ async function main() {
     await assertSucceeds(setDoc(doc(editorDb, 'technicalTests', 'editorTest'), {testId: 'editorTest', playerId: 'pU11'}));
     await assertSucceeds(setDoc(doc(adminDb, 'matches', 'adminMatch'), {matchId: 'adminMatch', teamId: 'U13'}));
     process.stdout.write('Checking authorized match update\n');
-    await assertSucceeds(setDoc(doc(db, 'matches', 'mU11'), {matchId: 'mU11', teamId: 'U11', score: '1-0'}));
-    process.stdout.write('Checking authorized match event update\n');
-    await assertSucceeds(setDoc(doc(db, 'matchEvents', 'eU11'), {eventId: 'eU11', matchId: 'mU11', type: 'goal'}));
+    await assertSucceeds(setDoc(doc(db, 'matches', 'mU11'), {score: '1-0'}, {merge:true}));
+    process.stdout.write('Checking match event revision protocol\n');
+    await assertFails(setDoc(doc(db, 'matchEvents', 'legacyCreate'), {eventId:'legacyCreate', matchId:'mU11', teamId:'U11'}));
+    await assertFails(setDoc(doc(db, 'matchEvents', 'eU11'), {type:'legacy-update'}, {merge:true}));
+    const legacyDelete = writeBatch(db);
+    legacyDelete.delete(doc(db, 'matchEvents', 'eU11'));
+    await assertFails(legacyDelete.commit());
+    await assertFails(setDoc(doc(db, 'matches', 'mU11'), {eventsRevision:deleteField()}, {merge:true}));
+    await assertFails(setDoc(doc(db, 'matches', 'mU11'), {eventsRevision:-1}, {merge:true}));
+
+    const addEvent = writeBatch(db);
+    addEvent.set(doc(db, 'matches', 'mU11'), {revision:1, eventsRevision:1}, {merge:true});
+    addEvent.set(doc(db, 'matchEvents', 'newU11'), {eventId:'newU11', matchId:'mU11', teamId:'U11'});
+    await assertSucceeds(addEvent.commit());
+    const updateEvent = writeBatch(db);
+    updateEvent.set(doc(db, 'matches', 'mU11'), {revision:2, eventsRevision:2}, {merge:true});
+    updateEvent.set(doc(db, 'matchEvents', 'newU11'), {type:'goal'}, {merge:true});
+    await assertSucceeds(updateEvent.commit());
+    const multipleEvents = writeBatch(db);
+    multipleEvents.set(doc(db, 'matches', 'mU11'), {revision:3, eventsRevision:3}, {merge:true});
+    multipleEvents.set(doc(db, 'matchEvents', 'newU11'), {minute:12}, {merge:true});
+    multipleEvents.set(doc(db, 'matchEvents', 'secondU11'), {eventId:'secondU11', matchId:'mU11', teamId:'U11'});
+    await assertSucceeds(multipleEvents.commit());
+    const deleteEvent = writeBatch(db);
+    deleteEvent.set(doc(db, 'matches', 'mU11'), {revision:4, eventsRevision:4}, {merge:true});
+    deleteEvent.delete(doc(db, 'matchEvents', 'newU11'));
+    await assertSucceeds(deleteEvent.commit());
+    const accessLimitBatch = writeBatch(db);
+    accessLimitBatch.set(doc(db, 'matches', 'mU11'), {revision:5, eventsRevision:5}, {merge:true});
+    for(let index = 1; index <= 20; index += 1){
+      const eventId = `accessLimitEvent${index}`;
+      accessLimitBatch.set(doc(db, 'matchEvents', eventId), {eventId, matchId:'mU11', teamId:'U11'});
+    }
+    await assertSucceeds(accessLimitBatch.commit());
+
+    await assertSucceeds(getDoc(doc(db, 'matches', 'mHistorical')));
+    const initializeHistorical = writeBatch(db);
+    initializeHistorical.set(doc(db, 'matches', 'mHistorical'), {revision:5, eventsRevision:0}, {merge:true});
+    await assertSucceeds(initializeHistorical.commit());
+    assert.equal((await assertSucceeds(getDoc(doc(db, 'matchEvents', 'eHistorical')))).exists(), true);
+
+    const assistantEvent = writeBatch(statsAssistantDb);
+    assistantEvent.set(doc(statsAssistantDb, 'matches', 'mAssistant'), {revision:1, eventsRevision:1}, {merge:true});
+    assistantEvent.set(doc(statsAssistantDb, 'matchEvents', 'assistantEvent'), {eventId:'assistantEvent', matchId:'mAssistant', teamId:'U11'});
+    await assertSucceeds(assistantEvent.commit());
+    const outsideTeamEvent = writeBatch(db);
+    outsideTeamEvent.set(doc(db, 'matches', 'mU13'), {revision:1, eventsRevision:1}, {merge:true});
+    outsideTeamEvent.set(doc(db, 'matchEvents', 'outsideTeamEvent'), {eventId:'outsideTeamEvent', matchId:'mU13', teamId:'U13'});
+    await assertFails(outsideTeamEvent.commit());
     process.stdout.write('Checking authorized attendance create\n');
     await assertSucceeds(setDoc(doc(db, 'attendance', 'newU11'), {attendanceId: 'newU11', sessionId: 'sU11', teamId: 'U11'}));
     process.stdout.write('Checking authorized attendance update\n');
