@@ -3532,9 +3532,9 @@ async function syncDataHubItems(items=[], meta={}){
 async function readSyncLogs(limit=20){
   if(!guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
-  const snap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db,'syncLogs'), firebaseFns.orderBy('date','desc')));
+  const snap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db,'syncLogs'), firebaseFns.orderBy('date','desc'), firebaseFns.limit(limit)));
   const logs = [];
-  snap.forEach(docSnap => { if(logs.length < limit) logs.push({id:docSnap.id, ...docSnap.data()}); });
+  snap.forEach(docSnap => { logs.push({id:docSnap.id, ...docSnap.data()}); });
   return logs;
 }
 async function adminListPlayers(filters={}){

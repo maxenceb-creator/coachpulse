@@ -1272,6 +1272,18 @@ function testPlayerArchiveUsesDirectStatusPatch(){
   assert(!body.includes('adminUpdatePlayer('), 'L’archivage ne doit pas repasser par la mise à jour complète de fiche.');
 }
 
+function testSyncLogsQueryKeepsOrderAndServerLimit(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const match = appSource.match(/async function readSyncLogs[\s\S]*?\n}\nasync function adminListPlayers/);
+  assert(match, 'La fonction readSyncLogs doit rester disponible.');
+  const body = match[0];
+  const orderPosition = body.indexOf("firebaseFns.orderBy('date','desc')");
+  const limitPosition = body.indexOf('firebaseFns.limit(limit)');
+  assert(orderPosition >= 0, 'Les syncLogs doivent rester triés par date décroissante.');
+  assert(limitPosition > orderPosition, 'La limite Firestore doit être appliquée après le tri attendu.');
+  assert(!body.includes('logs.length < limit'), 'La limitation ne doit plus être faite après lecture côté client.');
+}
+
 function testPresenceInteractionsStayNonBlocking(){
   const appSource = fs.readFileSync('app.js', 'utf8');
   const presenceSource = fs.readFileSync('pages/presences.html', 'utf8');
@@ -2058,6 +2070,7 @@ testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 testCompletedCoachStatsMatchesFeedTeamProfile();
 testPlayerArchiveUsesDirectStatusPatch();
+testSyncLogsQueryKeepsOrderAndServerLimit();
 testPresenceInteractionsStayNonBlocking();
 testPerformanceCriticalPathStaysNonBlocking();
 testTechnicalHistoryCompatibilityAndScoping();

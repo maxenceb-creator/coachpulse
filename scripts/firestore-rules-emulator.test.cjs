@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {Timestamp, collection, deleteField, doc, documentId, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
+const {Timestamp, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
 
 async function main() {
   const playerSnapshotScopedCollections = [
@@ -57,6 +57,10 @@ async function main() {
       await setDoc(doc(db, 'staff_members', 'editor'), {
         status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
         allowedModules: ['stats', 'presences', 'tests'], authorizedTeamIds: ['U11']
+      });
+      await setDoc(doc(db, 'staff_members', 'databaseEditor'), {
+        status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
+        allowedModules: ['database'], authorizedTeamIds: ['U11']
       });
       await setDoc(doc(db, 'staff_members', 'adminModuleEditor'), {
         status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
@@ -185,6 +189,13 @@ async function main() {
       await setDoc(doc(db, 'players', 'pSeveralScopes'), {
         playerId: 'pSeveralScopes', teamId: 'U11', teamIds: ['U11'], rosterTeamIds: ['U11'], status: 'ACTIVE'
       });
+      for (const [playerId, teamId] of [
+        ['pDeleteSaisie', 'U11'], ['pDeleteTestsEditor', 'U11'],
+        ['pDeleteDatabaseEditor', 'U11'], ['pDeleteForeign', 'U13'],
+        ['pDeleteAdmin', 'U13'], ['pUpdateDatabaseEditor', 'U11']
+      ]) {
+        await setDoc(doc(db, 'players', playerId), {playerId, teamId, status: 'ACTIVE'});
+      }
       await setDoc(doc(db, 'technicalTests', 'tDual'), {testId: 'tDual', playerId: 'pDual'});
       await setDoc(doc(db, 'players', 'pLegacy'), {playerId: 'pLegacy', teamId: 'U11', status: 'ACTIVE'});
       await setDoc(doc(db, 'sessions', 'sLegacy'), {sessionId: 'sLegacy', teamId: 'U11', source: 'Présences'});
@@ -342,6 +353,7 @@ async function main() {
     const statsAssistantDb = environment.authenticatedContext('statsAssistant').firestore();
     const realAssistantDb = environment.authenticatedContext('realAssistant').firestore();
     const editorDb = environment.authenticatedContext('editor').firestore();
+    const databaseEditorDb = environment.authenticatedContext('databaseEditor').firestore();
     const adminModuleEditorDb = environment.authenticatedContext('adminModuleEditor').firestore();
     const editorNoModulesDb = environment.authenticatedContext('editorNoModules').firestore();
     const editorEmptyModulesDb = environment.authenticatedContext('editorEmptyModules').firestore();
@@ -624,6 +636,21 @@ async function main() {
     process.stdout.write('Checking editor and admin writes\n');
     await assertSucceeds(setDoc(doc(editorDb, 'technicalTests', 'editorTest'), {testId: 'editorTest', playerId: 'pU11'}));
     await assertSucceeds(setDoc(doc(adminDb, 'matches', 'adminMatch'), {matchId: 'adminMatch', teamId: 'U13'}));
+    process.stdout.write('Checking player management permissions and team isolation\n');
+    await assertFails(setDoc(doc(db, 'players', 'pCreateSaisie'), {playerId: 'pCreateSaisie', teamId: 'U11', status: 'ACTIVE'}));
+    await assertFails(setDoc(doc(db, 'players', 'pUpdateDatabaseEditor'), {displayName: 'Denied'}, {merge:true}));
+    await assertFails(deleteDoc(doc(db, 'players', 'pDeleteSaisie')));
+    await assertFails(deleteDoc(doc(allPlayersDb, 'players', 'pDeleteForeign')));
+    await assertFails(deleteDoc(doc(editorDb, 'players', 'pDeleteTestsEditor')));
+    await assertSucceeds(setDoc(doc(databaseEditorDb, 'players', 'pCreateDatabaseEditor'), {
+      playerId: 'pCreateDatabaseEditor', teamId: 'U11', status: 'ACTIVE'
+    }));
+    await assertSucceeds(setDoc(doc(databaseEditorDb, 'players', 'pUpdateDatabaseEditor'), {
+      displayName: 'Updated'
+    }, {merge:true}));
+    await assertFails(deleteDoc(doc(databaseEditorDb, 'players', 'pDeleteForeign')));
+    await assertSucceeds(deleteDoc(doc(databaseEditorDb, 'players', 'pDeleteDatabaseEditor')));
+    await assertSucceeds(deleteDoc(doc(adminDb, 'players', 'pDeleteAdmin')));
     process.stdout.write('Checking authorized match update\n');
     await assertSucceeds(setDoc(doc(db, 'matches', 'mU11'), {score: '1-0'}, {merge:true}));
     process.stdout.write('Checking match event revision protocol\n');
