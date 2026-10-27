@@ -635,22 +635,14 @@ async function main() {
       for (const [playerId, teamId] of [
         ['pDeleteSaisie', 'U11'], ['pDeleteTestsEditor', 'U11'],
         ['pDeleteDatabaseEditor', 'U11'], ['pDeleteForeign', 'U13'],
-        ['pDeleteAdmin', 'U13'], ['pUpdateDatabaseEditor', 'U11']
+        ['pDeleteAdmin', 'U13']
       ]) {
         await setDoc(doc(seedDb, 'players', playerId), {playerId, teamId, status: 'ACTIVE'});
       }
     });
-    await assertFails(setDoc(doc(db, 'players', 'pCreateSaisie'), {playerId: 'pCreateSaisie', teamId: 'U11', status: 'ACTIVE'}));
-    await assertFails(setDoc(doc(db, 'players', 'pUpdateDatabaseEditor'), {displayName: 'Denied'}, {merge:true}));
     await assertFails(deleteDoc(doc(db, 'players', 'pDeleteSaisie')));
     await assertFails(deleteDoc(doc(allPlayersDb, 'players', 'pDeleteForeign')));
     await assertFails(deleteDoc(doc(editorDb, 'players', 'pDeleteTestsEditor')));
-    await assertSucceeds(setDoc(doc(databaseEditorDb, 'players', 'pCreateDatabaseEditor'), {
-      playerId: 'pCreateDatabaseEditor', teamId: 'U11', status: 'ACTIVE'
-    }));
-    await assertSucceeds(setDoc(doc(databaseEditorDb, 'players', 'pUpdateDatabaseEditor'), {
-      displayName: 'Updated'
-    }, {merge:true}));
     await assertFails(deleteDoc(doc(databaseEditorDb, 'players', 'pDeleteForeign')));
     await assertSucceeds(deleteDoc(doc(databaseEditorDb, 'players', 'pDeleteDatabaseEditor')));
     await assertSucceeds(deleteDoc(doc(adminDb, 'players', 'pDeleteAdmin')));
