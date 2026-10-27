@@ -189,13 +189,6 @@ async function main() {
       await setDoc(doc(db, 'players', 'pSeveralScopes'), {
         playerId: 'pSeveralScopes', teamId: 'U11', teamIds: ['U11'], rosterTeamIds: ['U11'], status: 'ACTIVE'
       });
-      for (const [playerId, teamId] of [
-        ['pDeleteSaisie', 'U11'], ['pDeleteTestsEditor', 'U11'],
-        ['pDeleteDatabaseEditor', 'U11'], ['pDeleteForeign', 'U13'],
-        ['pDeleteAdmin', 'U13'], ['pUpdateDatabaseEditor', 'U11']
-      ]) {
-        await setDoc(doc(db, 'players', playerId), {playerId, teamId, status: 'ACTIVE'});
-      }
       await setDoc(doc(db, 'technicalTests', 'tDual'), {testId: 'tDual', playerId: 'pDual'});
       await setDoc(doc(db, 'players', 'pLegacy'), {playerId: 'pLegacy', teamId: 'U11', status: 'ACTIVE'});
       await setDoc(doc(db, 'sessions', 'sLegacy'), {sessionId: 'sLegacy', teamId: 'U11', source: 'Présences'});
@@ -637,6 +630,16 @@ async function main() {
     await assertSucceeds(setDoc(doc(editorDb, 'technicalTests', 'editorTest'), {testId: 'editorTest', playerId: 'pU11'}));
     await assertSucceeds(setDoc(doc(adminDb, 'matches', 'adminMatch'), {matchId: 'adminMatch', teamId: 'U13'}));
     process.stdout.write('Checking player management permissions and team isolation\n');
+    await environment.withSecurityRulesDisabled(async context => {
+      const seedDb = context.firestore();
+      for (const [playerId, teamId] of [
+        ['pDeleteSaisie', 'U11'], ['pDeleteTestsEditor', 'U11'],
+        ['pDeleteDatabaseEditor', 'U11'], ['pDeleteForeign', 'U13'],
+        ['pDeleteAdmin', 'U13'], ['pUpdateDatabaseEditor', 'U11']
+      ]) {
+        await setDoc(doc(seedDb, 'players', playerId), {playerId, teamId, status: 'ACTIVE'});
+      }
+    });
     await assertFails(setDoc(doc(db, 'players', 'pCreateSaisie'), {playerId: 'pCreateSaisie', teamId: 'U11', status: 'ACTIVE'}));
     await assertFails(setDoc(doc(db, 'players', 'pUpdateDatabaseEditor'), {displayName: 'Denied'}, {merge:true}));
     await assertFails(deleteDoc(doc(db, 'players', 'pDeleteSaisie')));
