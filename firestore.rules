@@ -110,6 +110,23 @@ service cloud.firestore {
       return canEditData() && (canAccessModule('database') || canAccessModule('dataHub'));
     }
 
+    function canDeletePlayerData(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['EDITEUR', 'ADMIN']
+        && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0 || modules.hasAny(['database']))
+        && (level == 'ADMIN'
+          || teams.hasAny([data.get('teamId', '')])
+          || data.get('teamIds', []).hasAny(teams)
+          || data.get('rosterTeamIds', []).hasAny(teams));
+    }
+
     function canDeleteCoreData(data) {
       return canManageCoreData() && canAccessScopedData(data);
     }
@@ -906,8 +923,7 @@ service cloud.firestore {
         && request.resource.data.status in ['ACTIVE', 'ARCHIVED', 'active', 'injured', 'left', 'archived']
         && canAccessDirectData(resource.data)
         && canAccessDirectData(request.resource.data);
-      allow delete: if canWriteSportData() && canAccessModule('tests')
-        && (canAccessDirectData(resource.data) || moduleScopeAllowsAllPlayers('tests'));
+      allow delete: if canDeletePlayerData(resource.data);
     }
 
     match /teams/{teamId} {
