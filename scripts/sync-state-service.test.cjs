@@ -46,4 +46,39 @@ sync.confirm('write:2');
 sync.confirm('write:3');
 sync.confirm('write:3');
 assert.equal(sync.snapshot().notificationSequence, notificationsBeforeReconnect + 1);
+
+// Hors ligne puis reconnexion : la tentative de reconnexion remplace l'état local.
+sync.resetForTests();
+sync.setPersistence('available');
+sync.setUser('uid-offline');
+const offline = sync.declareLocal('legacy-cloud:uid-offline', {kind:'draft'}).operationToken;
+assert.equal(sync.snapshot().state, 'local');
+const reconnect = sync.markSyncing('legacy-cloud:uid-offline').operationToken;
+assert.equal(sync.isCurrent(offline), false);
+assert.equal(sync.isCurrent(reconnect), true);
+sync.confirm('legacy-cloud:uid-offline', {token:reconnect});
+assert.equal(sync.snapshot().state, 'unknown');
+
+// Deux synchronisations portant le même operationId ne peuvent pas se terminer
+// dans le désordre et écraser l'état de la tentative la plus récente.
+sync.setCoverage({complete:true, covered:['all'], uncovered:[]});
+const first = sync.markSyncing('legacy-cloud:uid-offline').operationToken;
+const second = sync.markSyncing('legacy-cloud:uid-offline').operationToken;
+assert.equal(sync.confirm('legacy-cloud:uid-offline', {token:first}).accepted, false);
+assert.equal(sync.snapshot().state, 'syncing');
+assert.equal(sync.fail('legacy-cloud:uid-offline', new Error('late failure'), {token:first}).accepted, false);
+assert.equal(sync.snapshot().state, 'syncing');
+assert.equal(sync.confirm('legacy-cloud:uid-offline', {token:second}).accepted, true);
+assert.equal(sync.snapshot().state, 'synced');
+
+// Un callback de l'ancien utilisateur reste obsolète même si cet UID redevient actif.
+const uidAToken = sync.markSyncing('legacy-cloud:uid-offline').operationToken;
+sync.setUser('uid-other');
+assert.equal(sync.confirm('legacy-cloud:uid-offline', {token:uidAToken}).accepted, false);
+assert.equal(sync.snapshot().operations.length, 0);
+sync.setUser('uid-offline');
+assert.equal(sync.isCurrent(uidAToken), false);
+assert.equal(sync.fail('legacy-cloud:uid-offline', new Error('late uid failure'), {token:uidAToken}).accepted, false);
+assert.equal(sync.snapshot().state, 'syncing');
+assert.equal(sync.snapshot().coverage.complete, true);
 console.log('Sync state service scenarios passed.');
