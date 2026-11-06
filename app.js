@@ -15,6 +15,8 @@ if(!storage) throw new Error('CoachPulseStorage doit être chargé avant app.js'
 const firestorePayloadService = window.CoachPulseFirestorePayload;
 if(!firestorePayloadService) throw new Error('CoachPulseFirestorePayload doit être chargé avant app.js');
 const notifier = window.CoachPulseNotify;
+const syncStateService = window.CoachPulseSyncState;
+if(!syncStateService) throw new Error('CoachPulseSyncState doit être chargé avant app.js');
 function notifyUser(message, type='info', options={}){
   if(notifier?.show) return notifier.show(message, {...options, type});
   const method = type === 'error' ? 'error' : type === 'warn' ? 'warn' : 'info';
@@ -1274,11 +1276,24 @@ async function initFirebaseInternal(){
     auth = firebaseFns.getAuth(fbApp);
     await configureAuthPersistence();
     db = firebaseFns.getFirestore(fbApp);
-    try{ await firebaseFns.enableIndexedDbPersistence(db); }catch(_e){}
+    try{
+      await firebaseFns.enableIndexedDbPersistence(db);
+      syncStateService.setPersistence(syncStateService.PERSISTENCE.AVAILABLE);
+    }catch(error){
+      const code = String(error?.code || '').toLowerCase();
+      const status = code.includes('failed-precondition')
+        ? syncStateService.PERSISTENCE.FAILED_PRECONDITION
+        : code.includes('unimplemented')
+          ? syncStateService.PERSISTENCE.UNIMPLEMENTED
+          : syncStateService.PERSISTENCE.ERROR;
+      syncStateService.setPersistence(status, {code:error?.code, message:error?.message});
+      console.warn('[CoachPulse persistence] Persistance IndexedDB indisponible', {status, code:error?.code || 'unknown'});
+    }
     firebaseFns.onAuthStateChanged(auth, async user => {
       const authCallbackStartedAt = authFlowStartedAt || performance.now();
       authReady = true;
       currentUser = user;
+      syncStateService.setUser(user?.uid || null);
       updateSyncState(user ? 'Cloud connecté' : 'Connexion staff requise');
       if(user){
         try{
@@ -6596,16 +6611,26 @@ function instrumentCentralDataBoundaries(){
 instrumentCentralDataBoundaries();
 async function syncCloud(manual=false){
   if(applyingCloud) return;
+  const syncUid = currentUser?.uid || null;
+  const syncOperationId = `legacy-cloud:${syncUid || 'anonymous'}`;
   snapshotLocalData({fromCloud:true});
-  if(!navigator.onLine){ storage.markPendingSync(); return updateSyncState('Hors ligne · local OK'); }
+  if(!navigator.onLine){
+    storage.markPendingSync();
+    syncStateService.declareLocal(syncOperationId, {kind:'draft', module:'legacy-cloud-sync'});
+    return updateSyncState('Hors ligne · local en attente');
+  }
   if(!db || !currentUser) return updateSyncState('Connexion staff requise');
+  const syncUser = currentUser;
   const cloudSyncDiagnostic = {function:'syncCloud', module:'cloud', scope:'user', collection:'coachpulse_common_base', operation:'write'};
   const loadingOperation = safeLoadingCall('start', ['cloud:sync', {kind:'sync', diagnostic:cloudSyncDiagnostic}]);
+  let syncAttempt = null;
   try{
+    syncAttempt = syncStateService.markSyncing(syncOperationId, {module:'legacy-cloud-sync'}).operationToken;
     updateSyncState('🔄 Synchronisation...');
     const ref = getCloudRef();
     const payload = buildPayload();
     const existingSnap = await firebaseFns.getDoc(ref);
+    if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     const existingItems = existingSnap.exists() ? existingSnap.data()?.items : {};
     const mergedPayload = {...payload, items:mergedCommonBaseItems(existingItems, payload.items)};
     const safePayload = firestorePayloadService.prepare(mergedPayload, {rootPath:'$', maxBytes:900 * 1024});
@@ -6614,8 +6639,8 @@ async function syncCloud(manual=false){
       ...safePayload,
       updatedAt:firebaseFns.serverTimestamp(),
       updatedAtIso:new Date().toISOString(),
-      updatedBy:currentUser.uid,
-      updatedByEmail:currentUser.email,
+      updatedBy:syncUser.uid,
+      updatedByEmail:syncUser.email,
       updatedByClient:CLIENT_ID,
       itemsHash
     };
@@ -6623,15 +6648,22 @@ async function syncCloud(manual=false){
     // tout en conservant les autres clés legacy récupérées juste au-dessus.
     if(existingSnap.exists()) await firebaseFns.updateDoc(ref, cloudDocument);
     else await firebaseFns.setDoc(ref, cloudDocument);
+    if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     legacyManagedCloudItemsCleaned = true;
     lastCloudItemsHash = itemsHash;
     storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
     storage.clearPendingSync();
     updateCloudKpis();
     updateSyncState('Cloud synchronisé');
+    Promise.resolve(firebaseFns.waitForPendingWrites(db)).then(
+      () => syncStateService.confirm(syncOperationId, {module:'legacy-cloud-sync', token:syncAttempt}),
+      error => syncStateService.fail(syncOperationId, error, {module:'legacy-cloud-sync', token:syncAttempt})
+    );
     try{ loadingOperation?.end?.(); }catch(_error){}
     if(manual) notifySuccess('Synchronisation cloud OK.');
   }catch(e){
+    const failure = syncStateService.fail(syncOperationId, e, {module:'legacy-cloud-sync', token:syncAttempt});
+    if(failure.accepted === false){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     if(e?.name === 'FirestorePayloadError' && debugPerfEnabled()){
       console.error('[CoachPulse sync] Payload Firestore refusé avant écriture', {
         collection:'coachpulse_common_base', documentId:currentUser?.uid || '', operation:'setDoc', property:'items',
