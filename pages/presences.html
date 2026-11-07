@@ -1734,6 +1734,24 @@
       let presenceLocalSaveTimer = null;
       const presenceCloudSaveTimers = new Map();
       const presenceCloudWriteChains = new Map();
+      const presenceMonthLoads = new Map();
+      const presenceCompleteMonths = new Set();
+      let presenceMonthRequestId = 0;
+      let presenceNavigationRequestId = 0;
+      let progressivePresenceLoadingAvailable = true;
+      let presenceHistoryLoaded = false;
+      function progressivePresenceLoadingEnabled(){
+        try{ return progressivePresenceLoadingAvailable && localStorage.getItem("coachpulse:presenceProgressiveMonths") !== "0"; }
+        catch(_error){ return progressivePresenceLoadingAvailable; }
+      }
+      function presenceMonthKey(value=new Date()){
+        const date = value instanceof Date ? value : (parseDate(value) || new Date());
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      }
+      function presenceAdjacentMonthKey(monthKey, amount){
+        const [year, month] = String(monthKey).split("-").map(Number);
+        return presenceMonthKey(new Date(year, month - 1 + amount, 1));
+      }
       function isPresenceAdmin(){
         const profile = presenceAccess?.profile || {};
         return String(profile.permissionLevel || '').toUpperCase() === 'ADMIN' || String(profile.role || '').toUpperCase() === 'ADMIN';
@@ -2250,7 +2268,77 @@
         const merged = mergePresenceEvents(loadPresenceEvents(), acknowledgedCloudEvents);
         queuePresenceEventsLocalSave(merged);
         cloudReady = true;
+        presenceHistoryLoaded = true;
         return {merged, cloudEvents:activeCloudEvents};
+      }
+      async function pullPresenceMonthFromCloud(monthKey, options={}){
+        const api = centralDataApi();
+        if(!progressivePresenceLoadingEnabled() || !api?.presenceListEventsByMonth) return pullPresenceEventsFromCloud();
+        if(options.forceRefresh !== true && presenceMonthLoads.has(monthKey)) return presenceMonthLoads.get(monthKey);
+        const requestId = ++presenceMonthRequestId;
+        const load = (async () => {
+          const firestoreStartedAt = presencePerf.enabled ? performance.now() : 0;
+          const cloudEvents = await api.presenceListEventsByMonth({month:monthKey, forceRefresh:options.forceRefresh === true});
+          presencePerf.record("firestore-month-load", {
+            month:monthKey,
+            durationMs:Math.round(performance.now() - firestoreStartedAt),
+            documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0
+          });
+          const activeCloudEvents = Array.isArray(cloudEvents) ? cloudEvents : [];
+          await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);
+          const syncedAt = new Date().toISOString();
+          const acknowledged = activeCloudEvents
+            .filter(event => !isDeletedPresenceEvent(event))
+            .map(event => ({...event, cloudSyncedAt:syncedAt}));
+          const existing = loadPresenceEvents();
+          const preserved = existing.filter(event => presenceMonthKey(event.date) !== monthKey || !event.cloudSyncedAt);
+          const merged = mergePresenceEvents(preserved, acknowledged);
+          queuePresenceEventsLocalSave(merged);
+          presenceCompleteMonths.add(monthKey);
+          cloudReady = true;
+          return {merged, cloudEvents:activeCloudEvents, month:monthKey, requestId};
+        })().catch(async error => {
+          const code = String(error?.code || "").toLowerCase();
+          if(code.includes("failed-precondition") || code === "9"){
+            progressivePresenceLoadingAvailable = false;
+            console.warn("[Présences] Index mensuels indisponibles, retour au chargement historique", error);
+            return pullPresenceEventsFromCloud();
+          }
+          throw error;
+        }).finally(() => {
+          if(presenceMonthLoads.get(monthKey) === load) presenceMonthLoads.delete(monthKey);
+        });
+        presenceMonthLoads.set(monthKey, load);
+        return load;
+      }
+      function prefetchAdjacentPresenceMonths(monthKey){
+        if(!progressivePresenceLoadingEnabled()) return;
+        const work = () => [-1, 1].forEach(offset => {
+          const adjacent = presenceAdjacentMonthKey(monthKey, offset);
+          if(!presenceCompleteMonths.has(adjacent)) pullPresenceMonthFromCloud(adjacent).catch(error => console.warn("[Présences] Préchargement mensuel différé", error));
+        });
+        if(typeof requestIdleCallback === "function") requestIdleCallback(work, {timeout:2500});
+        else setTimeout(work, 0);
+      }
+      async function ensurePresenceEventAttendance(eventId){
+        const api = centralDataApi();
+        const events = loadPresenceEvents();
+        const event = events.find(item => item.id === eventId);
+        if(!event || !api?.presenceLoadEventAttendance) return event;
+        try{
+          const detailed = await api.presenceLoadEventAttendance(event);
+          if(!detailed || !Object.keys(detailed).length) return event;
+          const currentEvents = loadPresenceEvents();
+          const index = currentEvents.findIndex(item => item.id === eventId);
+          if(index < 0) return event;
+          currentEvents[index] = {...currentEvents[index], attendance:mergeAttendanceMaps(currentEvents[index].attendance, detailed)};
+          presenceEventsMemoryCache = currentEvents;
+          queuePresenceEventsLocalSave(currentEvents);
+          return currentEvents[index];
+        }catch(error){
+          console.warn("[Présences] Détail des présences indisponible, données embarquées conservées", error);
+          return event;
+        }
       }
       async function pullPresenceSettingsFromCloud(){
         const api = centralDataApi();
@@ -2310,6 +2398,7 @@
         const localEvents = activePresenceSeasonEvents(loadPresenceEvents()).filter(event => !isDeletedPresenceEvent(event));
         const eventsToSync = localEvents.filter(event => {
           if(!event?.id) return false;
+          if(event.cloudSyncedAt) return false;
           const cloudEvent = cloudById.get(event.id);
           return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent);
         });
@@ -3724,7 +3813,7 @@
         document.getElementById("sessionDate")?.addEventListener("change", updateRecurrenceUi);
         document.getElementById("sessionRecurrence")?.addEventListener("change", updateRecurrenceUi);
         document.getElementById("sessionRecurrenceEnd")?.addEventListener("change", updateRecurrenceUi);
-        document.getElementById("sessionList")?.addEventListener("click", event => {
+        document.getElementById("sessionList")?.addEventListener("click", async event => {
           const deleteButton = event.target.closest("[data-delete-event]");
           if(deleteButton){
             deletePresenceEvent(deleteButton.dataset.deleteEvent || "");
@@ -3740,6 +3829,7 @@
           const button = event.target.closest("[data-open-attendance]");
           if(!button) return;
           selectedAttendanceEventId = button.dataset.openAttendance || "";
+          await ensurePresenceEventAttendance(selectedAttendanceEventId);
           renderSessionList();
           document.getElementById("attendanceDetail")?.scrollIntoView({behavior:"smooth", block:"start"});
         });
@@ -3763,6 +3853,9 @@
         document.querySelectorAll(".presence-tab").forEach(item => item.classList.toggle("active", item.dataset.tab === tab));
         document.querySelectorAll(".presence-panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${tab}`));
         render();
+        if(["reports","prevention"].includes(tab) && !presenceHistoryLoaded){
+          pullPresenceEventsFromCloud().then(() => render()).catch(error => console.warn('[Présences] Historique complet indisponible', error));
+        }
       }
       function openSessionCreationForDate(dateValue){
         const dateInput = document.getElementById("sessionDate");
@@ -3782,11 +3875,43 @@
           });
         });
       }
+      function subscribeToVisiblePresenceMonth(monthKey){
+        const api = centralDataApi();
+        stopPresenceEventsSubscription?.();
+        if(progressivePresenceLoadingEnabled() && api?.presenceSubscribeEventsByMonth){
+          stopPresenceEventsSubscription = api.presenceSubscribeEventsByMonth(monthKey, () => {
+            clearTimeout(realtimeRefreshTimer);
+            realtimeRefreshTimer = setTimeout(async () => {
+              try{ await pullPresenceMonthFromCloud(monthKey, {forceRefresh:true}); if(presenceMonthKey(calendarPageMonth) === monthKey) render(); }
+              catch(error){ console.warn('[Présences] Actualisation mensuelle impossible', error); }
+            }, 150);
+          }) || null;
+          return;
+        }
+        stopPresenceEventsSubscription = api?.presenceSubscribeEvents?.(() => {
+          clearTimeout(realtimeRefreshTimer);
+          realtimeRefreshTimer = setTimeout(async () => {
+            try{ await pullPresenceEventsFromCloud(); render(); }
+            catch(error){ console.warn('[Présences] Actualisation temps réel impossible', error); }
+          }, 150);
+        }) || null;
+      }
+      async function loadVisiblePresenceMonth(options={}){
+        const monthKey = presenceMonthKey(calendarPageMonth);
+        const navigationRequestId = ++presenceNavigationRequestId;
+        subscribeToVisiblePresenceMonth(monthKey);
+        const result = await pullPresenceMonthFromCloud(monthKey, options);
+        if(navigationRequestId !== presenceNavigationRequestId || presenceMonthKey(calendarPageMonth) !== monthKey) return result;
+        render();
+        prefetchAdjacentPresenceMonths(monthKey);
+        return result;
+      }
       function shiftMonth(target, amount){
         if(target === "calendarPage"){
           calendarPageMonth = new Date(calendarPageMonth.getFullYear(), calendarPageMonth.getMonth() + amount, 1);
         }
         render();
+        loadVisiblePresenceMonth().catch(error => console.warn('[Présences] Mois indisponible', error));
       }
       function resetMonth(target){
         if(target === "calendarPage"){
@@ -3794,6 +3919,7 @@
           selectedCalendarDate = isoDate(new Date());
         }
         render();
+        loadVisiblePresenceMonth().catch(error => console.warn('[Présences] Mois courant indisponible', error));
       }
       function initCalendarControls(){
         document.getElementById("calendarPagePrevMonth")?.addEventListener("click", () => shiftMonth("calendarPage", -1));
@@ -3829,7 +3955,7 @@
         selectCalendarDate(day.dataset.selectDate);
       });
       ["calendarPageTeamFilters","reportsTeamFilters","preventionTeamFilters"].forEach(bindTeamFilter);
-      document.getElementById("calendarDayList")?.addEventListener("click", event => {
+      document.getElementById("calendarDayList")?.addEventListener("click", async event => {
         const deleteButton = event.target.closest("[data-calendar-delete-event]");
         if(deleteButton){
           deletePresenceEvent(deleteButton.dataset.calendarDeleteEvent || "");
@@ -3838,6 +3964,7 @@
         const openButton = event.target.closest("[data-calendar-open-attendance]");
         if(!openButton) return;
         selectedAttendanceEventId = openButton.dataset.calendarOpenAttendance || "";
+        await ensurePresenceEventAttendance(selectedAttendanceEventId);
         activateTab("sessions");
         document.getElementById("attendanceDetail")?.scrollIntoView({behavior:"smooth", block:"start"});
       });
@@ -3871,7 +3998,7 @@
           })();
           const [, presenceResult] = await Promise.all([
             loadPlayers,
-            pullPresenceEventsFromCloud(),
+            pullPresenceMonthFromCloud(presenceMonthKey(calendarPageMonth)),
             pullPresenceSettingsFromCloud()
           ]);
           const {cloudEvents=[]} = presenceResult || {};
@@ -3882,14 +4009,8 @@
           syncPresenceEventsToCloud(cloudEvents).then(syncedCount => {
             if(syncedCount) setSessionMessage(`${syncedCount} événement(s) local(aux) synchronisé(s) avec le cloud.`, "success");
           }).catch(error => console.warn('[Présences] Synchronisation locale différée impossible', error));
-          stopPresenceEventsSubscription?.();
-          stopPresenceEventsSubscription = api?.presenceSubscribeEvents?.(() => {
-            clearTimeout(realtimeRefreshTimer);
-            realtimeRefreshTimer = setTimeout(async () => {
-              try{ await pullPresenceEventsFromCloud(); render(); }
-              catch(error){ console.warn('[Présences] Actualisation temps réel impossible', error); }
-            }, 150);
-          }) || null;
+          subscribeToVisiblePresenceMonth(presenceMonthKey(calendarPageMonth));
+          prefetchAdjacentPresenceMonths(presenceMonthKey(calendarPageMonth));
           stopPresenceSettingsSubscription?.();
           stopPresenceSettingsSubscription = api?.presenceSubscribeSettings?.(settings => {
             const deletedIds = deletedPresenceEventIds();
