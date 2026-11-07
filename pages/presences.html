@@ -2194,8 +2194,8 @@
       async function pullPresenceEventsFromCloud(){
         const api = centralDataApi();
         if(!api?.presenceListEvents) return [];
-        const cloudEvents = await api.presenceListEvents({includeRetiredPresenceSeasons:true});
-        const {active:activeCloudEvents, retired:retiredCloudEvents} = splitRetiredPresenceSeasonEvents(Array.isArray(cloudEvents) ? cloudEvents : []);
+        const cloudEvents = await api.presenceListEvents();
+        const activeCloudEvents = Array.isArray(cloudEvents) ? cloudEvents : [];
         await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);
         const syncedAt = new Date().toISOString();
         const acknowledgedCloudEvents = activeCloudEvents
@@ -2203,7 +2203,6 @@
           .map(event => ({...event, cloudSyncedAt:syncedAt}));
         const merged = mergePresenceEvents(loadPresenceEvents(), acknowledgedCloudEvents);
         queuePresenceEventsLocalSave(merged);
-        deleteRetiredPresenceEventsFromCloud(retiredCloudEvents);
         cloudReady = true;
         return {merged, cloudEvents:activeCloudEvents};
       }
@@ -3817,18 +3816,23 @@
       async function initPresenceCloud(){
         try{
           const api = centralDataApi();
-          try{
-            if(typeof api?.listPlayers !== "function") throw new Error("API centrale indisponible");
-            const loadedPlayers = await api.listPlayers({season:"all", includeArchived:true, moduleId:"presences"});
-            presenceScopedPlayers = Array.isArray(loadedPlayers) ? loadedPlayers : [];
-            presencePlayersSource = "firestore-scoped";
-          }catch(error){
-            presenceScopedPlayers = null;
-            presencePlayersSource = "offline-cache";
-            console.warn('[Présences] Chargement effectif indisponible, cache hors ligne utilisé', error);
-          }
-          await pullPresenceSettingsFromCloud();
-          const presenceResult = await pullPresenceEventsFromCloud();
+          const loadPlayers = (async () => {
+            try{
+              if(typeof api?.listPlayers !== "function") throw new Error("API centrale indisponible");
+              const loadedPlayers = await api.listPlayers({season:"all", includeArchived:true, moduleId:"presences"});
+              presenceScopedPlayers = Array.isArray(loadedPlayers) ? loadedPlayers : [];
+              presencePlayersSource = "firestore-scoped";
+            }catch(error){
+              presenceScopedPlayers = null;
+              presencePlayersSource = "offline-cache";
+              console.warn('[Présences] Chargement effectif indisponible, cache hors ligne utilisé', error);
+            }
+          })();
+          const [, presenceResult] = await Promise.all([
+            loadPlayers,
+            pullPresenceEventsFromCloud(),
+            pullPresenceSettingsFromCloud()
+          ]);
           const {cloudEvents=[]} = presenceResult || {};
           render();
           renderSessionList();
