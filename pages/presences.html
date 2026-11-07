@@ -2104,6 +2104,30 @@
           source
         };
       }
+      const presencePerf = (() => {
+        let enabled = false;
+        try{ enabled = localStorage.getItem("coachpulse:debugPerf") === "1"; }catch(_error){}
+        const startedAt = performance.now();
+        const entries = [];
+        const record = (stage, detail={}) => {
+          if(!enabled) return;
+          const entry = {stage, atMs:Math.round(performance.now() - startedAt), ...detail};
+          entries.push(entry);
+          if(entries.length > 100) entries.shift();
+          console.info("[Séances perf]", entry);
+        };
+        if(enabled && typeof PerformanceObserver === "function"){
+          try{
+            const observer = new PerformanceObserver(list => list.getEntries().forEach(entry => {
+              if(entry.duration > 50) record("ui-long-task", {durationMs:Math.round(entry.duration)});
+            }));
+            observer.observe({type:"longtask", buffered:true});
+          }catch(_error){}
+        }
+        const api = {enabled, record, elapsed:() => Math.round(performance.now() - startedAt), snapshot:() => entries.map(entry => ({...entry}))};
+        window.CoachPulsePresencePerf = api;
+        return api;
+      })();
       function filteredEvents(events){
         return events.filter(event => {
           if(calendarTeamFilterIds.size && !eventTeamIds(event).some(teamId => calendarTeamFilterIds.has(teamId))) return false;
@@ -2132,12 +2156,16 @@
       }
       function loadPresenceEvents(){
         if(Array.isArray(presenceEventsMemoryCache)) return presenceEventsMemoryCache;
+        const cacheStartedAt = presencePerf.enabled ? performance.now() : 0;
         const events = readJson(PRESENCE_EVENTS_KEY, []);
+        presencePerf.record("local-cache-read", {durationMs:Math.round(performance.now() - cacheStartedAt), documents:Array.isArray(events) ? events.length : 0});
+        const normalizationStartedAt = presencePerf.enabled ? performance.now() : 0;
         const normalized = Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
         const {active, retired} = splitRetiredPresenceSeasonEvents(normalized);
         const kept = filterDeletedPresenceEvents(active);
         presenceEventsMemoryCache = kept;
         if(retired.length || kept.length !== active.length) setJson(PRESENCE_EVENTS_KEY, kept);
+        presencePerf.record("normalization", {durationMs:Math.round(performance.now() - normalizationStartedAt), documents:kept.length});
         return presenceEventsMemoryCache;
       }
       function savePresenceEvents(events){
@@ -2194,7 +2222,9 @@
       async function pullPresenceEventsFromCloud(){
         const api = centralDataApi();
         if(!api?.presenceListEvents) return [];
+        const firestoreStartedAt = presencePerf.enabled ? performance.now() : 0;
         const cloudEvents = await api.presenceListEvents();
+        presencePerf.record("firestore-load", {durationMs:Math.round(performance.now() - firestoreStartedAt), documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0});
         const activeCloudEvents = Array.isArray(cloudEvents) ? cloudEvents : [];
         await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);
         const syncedAt = new Date().toISOString();
@@ -3807,11 +3837,13 @@
         document.getElementById("attendanceDetail")?.scrollIntoView({behavior:"smooth", block:"start"});
       });
       function render(){
+        const renderStartedAt = presencePerf.enabled ? performance.now() : 0;
         const events = filteredEvents(loadEvents());
         renderCalendarPage(events);
         renderReports(events);
         renderPrevention(events);
         renderSettings();
+        presencePerf.record("render", {durationMs:Math.round(performance.now() - renderStartedAt), documents:events.length});
       }
       async function initPresenceCloud(){
         try{
@@ -3834,8 +3866,10 @@
             pullPresenceSettingsFromCloud()
           ]);
           const {cloudEvents=[]} = presenceResult || {};
+          const synchronizedRenderStartedAt = presencePerf.enabled ? performance.now() : 0;
           render();
           renderSessionList();
+          presencePerf.record("post-sync-render", {durationMs:Math.round(performance.now() - synchronizedRenderStartedAt), documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0});
           if(cloudReady) setSessionMessage("Événements chargés depuis le cloud.", "success");
           syncPresenceEventsToCloud(cloudEvents).then(syncedCount => {
             if(syncedCount) setSessionMessage(`${syncedCount} événement(s) local(aux) synchronisé(s) avec le cloud.`, "success");
@@ -3880,6 +3914,7 @@
       initSettings();
       initCalendarControls();
       render();
+      presencePerf.record("first-render", {durationMs:presencePerf.elapsed()});
       initPresenceCloud();
     })();
   </script>
