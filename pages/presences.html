@@ -1653,6 +1653,7 @@
   <script src="../shared/services/teams-service.js"></script>
   <script src="../shared/services/players-service.js"></script>
   <script src="../shared/services/presence-events-service.js"></script>
+  <script src="../shared/services/presence-access-context-service.js"></script>
   <script src="../shared/utils/storage-service.js"></script>
   <script src="presences/presence-config.js"></script>
   <script src="presences/presence-utils.js"></script>
@@ -1740,6 +1741,10 @@
       let presenceNavigationRequestId = 0;
       let progressivePresenceLoadingAvailable = true;
       let presenceHistoryLoaded = false;
+      const presenceAccessContexts = window.CoachPulsePresenceAccessContext;
+      const presenceContextTracker = presenceAccessContexts.createTracker();
+      let presenceUiReady = false;
+      let presenceContextReloadTimer = null;
       function progressivePresenceLoadingEnabled(){
         try{ return progressivePresenceLoadingAvailable && localStorage.getItem("coachpulse:presenceProgressiveMonths") !== "0"; }
         catch(_error){ return progressivePresenceLoadingAvailable; }
@@ -1756,8 +1761,59 @@
         const profile = presenceAccess?.profile || {};
         return String(profile.permissionLevel || '').toUpperCase() === 'ADMIN' || String(profile.role || '').toUpperCase() === 'ADMIN';
       }
+      function presenceContextToken(){ return presenceContextTracker.capture(); }
+      function presenceContextIsCurrent(token){ return presenceContextTracker.isCurrent(token); }
+      function presenceContextMonthKey(monthKey){ return presenceContextTracker.monthKey(monthKey); }
+      function filterPresenceEventsForCurrentContext(events=[]){
+        return presenceAccessContexts.filterEvents(presenceAccess || {}, events);
+      }
+      function persistedPresenceEvents(){
+        const events = readJson(PRESENCE_EVENTS_KEY, []);
+        return Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
+      }
+      function presenceEventsForStorage(events=[]){
+        const current = activePresenceSeasonEvents(events).filter(event => !isDeletedPresenceEvent(event));
+        const access = presenceAccessContexts.contextParts(presenceAccess || {});
+        if(access.allPlayers) return current;
+        const preserved = persistedPresenceEvents().filter(event => !presenceAccessContexts.canAccessEvent(presenceAccess || {}, event));
+        return mergePresenceEvents(preserved, current);
+      }
+      function invalidatePresenceAccessContext(reason="access-change"){
+        presenceMonthRequestId += 1;
+        presenceNavigationRequestId += 1;
+        presenceMonthLoads.clear();
+        presenceCompleteMonths.clear();
+        presenceHistoryLoaded = false;
+        cloudReady = false;
+        clearTimeout(realtimeRefreshTimer);
+        realtimeRefreshTimer = null;
+        stopPresenceEventsSubscription?.();
+        stopPresenceEventsSubscription = null;
+        stopPresenceSettingsSubscription?.();
+        stopPresenceSettingsSubscription = null;
+        if(presenceLocalSaveTimer != null){
+          if(typeof cancelIdleCallback === "function") cancelIdleCallback(presenceLocalSaveTimer);
+          else clearTimeout(presenceLocalSaveTimer);
+          presenceLocalSaveTimer = null;
+        }
+        const source = Array.isArray(presenceEventsMemoryCache) ? presenceEventsMemoryCache : persistedPresenceEvents();
+        presenceEventsMemoryCache = filterPresenceEventsForCurrentContext(source);
+        presenceScopedPlayers = null;
+        invalidatePresencePlayersCache();
+        if(!presenceUiReady) return;
+        render();
+        clearTimeout(presenceContextReloadTimer);
+        const token = presenceContextToken();
+        presenceContextReloadTimer = setTimeout(() => {
+          if(!presenceContextIsCurrent(token)) return;
+          initPresenceCloud({contextRefresh:true, token, reason}).catch(error => console.warn('[Présences] Rechargement du contexte impossible', error));
+        }, 0);
+      }
       function applyPresenceAccess(context){
-        if(context?.type === 'coachpulse-access-context') presenceAccess = context;
+        if(context?.type !== 'coachpulse-access-context') return;
+        presenceAccess = context;
+        const update = presenceContextTracker.update(context);
+        if(update.changed) invalidatePresenceAccessContext('access-context-message');
         const allowed = isPresenceAdmin();
         document.querySelectorAll('[data-admin-only]').forEach(node => { node.hidden = !allowed; });
         if(!allowed && document.getElementById('panel-settings')?.classList.contains('active')) activateTab('calendar');
@@ -1945,7 +2001,7 @@
         ];
         presencePlayersMemoryCache = Array.isArray(presenceScopedPlayers)
           ? presenceScopedPlayers
-          : (presencePlayersSource === "offline-cache" && Array.isArray(cachedRows) ? cachedRows : []);
+          : (presencePlayersSource === "offline-cache" && Array.isArray(cachedRows) ? presenceAccessContexts.filterPlayers(presenceAccess || {}, cachedRows) : []);
         presencePlayersByIdCache = new Map(presencePlayersMemoryCache.map(player => [String(player.playerId || player.id || ""), player]));
         return presencePlayersMemoryCache;
       }
@@ -2189,42 +2245,45 @@
         ].filter(Boolean)).sort((a,b) => a.date - b.date);
       }
       function loadPresenceEvents(){
-        if(Array.isArray(presenceEventsMemoryCache)) return presenceEventsMemoryCache;
+        if(Array.isArray(presenceEventsMemoryCache)) return filterPresenceEventsForCurrentContext(presenceEventsMemoryCache);
         const cacheStartedAt = presencePerf.enabled ? performance.now() : 0;
-        const events = readJson(PRESENCE_EVENTS_KEY, []);
+        const events = persistedPresenceEvents();
         presencePerf.record("local-cache-read", {durationMs:Math.round(performance.now() - cacheStartedAt), documents:Array.isArray(events) ? events.length : 0});
         const normalizationStartedAt = presencePerf.enabled ? performance.now() : 0;
         const normalized = Array.isArray(events) ? events.map(normalizePresenceEventForStorage).filter(event => event?.id) : [];
         const {active, retired} = splitRetiredPresenceSeasonEvents(normalized);
-        const kept = filterDeletedPresenceEvents(active);
+        const kept = filterPresenceEventsForCurrentContext(filterDeletedPresenceEvents(active));
         presenceEventsMemoryCache = kept;
-        if(retired.length || kept.length !== active.length) setJson(PRESENCE_EVENTS_KEY, kept);
         presencePerf.record("normalization", {durationMs:Math.round(performance.now() - normalizationStartedAt), documents:kept.length});
         return presenceEventsMemoryCache;
       }
       function savePresenceEvents(events){
-        const normalized = activePresenceSeasonEvents((Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id))
-          .filter(event => !isDeletedPresenceEvent(event));
+        const normalized = filterPresenceEventsForCurrentContext(activePresenceSeasonEvents((Array.isArray(events) ? events : []).map(normalizePresenceEventForStorage).filter(event => event?.id))
+          .filter(event => !isDeletedPresenceEvent(event)));
         presenceEventsMemoryCache = normalized;
+        const stored = presenceEventsForStorage(normalized);
         const compacted = window.CoachPulsePresenceEventsService?.compactStoredEvents
-          ? window.CoachPulsePresenceEventsService.compactStoredEvents(normalized)
-          : normalized;
+          ? window.CoachPulsePresenceEventsService.compactStoredEvents(stored)
+          : stored;
         setJson(PRESENCE_EVENTS_KEY, compacted);
       }
       function queuePresenceEventsLocalSave(events){
-        presenceEventsMemoryCache = Array.isArray(events) ? events : [];
+        presenceEventsMemoryCache = filterPresenceEventsForCurrentContext(Array.isArray(events) ? events : []);
+        const token = presenceContextToken();
         if(presenceLocalSaveTimer != null){
           if(typeof cancelIdleCallback === "function") cancelIdleCallback(presenceLocalSaveTimer);
           else clearTimeout(presenceLocalSaveTimer);
         }
         const persist = () => {
           presenceLocalSaveTimer = null;
+          if(!presenceContextIsCurrent(token)) return;
           const activeEvents = activePresenceSeasonEvents(presenceEventsMemoryCache || [])
             .filter(event => !isDeletedPresenceEvent(event));
           presenceEventsMemoryCache = activeEvents;
+          const stored = presenceEventsForStorage(activeEvents);
           const compacted = window.CoachPulsePresenceEventsService?.compactStoredEvents
-            ? window.CoachPulsePresenceEventsService.compactStoredEvents(activeEvents)
-            : activeEvents;
+            ? window.CoachPulsePresenceEventsService.compactStoredEvents(stored)
+            : stored;
           setJson(PRESENCE_EVENTS_KEY, compacted);
         };
         presenceLocalSaveTimer = typeof requestIdleCallback === "function"
@@ -2254,13 +2313,17 @@
         return [...byId.values()].sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
       }
       async function pullPresenceEventsFromCloud(){
+        const options = arguments[0] || {};
+        const token = options.token || presenceContextToken();
         const api = centralDataApi();
         if(!api?.presenceListEvents) return [];
         const firestoreStartedAt = presencePerf.enabled ? performance.now() : 0;
         const cloudEvents = await api.presenceListEvents();
+        if(!presenceContextIsCurrent(token)) return {merged:[], cloudEvents:[], stale:true};
         presencePerf.record("firestore-load", {durationMs:Math.round(performance.now() - firestoreStartedAt), documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0});
         const activeCloudEvents = Array.isArray(cloudEvents) ? cloudEvents : [];
         await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);
+        if(!presenceContextIsCurrent(token)) return {merged:[], cloudEvents:[], stale:true};
         const syncedAt = new Date().toISOString();
         const acknowledgedCloudEvents = activeCloudEvents
           .filter(event => !isDeletedPresenceEvent(event))
@@ -2272,13 +2335,16 @@
         return {merged, cloudEvents:activeCloudEvents};
       }
       async function pullPresenceMonthFromCloud(monthKey, options={}){
+        const token = options.token || presenceContextToken();
         const api = centralDataApi();
-        if(!progressivePresenceLoadingEnabled() || !api?.presenceListEventsByMonth) return pullPresenceEventsFromCloud();
-        if(options.forceRefresh !== true && presenceMonthLoads.has(monthKey)) return presenceMonthLoads.get(monthKey);
+        if(!progressivePresenceLoadingEnabled() || !api?.presenceListEventsByMonth) return pullPresenceEventsFromCloud({token});
+        const scopedMonthKey = presenceContextMonthKey(monthKey);
+        if(options.forceRefresh !== true && presenceMonthLoads.has(scopedMonthKey)) return presenceMonthLoads.get(scopedMonthKey);
         const requestId = ++presenceMonthRequestId;
         const load = (async () => {
           const firestoreStartedAt = presencePerf.enabled ? performance.now() : 0;
           const cloudEvents = await api.presenceListEventsByMonth({month:monthKey, forceRefresh:options.forceRefresh === true});
+          if(!presenceContextIsCurrent(token)) return {merged:[], cloudEvents:[], month:monthKey, requestId, stale:true};
           presencePerf.record("firestore-month-load", {
             month:monthKey,
             durationMs:Math.round(performance.now() - firestoreStartedAt),
@@ -2286,6 +2352,7 @@
           });
           const activeCloudEvents = Array.isArray(cloudEvents) ? cloudEvents : [];
           await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);
+          if(!presenceContextIsCurrent(token)) return {merged:[], cloudEvents:[], month:monthKey, requestId, stale:true};
           const syncedAt = new Date().toISOString();
           const acknowledged = activeCloudEvents
             .filter(event => !isDeletedPresenceEvent(event))
@@ -2294,7 +2361,8 @@
           const preserved = existing.filter(event => presenceMonthKey(event.date) !== monthKey || !event.cloudSyncedAt);
           const merged = mergePresenceEvents(preserved, acknowledged);
           queuePresenceEventsLocalSave(merged);
-          presenceCompleteMonths.add(monthKey);
+          if(!presenceContextIsCurrent(token)) return {merged:[], cloudEvents:[], month:monthKey, requestId, stale:true};
+          presenceCompleteMonths.add(scopedMonthKey);
           cloudReady = true;
           return {merged, cloudEvents:activeCloudEvents, month:monthKey, requestId};
         })().catch(async error => {
@@ -2302,31 +2370,36 @@
           if(code.includes("failed-precondition") || code === "9"){
             progressivePresenceLoadingAvailable = false;
             console.warn("[Présences] Index mensuels indisponibles, retour au chargement historique", error);
-            return pullPresenceEventsFromCloud();
+            if(!presenceContextIsCurrent(token)) return {merged:[], cloudEvents:[], month:monthKey, requestId, stale:true};
+            return pullPresenceEventsFromCloud({token});
           }
           throw error;
         }).finally(() => {
-          if(presenceMonthLoads.get(monthKey) === load) presenceMonthLoads.delete(monthKey);
+          if(presenceMonthLoads.get(scopedMonthKey) === load) presenceMonthLoads.delete(scopedMonthKey);
         });
-        presenceMonthLoads.set(monthKey, load);
+        presenceMonthLoads.set(scopedMonthKey, load);
         return load;
       }
       function prefetchAdjacentPresenceMonths(monthKey){
         if(!progressivePresenceLoadingEnabled()) return;
+        const token = presenceContextToken();
         const work = () => [-1, 1].forEach(offset => {
+          if(!presenceContextIsCurrent(token)) return;
           const adjacent = presenceAdjacentMonthKey(monthKey, offset);
-          if(!presenceCompleteMonths.has(adjacent)) pullPresenceMonthFromCloud(adjacent).catch(error => console.warn("[Présences] Préchargement mensuel différé", error));
+          if(!presenceCompleteMonths.has(presenceContextMonthKey(adjacent))) pullPresenceMonthFromCloud(adjacent, {token}).catch(error => console.warn("[Présences] Préchargement mensuel différé", error));
         });
         if(typeof requestIdleCallback === "function") requestIdleCallback(work, {timeout:2500});
         else setTimeout(work, 0);
       }
       async function ensurePresenceEventAttendance(eventId){
+        const token = presenceContextToken();
         const api = centralDataApi();
         const events = loadPresenceEvents();
         const event = events.find(item => item.id === eventId);
         if(!event || !api?.presenceLoadEventAttendance) return event;
         try{
           const detailed = await api.presenceLoadEventAttendance(event);
+          if(!presenceContextIsCurrent(token)) return null;
           if(!detailed || !Object.keys(detailed).length) return event;
           const currentEvents = loadPresenceEvents();
           const index = currentEvents.findIndex(item => item.id === eventId);
@@ -2340,10 +2413,11 @@
           return event;
         }
       }
-      async function pullPresenceSettingsFromCloud(){
+      async function pullPresenceSettingsFromCloud(token=presenceContextToken()){
         const api = centralDataApi();
         if(!api?.presenceLoadSettings) return;
         const cloudSettings = await api.presenceLoadSettings();
+        if(!presenceContextIsCurrent(token)) return;
         if(cloudSettings && Object.keys(cloudSettings).length){
           const deletedIds = deletedPresenceEventIds();
           const deletedKeys = deletedPresenceEventKeys();
@@ -3877,31 +3951,37 @@
       }
       function subscribeToVisiblePresenceMonth(monthKey){
         const api = centralDataApi();
+        const token = presenceContextToken();
         stopPresenceEventsSubscription?.();
         if(progressivePresenceLoadingEnabled() && api?.presenceSubscribeEventsByMonth){
           stopPresenceEventsSubscription = api.presenceSubscribeEventsByMonth(monthKey, () => {
+            if(!presenceContextIsCurrent(token)) return;
             clearTimeout(realtimeRefreshTimer);
             realtimeRefreshTimer = setTimeout(async () => {
-              try{ await pullPresenceMonthFromCloud(monthKey, {forceRefresh:true}); if(presenceMonthKey(calendarPageMonth) === monthKey) render(); }
+              if(!presenceContextIsCurrent(token)) return;
+              try{ await pullPresenceMonthFromCloud(monthKey, {forceRefresh:true, token}); if(presenceContextIsCurrent(token) && presenceMonthKey(calendarPageMonth) === monthKey) render(); }
               catch(error){ console.warn('[Présences] Actualisation mensuelle impossible', error); }
             }, 150);
           }) || null;
           return;
         }
         stopPresenceEventsSubscription = api?.presenceSubscribeEvents?.(() => {
+          if(!presenceContextIsCurrent(token)) return;
           clearTimeout(realtimeRefreshTimer);
           realtimeRefreshTimer = setTimeout(async () => {
-            try{ await pullPresenceEventsFromCloud(); render(); }
+            if(!presenceContextIsCurrent(token)) return;
+            try{ await pullPresenceEventsFromCloud({token}); if(presenceContextIsCurrent(token)) render(); }
             catch(error){ console.warn('[Présences] Actualisation temps réel impossible', error); }
           }, 150);
         }) || null;
       }
       async function loadVisiblePresenceMonth(options={}){
         const monthKey = presenceMonthKey(calendarPageMonth);
+        const token = options.token || presenceContextToken();
         const navigationRequestId = ++presenceNavigationRequestId;
         subscribeToVisiblePresenceMonth(monthKey);
-        const result = await pullPresenceMonthFromCloud(monthKey, options);
-        if(navigationRequestId !== presenceNavigationRequestId || presenceMonthKey(calendarPageMonth) !== monthKey) return result;
+        const result = await pullPresenceMonthFromCloud(monthKey, {...options, token});
+        if(!presenceContextIsCurrent(token) || navigationRequestId !== presenceNavigationRequestId || presenceMonthKey(calendarPageMonth) !== monthKey) return result;
         render();
         prefetchAdjacentPresenceMonths(monthKey);
         return result;
@@ -3980,16 +4060,20 @@
         presencePerf.record("render", {durationMs:Math.round(performance.now() - renderStartedAt), documents:events?.length || loadPresenceEvents().length, panel:activePresenceTab});
       }
       async function initPresenceCloud(){
+        const options = arguments[0] || {};
+        const token = options.token || presenceContextToken();
         try{
           const api = centralDataApi();
           const loadPlayers = (async () => {
             try{
               if(typeof api?.listPlayers !== "function") throw new Error("API centrale indisponible");
               const loadedPlayers = await api.listPlayers({season:"all", includeArchived:true, moduleId:"presences"});
+              if(!presenceContextIsCurrent(token)) return;
               presenceScopedPlayers = Array.isArray(loadedPlayers) ? loadedPlayers : [];
               presencePlayersSource = "firestore-scoped";
               invalidatePresencePlayersCache();
             }catch(error){
+              if(!presenceContextIsCurrent(token)) return;
               presenceScopedPlayers = null;
               presencePlayersSource = "offline-cache";
               invalidatePresencePlayersCache();
@@ -3998,21 +4082,26 @@
           })();
           const [, presenceResult] = await Promise.all([
             loadPlayers,
-            pullPresenceMonthFromCloud(presenceMonthKey(calendarPageMonth)),
-            pullPresenceSettingsFromCloud()
+            options.contextRefresh === true
+              ? pullPresenceMonthFromCloud(presenceMonthKey(calendarPageMonth), {token, forceRefresh:true})
+              : pullPresenceMonthFromCloud(presenceMonthKey(calendarPageMonth)),
+            options.contextRefresh === true ? pullPresenceSettingsFromCloud(token) : pullPresenceSettingsFromCloud()
           ]);
+          if(!presenceContextIsCurrent(token)) return;
           const {cloudEvents=[]} = presenceResult || {};
           const synchronizedRenderStartedAt = presencePerf.enabled ? performance.now() : 0;
           render();
           presencePerf.record("post-sync-render", {durationMs:Math.round(performance.now() - synchronizedRenderStartedAt), documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0});
           if(cloudReady) setSessionMessage("Événements chargés depuis le cloud.", "success");
-          syncPresenceEventsToCloud(cloudEvents).then(syncedCount => {
+          if(options.contextRefresh !== true) syncPresenceEventsToCloud(cloudEvents).then(syncedCount => {
+            if(!presenceContextIsCurrent(token)) return;
             if(syncedCount) setSessionMessage(`${syncedCount} événement(s) local(aux) synchronisé(s) avec le cloud.`, "success");
           }).catch(error => console.warn('[Présences] Synchronisation locale différée impossible', error));
           subscribeToVisiblePresenceMonth(presenceMonthKey(calendarPageMonth));
           prefetchAdjacentPresenceMonths(presenceMonthKey(calendarPageMonth));
           stopPresenceSettingsSubscription?.();
           stopPresenceSettingsSubscription = api?.presenceSubscribeSettings?.(settings => {
+            if(!presenceContextIsCurrent(token)) return;
             const deletedIds = deletedPresenceEventIds();
             const deletedKeys = deletedPresenceEventKeys();
             (Array.isArray(settings.deletedEventIds) ? settings.deletedEventIds : []).forEach(id => {
@@ -4032,6 +4121,7 @@
             render();
           }) || null;
         }catch(error){
+          if(!presenceContextIsCurrent(token)) return;
           cloudReady = false;
           setSessionMessage(`Cloud indisponible : affichage local uniquement. ${error?.message || error}`, "error");
         }
@@ -4044,7 +4134,8 @@
       initCalendarControls();
       render();
       presencePerf.record("first-render", {durationMs:presencePerf.elapsed()});
-      initPresenceCloud();
+      presenceUiReady = true;
+      initPresenceCloud({token:presenceContextToken()});
     })();
   </script>
 </body>

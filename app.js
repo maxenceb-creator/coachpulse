@@ -50,6 +50,7 @@ let adminAccessChoiceCache = null;
 let appRefreshInProgress = false;
 let localChangeSnapshotTimer = null;
 let presenceCacheGeneration = 0;
+let activePresenceAccessContextKey = '';
 const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
   'coachStatsV170',
   'presenceSeanceV3_6_Excel',
@@ -421,7 +422,7 @@ function normalizeLoadedStaffProfile(profile={}){
 function accessContext(){
   const profile = accessProfile();
   const authorizedTeamIds = getAuthorizedTeamIds();
-  return {
+  const context = {
     type:'coachpulse-access-context',
     user:{uid:currentUser?.uid || '', email:currentUser?.email || ''},
     profile:{
@@ -442,9 +443,20 @@ function accessContext(){
     },
     modules:Object.fromEntries(moduleRegistry().map(module => [module.id, {read:hasModulePermission(module, 'read'), write:hasModulePermission(module, 'write'), delete:canDeleteData(module.id)}]))
   };
+  context.presenceContextKey = window.CoachPulsePresenceAccessContext?.contextKey?.(context) || '';
+  return context;
+}
+function syncPresenceAccessContext(context=accessContext()){
+  const nextKey = context.presenceContextKey || window.CoachPulsePresenceAccessContext?.contextKey?.(context) || '';
+  if(nextKey === activePresenceAccessContextKey) return false;
+  activePresenceAccessContextKey = nextKey;
+  invalidateAppDataCaches('presences');
+  return true;
 }
 function notifyFramesAccessUpdated(){
-  try{ frame?.contentWindow?.postMessage(accessContext(), '*'); }catch(_e){}
+  const context = accessContext();
+  syncPresenceAccessContext(context);
+  try{ frame?.contentWindow?.postMessage(context, '*'); }catch(_e){}
 }
 function guardAdminAction(label='Action réservée aux éditeurs autorisés'){
   if(isAdmin()) return true;
@@ -1326,6 +1338,7 @@ async function initFirebaseInternal(){
         currentProfile = null;
         stopRealtimeSync();
         stopStaffProfileSubscription();
+        notifyFramesAccessUpdated();
         setLocked(true);
       }
     });
@@ -6085,13 +6098,7 @@ async function presenceListEvents(options={}){
   const presenceLoadStartedAt = presenceDebug ? performance.now() : 0;
   const readStats = {queries:0, queryResults:[], queryErrors:[]};
   const authorizedTeamIds = getAuthorizedTeamIds();
-  const cacheKey = [
-    currentUser.uid,
-    presenceSettingsAdminAllowed() ? 'admin' : 'staff',
-    canAccessAllPlayersForModule('presences') ? 'allPlayers' : 'teamScope',
-    authorizedTeamIds.slice().sort().join(','),
-    includeRetiredPresenceSeasons ? 'withRetiredPresenceSeasons' : 'activePresenceSeasons'
-  ].join(':');
+  const cacheKey = `${window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || currentUser.uid}:${includeRetiredPresenceSeasons ? 'withRetiredPresenceSeasons' : 'activePresenceSeasons'}`;
   if(
     options.forceRefresh !== true
     &&
@@ -6241,6 +6248,7 @@ async function presenceListEvents(options={}){
       .map(session => presenceCloudEventFromSession(session, attendanceBySessionId.get(String(session.sessionId || session.id || '')) || []))
       .filter(event => event.id && event.date)
       .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+    if(cacheGeneration !== presenceCacheGeneration || appDataCache.presenceEvents.key !== cacheKey) return [];
     if(presenceDebug){
       const firestoreDocuments = readStats.queryResults.reduce((total, query) => total + query.documents, 0);
       recordPerfEvent('presences:firestore-load', {
@@ -6283,11 +6291,12 @@ async function presenceListEventsByMonth(options={}){
   if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const range = presenceMonthRange(options.month);
+  const cacheGeneration = presenceCacheGeneration;
   const authorizedTeamIds = getAuthorizedTeamIds();
   const adminScope = presenceSettingsAdminAllowed() || canAccessAllPlayersForModule('presences');
   if(!adminScope && !authorizedTeamIds.length) return [];
-  const scopeKey = adminScope ? 'all' : authorizedTeamIds.slice().sort().join(',');
-  const cacheKey = `${currentUser.uid}:${scopeKey}:${range.monthKey}`;
+  const accessKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || `${currentUser.uid}:${adminScope ? 'all' : authorizedTeamIds.slice().sort().join(',')}`;
+  const cacheKey = `${accessKey}:${range.monthKey}`;
   const cached = appDataCache.presenceEvents.months.get(cacheKey);
   if(options.forceRefresh !== true && cached?.complete && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS){
     if(debugPerfEnabled()) recordPerfEvent('presences:month-cache-hit', {month:range.monthKey, documents:cached.rows.length, queries:0});
@@ -6329,6 +6338,7 @@ async function presenceListEventsByMonth(options={}){
       }
     }
     const sessionRows = (await Promise.all(reads)).flat();
+    if(cacheGeneration !== presenceCacheGeneration || accessKey !== (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '')) return [];
     const uniqueSessions = [...new Map(sessionRows.map(row => [row.sessionId || row.id, row])).values()];
     const sessions = scopedRecordsForModuleAccess(uniqueSessions, 'presences')
       .filter(row => row.sessionId || row.id)
@@ -6364,6 +6374,8 @@ async function presenceLoadEventAttendance(event={}){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const sessionId = String(event.sessionId || event.id || '').trim();
   if(!sessionId) return {};
+  const cacheGeneration = presenceCacheGeneration;
+  const accessKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '';
   const rows = [];
   const authorizedTeamIds = getAuthorizedTeamIds();
   const adminScope = presenceSettingsAdminAllowed() || canAccessAllPlayersForModule('presences');
@@ -6389,6 +6401,7 @@ async function presenceLoadEventAttendance(event={}){
     }
   }
   (await Promise.all(reads)).forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
+  if(cacheGeneration !== presenceCacheGeneration || accessKey !== (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '')) return {};
   const attendance = {};
   const uniqueRows = [...new Map(rows.map(row => [row.attendanceId || row.id, row])).values()];
   scopedRecordsForModuleAccess(uniqueRows, 'presences').forEach(row => {
@@ -6432,6 +6445,10 @@ async function presenceSaveSettings(settings={}){
 }
 function presenceSubscribeEvents(onChange){
   if(!db || !currentUser || typeof onChange !== 'function') return () => {};
+  const subscriptionGeneration = presenceCacheGeneration;
+  const subscriptionContextKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '';
+  const contextIsCurrent = () => subscriptionGeneration === presenceCacheGeneration
+    && subscriptionContextKey === (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '');
   const authorizedTeamIds = getAuthorizedTeamIds();
   if(!presenceSettingsAdminAllowed() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return () => {};
   const queries = [];
@@ -6460,6 +6477,7 @@ function presenceSubscribeEvents(onChange){
     const diagnostic = {function:'presenceSubscribeEvents', module:'presences', scope:authorizedTeamIds.length ? 'authorized-teams' : 'all', collection:'sessions', operation:'listener'};
     const loadingOperation = safeLoadingCall('start', [label, {kind:'sync', diagnostic}]);
     const unsubscribe = firebaseFns.onSnapshot(queryRef, () => {
+    if(!contextIsCurrent()) return;
     try{ loadingOperation?.end?.(); }catch(_error){}
     invalidateAppDataCaches('presences');
     if(initialized++ >= queries.length) onChange();
@@ -6479,6 +6497,10 @@ function presenceSubscribeEventsByMonth(monthKey, onChange){
   const range = presenceMonthRange(monthKey);
   const authorizedTeamIds = getAuthorizedTeamIds();
   const adminScope = presenceSettingsAdminAllowed() || canAccessAllPlayersForModule('presences');
+  const subscriptionGeneration = presenceCacheGeneration;
+  const subscriptionContextKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '';
+  const contextIsCurrent = () => subscriptionGeneration === presenceCacheGeneration
+    && subscriptionContextKey === (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '');
   if(!adminScope && !authorizedTeamIds.length) return () => {};
   const baseRanges = [
     [{field:'createdFromPresenceModule', operator:'==', value:true}],
@@ -6508,6 +6530,7 @@ function presenceSubscribeEventsByMonth(monthKey, onChange){
         ...constraints.map(item => firebaseFns.where(item.field, item.operator, item.value))
       );
       return firebaseFns.onSnapshot(queryRef, () => {
+        if(!contextIsCurrent()) return;
         if(initialized++ >= constraintSets.length) onChange({month:range.monthKey});
       }, error => console.warn(`[Présences] Écoute mensuelle ${index + 1} indisponible`, cleanError(error)));
     });
@@ -6516,9 +6539,12 @@ function presenceSubscribeEventsByMonth(monthKey, onChange){
 }
 function presenceSubscribeSettings(onChange){
   if(!db || !currentUser || typeof onChange !== 'function') return () => {};
+  const subscriptionGeneration = presenceCacheGeneration;
+  const subscriptionContextKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '';
   const diagnostic = {function:'presenceSubscribeSettings', module:'presences', scope:'module', collection:'settings', operation:'listener'};
   const loadingOperation = safeLoadingCall('start', ['attendance-settings:listen', {kind:'sync', diagnostic}]);
   const unsubscribe = firebaseFns.onSnapshot(firebaseFns.doc(db, 'settings', 'presence-module'), snap => {
+    if(subscriptionGeneration !== presenceCacheGeneration || subscriptionContextKey !== (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '')) return;
     try{ loadingOperation?.end?.(); }catch(_error){}
     if(snap.exists()) onChange(firestoreSafeData(snap.data()?.value || {}));
   }, error => {
@@ -7023,6 +7049,7 @@ async function logout(){
   stopRealtimeSync();
   stopStaffProfileSubscription();
   currentUser = null; currentProfile = null;
+  notifyFramesAccessUpdated();
   clearSensitiveLocalData();
   storage.clearPendingSync();
   setLocked(true);
