@@ -6081,6 +6081,7 @@ async function presenceListEvents(options={}){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const includeRetiredPresenceSeasons = options.includeRetiredPresenceSeasons === true;
   const presenceDebug = debugPerfEnabled();
+  const presenceLoadStartedAt = presenceDebug ? performance.now() : 0;
   const readStats = {queries:0, queryResults:[], queryErrors:[]};
   const authorizedTeamIds = getAuthorizedTeamIds();
   const cacheKey = [
@@ -6097,9 +6098,11 @@ async function presenceListEvents(options={}){
     && appDataCache.presenceEvents.key === cacheKey
     && Date.now() - appDataCache.presenceEvents.loadedAt < DATA_CACHE_TTL_MS
   ){
+    if(presenceDebug) recordPerfEvent('presences:firestore-cache-hit', {documents:appDataCache.presenceEvents.rows.length, queries:0});
     return cloneData(appDataCache.presenceEvents.rows);
   }
   if(appDataCache.presenceEvents.pending && appDataCache.presenceEvents.key === cacheKey){
+    if(presenceDebug) recordPerfEvent('presences:firestore-cache-pending', {queries:0});
     return cloneData(await appDataCache.presenceEvents.pending);
   }
   const docsFromSnap = snap => {
@@ -6109,20 +6112,22 @@ async function presenceListEvents(options={}){
   };
   const readWhere = async (collectionName, field, operator, value) => {
     readStats.queries += 1;
+    const startedAt = presenceDebug ? performance.now() : 0;
     const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, operator, value));
     const rows = docsFromSnap(await firebaseFns.getDocs(q));
-    readStats.queryResults.push({collection:collectionName, fields:[field], documents:rows.length});
+    readStats.queryResults.push({collection:collectionName, fields:[field], documents:rows.length, durationMs:presenceDebug ? Math.round(performance.now() - startedAt) : 0});
     return rows;
   };
   const readWhereSafe = async (collectionName, constraints=[]) => {
     readStats.queries += 1;
+    const startedAt = presenceDebug ? performance.now() : 0;
     try{
       const q = firebaseFns.query(
         firebaseFns.collection(db, collectionName),
         ...constraints.map(item => firebaseFns.where(item.field, item.operator, item.value))
       );
       const rows = docsFromSnap(await firebaseFns.getDocs(q));
-      readStats.queryResults.push({collection:collectionName, fields:constraints.map(item => item.field), documents:rows.length});
+      readStats.queryResults.push({collection:collectionName, fields:constraints.map(item => item.field), documents:rows.length, durationMs:presenceDebug ? Math.round(performance.now() - startedAt) : 0});
       return rows;
     }catch(error){
       const code = String(error?.code || '').toLowerCase();
@@ -6235,8 +6240,15 @@ async function presenceListEvents(options={}){
       .filter(event => event.id && event.date)
       .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
     if(presenceDebug){
+      const firestoreDocuments = readStats.queryResults.reduce((total, query) => total + query.documents, 0);
+      recordPerfEvent('presences:firestore-load', {
+        durationMs:Math.round(performance.now() - presenceLoadStartedAt),
+        queries:readStats.queries,
+        documents:firestoreDocuments,
+        returned:events.length,
+        errors:readStats.queryErrors.length
+      });
       console.info('[Présences debug]', {
-        teamId:options.teamId || '', period:options.period || '', startDate:options.startDate || '', endDate:options.endDate || '',
         firestoreQueries:readStats.queries, queryResults:readStats.queryResults, queryErrors:readStats.queryErrors,
         firestoreDocuments:sessionRows.length, beforeFiltering:sessionRows.length,
         afterNormalization:events.length, afterAuthorization:authorizedSessions.length, afterVisibility:sessions.length, returned:events.length
