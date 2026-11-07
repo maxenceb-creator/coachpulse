@@ -6031,7 +6031,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   const dateFromId = sessionId.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
   const eventDate = session.date || session.startDate || session.day || dateFromId || '';
   const teamIds = presenceTeamIdRefs(session, session.teamSnapshot, session.sessionSnapshot);
-  const rowsForSession = attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId && presenceUiStatusFromCode(row.status));
+  const rowsForSession = Array.isArray(attendanceRows) ? attendanceRows : [];
   const embeddedAttendanceIsAuthoritative = Number(session.embeddedAttendanceVersion || 0) >= 2;
   const embeddedAttendance = firestoreSafeData(session.attendance || {});
   const attendance = {...embeddedAttendance};
@@ -6235,8 +6235,9 @@ async function presenceListEvents(options={}){
         .map(row => [row.attendanceId || row.id, row])).values()];
     }
     const attendance = scopedRecordsForModuleAccess(attendanceRows, 'presences');
+    const attendanceBySessionId = presenceEventsService()?.indexAttendanceRowsBySessionId?.(attendance) || new Map();
     const events = sessions
-      .map(session => presenceCloudEventFromSession(session, attendance))
+      .map(session => presenceCloudEventFromSession(session, attendanceBySessionId.get(String(session.sessionId || session.id || '')) || []))
       .filter(event => event.id && event.date)
       .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
     if(presenceDebug){

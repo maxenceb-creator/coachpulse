@@ -1716,6 +1716,7 @@
       const RETIRED_PRESENCE_SEASONS = new Set(["2025-2026"]);
       let calendarPageMonth = new Date();
       let selectedCalendarDate = isoDate(new Date());
+      let activePresenceTab = "calendar";
       let selectedAttendanceEventId = "";
       let editingEventId = "";
       let calendarTeamFilterIds = new Set();
@@ -1728,6 +1729,8 @@
       let stopPresenceSettingsSubscription = null;
       let realtimeRefreshTimer = null;
       let presenceEventsMemoryCache = null;
+      let presencePlayersMemoryCache = null;
+      let presencePlayersByIdCache = null;
       let presenceLocalSaveTimer = null;
       const presenceCloudSaveTimers = new Map();
       const presenceCloudWriteChains = new Map();
@@ -1911,6 +1914,23 @@
           return window.CoachPulsePlayersService || null;
         }
       }
+      function invalidatePresencePlayersCache(){
+        presencePlayersMemoryCache = null;
+        presencePlayersByIdCache = null;
+      }
+      function presencePlayerRows(){
+        if(Array.isArray(presencePlayersMemoryCache)) return presencePlayersMemoryCache;
+        const service = playersService();
+        const cachedRows = service?.readCachedPlayers ? service.readCachedPlayers() : [
+          ...readJson("coachpulse:centralPlayers", []),
+          ...readJson("coachpulse:customPlayers", [])
+        ];
+        presencePlayersMemoryCache = Array.isArray(presenceScopedPlayers)
+          ? presenceScopedPlayers
+          : (presencePlayersSource === "offline-cache" && Array.isArray(cachedRows) ? cachedRows : []);
+        presencePlayersByIdCache = new Map(presencePlayersMemoryCache.map(player => [String(player.playerId || player.id || ""), player]));
+        return presencePlayersMemoryCache;
+      }
       function centralDataApi(){
         try{
           return window.parent?.CoachPulseCentralData || null;
@@ -2000,11 +2020,7 @@
       }
       function playersForTeam(teamId, dateValue){
         const service = playersService();
-        const cachedRows = service?.readCachedPlayers ? service.readCachedPlayers() : [
-          ...readJson("coachpulse:centralPlayers", []),
-          ...readJson("coachpulse:customPlayers", [])
-        ];
-        const rows = Array.isArray(presenceScopedPlayers) ? presenceScopedPlayers : (presencePlayersSource === "offline-cache" ? cachedRows : []);
+        const rows = presencePlayerRows();
         const normalized = service?.playersForTeamAtDate
           ? service.playersForTeamAtDate(Array.isArray(rows) ? rows : [], teamId, dateValue)
           : (Array.isArray(rows) ? rows : [])
@@ -2536,7 +2552,6 @@
         savePresenceSettings({...settings, attendanceCodes});
         resetAttendanceCodeForm();
         render();
-        renderSessionList();
         setSettingsMessage(exists ? "Code modifié." : "Code ajouté.", "success");
       }
       function deleteAttendanceCode(codeId){
@@ -2549,7 +2564,6 @@
         savePresenceSettings({...settings, attendanceCodes:codes.filter(code => code.id !== codeId)});
         resetAttendanceCodeForm();
         render();
-        renderSessionList();
         setSettingsMessage("Code supprimé.", "success");
       }
       function renderSettings(){
@@ -2742,12 +2756,8 @@
         })).filter(entry => !!entry.status);
       }
       function playerById(playerId, dateValue){
-        const service = playersService();
-        const rows = service?.readCachedPlayers ? service.readCachedPlayers() : [
-          ...readJson("coachpulse:centralPlayers", []),
-          ...readJson("coachpulse:customPlayers", [])
-        ];
-        const player = (Array.isArray(rows) ? rows : []).find(row => String(row.playerId || row.id || "") === String(playerId || ""));
+        presencePlayerRows();
+        const player = presencePlayersByIdCache?.get(String(playerId || ""));
         return player ? playerForEventSeason(player, dateValue) : null;
       }
       function playerSnapshotForAttendance(player, teamId, dateValue){
@@ -3136,7 +3146,6 @@
         removeDeletedPresenceEventFromLocalStores(event);
         if(selectedAttendanceEventId === eventId) selectedAttendanceEventId = "";
         render();
-        renderSessionList();
         setSessionMessage("Événement et présences associés supprimés définitivement de Firebase.", "success");
       }
       function emptyAttendanceForEvent(teamId, dateValue, duration){
@@ -3636,7 +3645,6 @@
           savePresenceSettings({...settings, attendanceCodes:DEFAULT_ATTENDANCE_CODES});
           resetAttendanceCodeForm();
           render();
-          renderSessionList();
           setSettingsMessage("Codes réinitialisés.", "success");
         });
       }
@@ -3696,13 +3704,11 @@
             }
           }catch(error){
             render();
-            renderSessionList();
             setSessionMessage(`Événement conservé en local, mais cloud non synchronisé : ${error?.message || error}.`, "error");
             return;
           }
           resetSessionForm();
           render();
-          renderSessionList();
           setSessionMessage(previousEvent ? "Événement modifié dans le cloud." : `${savedItems.length} événement(s) créé(s) dans le cloud.`, "success");
         });
         document.getElementById("sessionForm")?.addEventListener("reset", () => {
@@ -3751,12 +3757,12 @@
           updateAttendanceEntry(button.dataset.attendanceEvent, button.dataset.playerId, {status:nextStatus});
         });
         updateRecurrenceUi();
-        renderSessionList();
       }
       function activateTab(tab){
+        activePresenceTab = tab;
         document.querySelectorAll(".presence-tab").forEach(item => item.classList.toggle("active", item.dataset.tab === tab));
         document.querySelectorAll(".presence-panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${tab}`));
-        if(tab === "calendar") render();
+        render();
       }
       function openSessionCreationForDate(dateValue){
         const dateInput = document.getElementById("sessionDate");
@@ -3833,17 +3839,18 @@
         if(!openButton) return;
         selectedAttendanceEventId = openButton.dataset.calendarOpenAttendance || "";
         activateTab("sessions");
-        renderSessionList();
         document.getElementById("attendanceDetail")?.scrollIntoView({behavior:"smooth", block:"start"});
       });
       function render(){
         const renderStartedAt = presencePerf.enabled ? performance.now() : 0;
-        const events = filteredEvents(loadEvents());
-        renderCalendarPage(events);
-        renderReports(events);
-        renderPrevention(events);
-        renderSettings();
-        presencePerf.record("render", {durationMs:Math.round(performance.now() - renderStartedAt), documents:events.length});
+        let events = null;
+        if(["calendar","reports","prevention"].includes(activePresenceTab)) events = filteredEvents(loadEvents());
+        if(activePresenceTab === "calendar") renderCalendarPage(events);
+        else if(activePresenceTab === "sessions") renderSessionList();
+        else if(activePresenceTab === "reports") renderReports(events);
+        else if(activePresenceTab === "prevention") renderPrevention(events);
+        else if(activePresenceTab === "settings" && isPresenceAdmin()) renderSettings();
+        presencePerf.record("render", {durationMs:Math.round(performance.now() - renderStartedAt), documents:events?.length || loadPresenceEvents().length, panel:activePresenceTab});
       }
       async function initPresenceCloud(){
         try{
@@ -3854,9 +3861,11 @@
               const loadedPlayers = await api.listPlayers({season:"all", includeArchived:true, moduleId:"presences"});
               presenceScopedPlayers = Array.isArray(loadedPlayers) ? loadedPlayers : [];
               presencePlayersSource = "firestore-scoped";
+              invalidatePresencePlayersCache();
             }catch(error){
               presenceScopedPlayers = null;
               presencePlayersSource = "offline-cache";
+              invalidatePresencePlayersCache();
               console.warn('[Présences] Chargement effectif indisponible, cache hors ligne utilisé', error);
             }
           })();
@@ -3868,7 +3877,6 @@
           const {cloudEvents=[]} = presenceResult || {};
           const synchronizedRenderStartedAt = presencePerf.enabled ? performance.now() : 0;
           render();
-          renderSessionList();
           presencePerf.record("post-sync-render", {durationMs:Math.round(performance.now() - synchronizedRenderStartedAt), documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0});
           if(cloudReady) setSessionMessage("Événements chargés depuis le cloud.", "success");
           syncPresenceEventsToCloud(cloudEvents).then(syncedCount => {
@@ -3878,7 +3886,7 @@
           stopPresenceEventsSubscription = api?.presenceSubscribeEvents?.(() => {
             clearTimeout(realtimeRefreshTimer);
             realtimeRefreshTimer = setTimeout(async () => {
-              try{ await pullPresenceEventsFromCloud(); render(); renderSessionList(); }
+              try{ await pullPresenceEventsFromCloud(); render(); }
               catch(error){ console.warn('[Présences] Actualisation temps réel impossible', error); }
             }, 150);
           }) || null;

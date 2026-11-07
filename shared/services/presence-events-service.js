@@ -282,6 +282,17 @@
   function uniqueRows(rows=[], keyFn){
     return [...new Map(rows.map(row => [keyFn(row), row])).values()];
   }
+  function indexAttendanceRowsBySessionId(rows=[]){
+    const bySessionId = new Map();
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+      const sessionId = text(row?.sessionId);
+      if(!sessionId || !text(row?.playerId) || !normalizeStatus(row?.status)) return;
+      const sessionRows = bySessionId.get(sessionId) || [];
+      sessionRows.push(row);
+      bySessionId.set(sessionId, sessionRows);
+    });
+    return bySessionId;
+  }
   function collectionsFromEvents(events=[]){
     const elapsedEvents = events.filter(event => isElapsedEvent(event));
     return {
@@ -313,6 +324,7 @@
     teamIdsFromEvent,
     attendanceRowsFromEvent,
     attendanceRosterPlayers,
+    indexAttendanceRowsBySessionId,
     isElapsedEvent,
     isRetiredPresenceSeasonEvent,
     collectionsFromEvents,
