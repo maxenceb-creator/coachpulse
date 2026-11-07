@@ -53,6 +53,11 @@ assert(pageSource.includes('if(event.cloudSyncedAt) return false;'), 'Un cache h
 assert(pageSource.includes('function invalidatePresenceAccessContext'), 'Le changement de droits doit avoir un point d’invalidation unique.');
 assert(pageSource.includes('presenceContextIsCurrent(token)'), 'Les résultats asynchrones doivent vérifier leur génération avant application.');
 assert(pageSource.includes('stopPresenceEventsSubscription?.()'), 'Le listener du contexte précédent doit être détaché immédiatement.');
+assert(pageSource.includes('presenceCloudSaveTimers.forEach(timer => clearTimeout(timer))'), 'Les timers cloud de l’ancien contexte doivent être annulés.');
+assert(pageSource.includes('if(!presenceContextIsCurrent(token)) return;\n          const previousWrite'), 'Un timer obsolète ne doit pas démarrer sa chaîne d’écriture.');
+assert(pageSource.includes('await pushPresenceEventToCloud(latestEvent, "attendance-debounce");\n            if(!presenceContextIsCurrent(token)) return;'), 'Une écriture résolue sous un ancien contexte ne doit pas muter le cache ou l’UI.');
+assert(pageSource.includes('reconcileDeletedPresenceEventsFromCloud(activeCloudEvents, token)'), 'La réconciliation doit recevoir le token du chargement.');
+assert(pageSource.includes('if(!presenceContextIsCurrent(token)) return {deleted:0, failed:0, stale:true};'), 'La réconciliation obsolète doit être abandonnée sans effet.');
 assert(monthlyBlock.includes('cacheGeneration !== presenceCacheGeneration'), 'Le cache mensuel central doit rejeter une ancienne génération.');
 assert(attendanceBlock.includes('cacheGeneration !== presenceCacheGeneration'), 'Le détail attendance doit rejeter une ancienne génération.');
 
@@ -88,6 +93,17 @@ async function testContextIsolation(){
     {id:'player-u11', seasonHistory:{'2026-2027':{teamId:'team-u11-a'}}}
   ]).map(row => row.id), ['player-u11'], 'Le roster offline doit être filtré avec le même contexte.');
 
+  const localSources = {
+    presence:[{id:'modern-u13', teamId:'team-u13-a'}, {id:'modern-u11', teamId:'team-u11-a'}],
+    methodology:[{id:'method-u13', teamId:'team-u13-a'}, {id:'method-u11', teamId:'team-u11-a'}],
+    legacy:[{id:'legacy-u13', teamId:'team-u13-a'}, {id:'legacy-u11', teamId:'team-u11-a'}]
+  };
+  const normalizeLocalEvent = (event, source) => ({...event, source});
+  const visibleForA = presenceContexts.filterLocalEventSources(trainerA, localSources, normalizeLocalEvent);
+  const visibleForB = presenceContexts.filterLocalEventSources(trainerB, localSources, normalizeLocalEvent);
+  assert.deepEqual(visibleForA.map(row => row.id), ['modern-u13','method-u13','legacy-u13'], 'A doit voir uniquement ses trois sources locales U13.');
+  assert.deepEqual(visibleForB.map(row => row.id), ['modern-u11','method-u11','legacy-u11'], 'B offline ne doit voir aucune ligne U13, quelle que soit la source locale.');
+
   const trainer = access('uid-a', ['team-u13-a']);
   const admin = access('uid-a', ['team-u13-a'], {permissionLevel:'ADMIN', role:'ADMIN', allPlayers:true});
   assert.notEqual(presenceContexts.contextKey(trainer), presenceContexts.contextKey(admin), 'ENTRAINEUR et ADMIN doivent avoir des caches distincts.');
@@ -118,8 +134,43 @@ async function testContextIsolation(){
   await oldRequest;
   assert.equal(applyCount, 0, 'Une réponse arrivée après logout ne doit produire aucun effet.');
 
+  tracker.update(trainerA);
+  const timerToken = tracker.capture();
+  let deferredWrites = 0;
+  const deferredTimer = setTimeout(() => {
+    if(tracker.isCurrent(timerToken)) deferredWrites += 1;
+  }, 5);
+  tracker.update(trainerB);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  clearTimeout(deferredTimer);
+  assert.equal(deferredWrites, 0, 'Un timer créé sous A ne doit lancer aucune écriture après passage à B.');
+
+  tracker.update(trainerA);
+  const chainToken = tracker.capture();
+  let releaseWrite;
+  const writeResult = new Promise(resolve => { releaseWrite = resolve; });
+  let postWriteEffects = 0;
+  const oldWriteChain = (async () => {
+    if(!tracker.isCurrent(chainToken)) return;
+    await writeResult;
+    if(!tracker.isCurrent(chainToken)) return;
+    postWriteEffects += 1;
+  })();
+  tracker.update(trainerB);
+  releaseWrite();
+  await oldWriteChain;
+  assert.equal(postWriteEffects, 0, 'La résolution tardive d’une écriture A ne doit modifier ni cache ni UI sous B.');
+
+  tracker.update(trainerA);
+  const reconcileToken = tracker.capture();
+  tracker.update(trainerB);
+  let destructiveMutations = 0;
+  if(tracker.isCurrent(reconcileToken)) destructiveMutations += 1;
+  assert.equal(destructiveMutations, 0, 'Une réconciliation A devenue obsolète ne doit lancer aucune mutation sous B.');
+
   let listenerCallbacks = 0;
   let unsubscribeCount = 0;
+  tracker.update(trainerA);
   const listenerToken = tracker.capture();
   const oldCallback = () => { if(tracker.isCurrent(listenerToken)) listenerCallbacks += 1; };
   const unsubscribe = () => { unsubscribeCount += 1; };

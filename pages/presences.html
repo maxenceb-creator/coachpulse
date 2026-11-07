@@ -1796,6 +1796,8 @@
           else clearTimeout(presenceLocalSaveTimer);
           presenceLocalSaveTimer = null;
         }
+        presenceCloudSaveTimers.forEach(timer => clearTimeout(timer));
+        presenceCloudSaveTimers.clear();
         const source = Array.isArray(presenceEventsMemoryCache) ? presenceEventsMemoryCache : persistedPresenceEvents();
         presenceEventsMemoryCache = filterPresenceEventsForCurrentContext(source);
         presenceScopedPlayers = null;
@@ -2238,11 +2240,11 @@
         const methodo = Array.isArray(savedMethodoEvents) ? savedMethodoEvents : [];
         const legacy = readJson(LEGACY_PRESENCE_KEY, null);
         const legacySessions = activePresenceSeasonEvents(Array.isArray(legacy?.sessions) ? legacy.sessions : []);
-        return filterDeletedPresenceEvents([
-          ...presenceEvents.map(event => normalizeEvent(event, "presences")),
-          ...methodo.map(event => normalizeEvent(event, "methodologie")),
-          ...legacySessions.map(event => normalizeEvent(event, "presences"))
-        ].filter(Boolean)).sort((a,b) => a.date - b.date);
+        return presenceAccessContexts.filterLocalEventSources(presenceAccess || {}, {
+          presence:presenceEvents,
+          methodology:methodo,
+          legacy:legacySessions
+        }, normalizeEvent, filterDeletedPresenceEvents).sort((a,b) => a.date - b.date);
       }
       function loadPresenceEvents(){
         if(Array.isArray(presenceEventsMemoryCache)) return filterPresenceEventsForCurrentContext(presenceEventsMemoryCache);
@@ -2322,7 +2324,7 @@
         if(!presenceContextIsCurrent(token)) return {merged:[], cloudEvents:[], stale:true};
         presencePerf.record("firestore-load", {durationMs:Math.round(performance.now() - firestoreStartedAt), documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0});
         const activeCloudEvents = Array.isArray(cloudEvents) ? cloudEvents : [];
-        await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);
+        await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents, token);
         if(!presenceContextIsCurrent(token)) return {merged:[], cloudEvents:[], stale:true};
         const syncedAt = new Date().toISOString();
         const acknowledgedCloudEvents = activeCloudEvents
@@ -2351,7 +2353,7 @@
             documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0
           });
           const activeCloudEvents = Array.isArray(cloudEvents) ? cloudEvents : [];
-          await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);
+          await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents, token);
           if(!presenceContextIsCurrent(token)) return {merged:[], cloudEvents:[], month:monthKey, requestId, stale:true};
           const syncedAt = new Date().toISOString();
           const acknowledged = activeCloudEvents
@@ -2446,18 +2448,23 @@
         return api.presenceSaveEvent(normalized, {origin});
       }
       function schedulePresenceEventCloudSave(eventId, delay=650){
+        const token = presenceContextToken();
         clearTimeout(presenceCloudSaveTimers.get(eventId));
         setSessionMessage("Modification enregistrée localement…", "");
         presenceCloudSaveTimers.set(eventId, setTimeout(() => {
           presenceCloudSaveTimers.delete(eventId);
+          if(!presenceContextIsCurrent(token)) return;
           const previousWrite = presenceCloudWriteChains.get(eventId) || Promise.resolve();
           const nextWrite = previousWrite.catch(() => {}).then(async () => {
+            if(!presenceContextIsCurrent(token)) return;
             const latestEvent = loadPresenceEvents().find(item => item.id === eventId);
             if(!latestEvent || isDeletedPresenceEvent(latestEvent)) return;
             await pushPresenceEventToCloud(latestEvent, "attendance-debounce");
+            if(!presenceContextIsCurrent(token)) return;
             markPresenceEventsSynced([eventId]);
             setSessionMessage("Feuille de présence synchronisée.", "success");
           }).catch(error => {
+            if(!presenceContextIsCurrent(token)) return;
             setSessionMessage(`Sauvegarde cloud impossible : ${error?.message || error}.`, "error");
           }).finally(() => {
             if(presenceCloudWriteChains.get(eventId) === nextWrite) presenceCloudWriteChains.delete(eventId);
@@ -2465,7 +2472,7 @@
           presenceCloudWriteChains.set(eventId, nextWrite);
         }, delay));
       }
-      async function syncPresenceEventsToCloud(cloudEvents=[]){
+      async function syncPresenceEventsToCloud(cloudEvents=[], token=presenceContextToken()){
         const api = centralDataApi();
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
         const cloudById = new Map((Array.isArray(cloudEvents) ? cloudEvents : []).map(event => [event.id, event]));
@@ -2478,9 +2485,12 @@
         });
         const syncedIds = [];
         for(const event of eventsToSync){
+          if(!presenceContextIsCurrent(token)) return syncedIds.length;
           await api.presenceSaveEvent(event, {origin:"initial-pending-sync"});
+          if(!presenceContextIsCurrent(token)) return syncedIds.length;
           syncedIds.push(event.id);
         }
+        if(!presenceContextIsCurrent(token)) return syncedIds.length;
         markPresenceEventsSynced(syncedIds);
         return syncedIds.length;
       }
@@ -2489,11 +2499,14 @@
         if(!api?.presenceDeleteEvent) throw new Error("Suppression cloud indisponible.");
         return api.presenceDeleteEvent(event);
       }
-      async function reconcileDeletedPresenceEventsFromCloud(events=[]){
+      async function reconcileDeletedPresenceEventsFromCloud(events=[], token=presenceContextToken()){
+        if(!presenceContextIsCurrent(token)) return {deleted:0, failed:0, stale:true};
         const api = centralDataApi();
         const marked = (Array.isArray(events) ? events : []).filter(event => event?.id && isDeletedPresenceEvent(event));
         if(!marked.length || !api?.presenceDeleteEvent) return {deleted:0, failed:0};
+        if(!presenceContextIsCurrent(token)) return {deleted:0, failed:0, stale:true};
         const results = await Promise.allSettled(marked.map(event => api.presenceDeleteEvent(event)));
+        if(!presenceContextIsCurrent(token)) return {deleted:0, failed:0, stale:true};
         const deleted = results.filter(result => result.status === "fulfilled").length;
         const failed = results.length - deleted;
         if(deleted) console.info(`[Présences] ${deleted} ancienne(s) suppression(s) réconciliée(s) avec Firebase.`);
@@ -4093,7 +4106,7 @@
           render();
           presencePerf.record("post-sync-render", {durationMs:Math.round(performance.now() - synchronizedRenderStartedAt), documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0});
           if(cloudReady) setSessionMessage("Événements chargés depuis le cloud.", "success");
-          if(options.contextRefresh !== true) syncPresenceEventsToCloud(cloudEvents).then(syncedCount => {
+          if(options.contextRefresh !== true) syncPresenceEventsToCloud(cloudEvents, token).then(syncedCount => {
             if(!presenceContextIsCurrent(token)) return;
             if(syncedCount) setSessionMessage(`${syncedCount} événement(s) local(aux) synchronisé(s) avec le cloud.`, "success");
           }).catch(error => console.warn('[Présences] Synchronisation locale différée impossible', error));

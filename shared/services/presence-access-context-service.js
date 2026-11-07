@@ -83,6 +83,17 @@
     return (Array.isArray(events) ? events : []).filter(event => canAccessEvent(context, event));
   }
 
+  function filterLocalEventSources(context={}, sources={}, normalizeEvent, filterDeleted){
+    const normalize = typeof normalizeEvent === 'function' ? normalizeEvent : event => event;
+    const rows = [
+      ...(Array.isArray(sources.presence) ? sources.presence : []).map(event => normalize(event, 'presences')),
+      ...(Array.isArray(sources.methodology) ? sources.methodology : []).map(event => normalize(event, 'methodologie')),
+      ...(Array.isArray(sources.legacy) ? sources.legacy : []).map(event => normalize(event, 'presences'))
+    ].filter(Boolean);
+    const activeRows = typeof filterDeleted === 'function' ? filterDeleted(rows) : rows;
+    return filterEvents(context, activeRows);
+  }
+
   function canAccessPlayer(context={}, player={}){
     const access = contextParts(context);
     if(!access.uid) return false;
@@ -116,7 +127,7 @@
     return {update, capture, isCurrent, monthKey, key:() => key, generation:() => generation, context:() => context};
   }
 
-  const service = {contextParts, contextKey, eventTeamIds, playerTeamIds, canAccessEvent, filterEvents, canAccessPlayer, filterPlayers, createTracker};
+  const service = {contextParts, contextKey, eventTeamIds, playerTeamIds, canAccessEvent, filterEvents, filterLocalEventSources, canAccessPlayer, filterPlayers, createTracker};
   global.CoachPulsePresenceAccessContext = service;
   if(typeof module !== 'undefined' && module.exports) module.exports = service;
 })(typeof window !== 'undefined' ? window : globalThis);

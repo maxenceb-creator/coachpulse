@@ -852,7 +852,7 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes('const batch = firebaseFns.writeBatch(db);'), 'La séance et ses présences doivent être sauvegardées dans le même batch Firestore.');
   assert(appSource.includes("Cette séance a été supprimée définitivement"), 'Une séance supprimée ne doit pas pouvoir être recréée depuis un cache ancien.');
   const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
-  assert(presencePageSource.includes('await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);'), 'Les suppressions historiques doivent être réconciliées au chargement du calendrier.');
+  assert(presencePageSource.includes('await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents, token);'), 'Les suppressions historiques doivent être réconciliées avec le contexte du chargement du calendrier.');
   assert(presencePageSource.indexOf('await deletePresenceEventFromCloud(event);') < presencePageSource.indexOf('await markPresenceEventDeleted(eventId, {event, syncCloud:true});'), 'Le calendrier ne doit masquer une séance qu’après confirmation de Firebase.');
   const mergeWorkflowSource = fs.readFileSync('.github/workflows/firebase-hosting-merge.yml', 'utf8');
   assert(!mergeWorkflowSource.includes('deploy --only firestore:rules'), 'Le merge sur main ne doit jamais publier les Rules Firestore.');
