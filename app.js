@@ -6265,7 +6265,7 @@ async function presenceListEvents(options={}){
       });
     }
     if(cacheGeneration === presenceCacheGeneration && appDataCache.presenceEvents.key === cacheKey){
-      appDataCache.presenceEvents = {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey, pending:null};
+      Object.assign(appDataCache.presenceEvents, {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey, pending:null});
     }
     return events;
   };
