@@ -34,6 +34,29 @@
   };
 
   function text(value){ return String(value ?? '').trim(); }
+  function isPendingEvent(event={}){
+    const syncedAt = Date.parse(event.cloudSyncedAt || 0) || 0;
+    const updatedAt = Date.parse(event.updatedAt || event.createdAt || 0) || 0;
+    return !syncedAt || updatedAt > syncedAt;
+  }
+  function markEventPending(event={}, updatedAt=new Date().toISOString()){
+    const {cloudSyncedAt:_cloudSyncedAt, ...pending} = event;
+    return {...pending, updatedAt};
+  }
+  function mergeEventVersions(current, next){
+    if(!current) return next;
+    if(!next) return current;
+    const currentPending = isPendingEvent(current);
+    const currentTime = Date.parse(current.updatedAt || current.createdAt || 0) || 0;
+    const nextTime = Date.parse(next.updatedAt || next.createdAt || 0) || 0;
+    const attendance = currentPending
+      ? {...(next.attendance || {}), ...(current.attendance || {})}
+      : {...(current.attendance || {}), ...(next.attendance || {})};
+    if(currentPending) return {...next, ...current, attendance};
+    return nextTime >= currentTime
+      ? {...current, ...next, attendance}
+      : {...next, ...current, attendance};
+  }
   function readJson(key, fallback){
     try{
       const value = global.localStorage?.getItem(key);
@@ -176,11 +199,23 @@
     if(!attendance || typeof attendance !== 'object') return {};
     return Object.fromEntries(Object.entries(attendance).map(([playerId, raw]) => {
       if(!raw || typeof raw !== 'object') return [playerId, raw];
+      const cleaned = stripEmbeddedImages(raw);
       return [playerId, {
-        ...raw,
-        playerSnapshot:playerSnapshotFromRaw(raw, playerId, event)
+        ...cleaned,
+        playerSnapshot:playerSnapshotFromRaw(cleaned, playerId, event)
       }];
     }));
+  }
+  function stripEmbeddedImages(value, key=''){
+    if(value == null) return value;
+    const imageKey = /^(?:photo|image|avatar|portrait|thumbnail|picture)(?:url|src|data)?$/i.test(String(key).replace(/[-_\s]/g, ''));
+    if(imageKey) return undefined;
+    if(typeof value === 'string') return /^data:image\//i.test(value.trim()) ? undefined : value;
+    if(Array.isArray(value)) return value.map(item => stripEmbeddedImages(item)).filter(item => item !== undefined);
+    if(typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value)
+      .map(([childKey, childValue]) => [childKey, stripEmbeddedImages(childValue, childKey)])
+      .filter(([, childValue]) => childValue !== undefined));
   }
   function sanitizePresenceEvent(event={}){
     return {...event, attendance:sanitizeAttendanceMap(event.attendance, event)};
@@ -293,9 +328,9 @@
   function compactStoredEvents(events=[], options={}){
     const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : 1536 * 1024;
     const rows = Array.isArray(events) ? events.filter(event => eventId(event)) : [];
-    const pending = rows.filter(event => !text(event.cloudSyncedAt));
+    const pending = rows.filter(isPendingEvent);
     const synced = rows
-      .filter(event => text(event.cloudSyncedAt))
+      .filter(event => !isPendingEvent(event))
       .sort((a,b) => (Date.parse(b.updatedAt || b.createdAt || b.cloudSyncedAt || 0) || 0) - (Date.parse(a.updatedAt || a.createdAt || a.cloudSyncedAt || 0) || 0));
     const kept = [...pending, ...synced];
     const bytes = value => {
@@ -349,6 +384,10 @@
     STORAGE_KEY,
     readEvents,
     compactStoredEvents,
+    isPendingEvent,
+    markEventPending,
+    mergeEventVersions,
+    stripEmbeddedImages,
     lightPlayerSnapshot,
     sanitizeAttendanceMap,
     sanitizePresenceEvent,

@@ -2301,6 +2301,18 @@
       function eventSyncStamp(event={}){
         return Date.parse(event.updatedAt || event.createdAt || "") || 0;
       }
+      function isPendingPresenceEvent(event={}){
+        const service = window.CoachPulsePresenceEventsService;
+        if(service?.isPendingEvent) return service.isPendingEvent(event);
+        const syncedAt = Date.parse(event.cloudSyncedAt || 0) || 0;
+        return !syncedAt || eventSyncStamp(event) > syncedAt;
+      }
+      function markPresenceEventPending(event={}, updatedAt=new Date().toISOString()){
+        const service = window.CoachPulsePresenceEventsService;
+        if(service?.markEventPending) return service.markEventPending(event, updatedAt);
+        const {cloudSyncedAt:_cloudSyncedAt, ...pending} = event;
+        return {...pending, updatedAt};
+      }
       function markPresenceEventsSynced(eventIds=[]){
         const ids = new Set(eventIds.filter(Boolean));
         if(!ids.size) return true;
@@ -2313,10 +2325,19 @@
           if(!event?.id) return;
           if(isDeletedPresenceEvent(event)) return;
           const current = byId.get(event.id);
-          const currentTime = Date.parse(current?.updatedAt || current?.createdAt || '') || 0;
-          const nextTime = Date.parse(event.updatedAt || event.createdAt || '') || 0;
-          const attendance = mergeAttendanceMaps(current?.attendance, event.attendance);
-          const merged = !current || nextTime >= currentTime ? {...current, ...event, attendance} : {...event, ...current, attendance};
+          const merged = window.CoachPulsePresenceEventsService?.mergeEventVersions
+            ? window.CoachPulsePresenceEventsService.mergeEventVersions(current, event)
+            : (() => {
+              const currentTime = Date.parse(current?.updatedAt || current?.createdAt || '') || 0;
+              const nextTime = Date.parse(event.updatedAt || event.createdAt || '') || 0;
+              const currentPending = current && isPendingPresenceEvent(current);
+              const attendance = currentPending
+                ? mergeAttendanceMaps(event.attendance, current.attendance)
+                : mergeAttendanceMaps(current?.attendance, event.attendance);
+              return currentPending
+                ? {...event, ...current, attendance}
+                : (!current || nextTime >= currentTime ? {...current, ...event, attendance} : {...event, ...current, attendance});
+            })();
           byId.set(event.id, normalizePresenceEventForStorage(merged));
         });
         return [...byId.values()].sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
@@ -2481,13 +2502,11 @@
       async function syncPresenceEventsToCloud(cloudEvents=[], token=presenceContextToken()){
         const api = centralDataApi();
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
-        const cloudById = new Map((Array.isArray(cloudEvents) ? cloudEvents : []).map(event => [event.id, event]));
         const localEvents = activePresenceSeasonEvents(loadPresenceEvents()).filter(event => !isDeletedPresenceEvent(event));
         const eventsToSync = localEvents.filter(event => {
           if(!event?.id) return false;
-          if(event.cloudSyncedAt) return false;
-          const cloudEvent = cloudById.get(event.id);
-          return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent);
+          if(!isPendingPresenceEvent(event)) return false;
+          return true;
         });
         const syncedIds = [];
         for(const event of eventsToSync){
@@ -3510,7 +3529,7 @@
         }
         if(!team) throw new Error("Choisis une équipe reliée à un teamId.");
         const teamIds = eventTeamIds({teamId:team.teamId, teamIds:team.teamIds || [], team:team.name, category:team.category});
-        return {
+        return markPresenceEventPending({
           ...(previousEvent || {}),
           id:previousEvent?.id || `presence-event-${Date.now()}-0`,
           date,
@@ -3537,9 +3556,8 @@
           recurrenceId:previousEvent?.recurrenceId || "",
           recurrenceEnd:recurrence === "none" ? "" : recurrenceEnd,
           createdAt:previousEvent?.createdAt || new Date().toISOString(),
-          updatedAt:new Date().toISOString(),
           source:"Présences"
-        };
+        });
       }
       function renderSessionList(){
         const list = document.getElementById("sessionList");
@@ -3762,15 +3780,15 @@
             }, next.playerSnapshot || playerSnapshot)
           };
         }
-        events[index] = {
+        events[index] = markPresenceEventPending({
           ...current,
-          attendance,
-          updatedAt:new Date().toISOString()
-        };
+          attendance
+        });
         presenceEventsMemoryCache = events;
         updateAttendanceDetailUi(events[index], playerId, patch);
-        queuePresenceEventsLocalSave(events);
+        const persisted = savePresenceEvents(events);
         schedulePresenceEventCloudSave(eventId);
+        if(!persisted) warnPresenceLocalSaveFailure();
       }
       function updateDurationFromTimes(){
         const start = document.getElementById("sessionStart")?.value || "";
@@ -4123,7 +4141,7 @@
           render();
           presencePerf.record("post-sync-render", {durationMs:Math.round(performance.now() - synchronizedRenderStartedAt), documents:Array.isArray(cloudEvents) ? cloudEvents.length : 0});
           if(cloudReady) setSessionMessage("Événements chargés depuis le cloud.", "success");
-          if(options.contextRefresh !== true) syncPresenceEventsToCloud(cloudEvents, token).then(syncedCount => {
+          if(options.contextRefresh !== true || options.syncPending === true) syncPresenceEventsToCloud(cloudEvents, token).then(syncedCount => {
             if(!presenceContextIsCurrent(token)) return;
             if(syncedCount) setSessionMessage(`${syncedCount} événement(s) local(aux) synchronisé(s) avec le cloud.`, "success");
           }).catch(error => console.warn('[Présences] Synchronisation locale différée impossible', error));
@@ -4166,6 +4184,10 @@
       presencePerf.record("first-render", {durationMs:presencePerf.elapsed()});
       presenceUiReady = true;
       initPresenceCloud({token:presenceContextToken()});
+      window.addEventListener("online", () => {
+        initPresenceCloud({token:presenceContextToken(), contextRefresh:true, syncPending:true, reason:"online"})
+          .catch(error => console.warn("[Présences] Reprise après reconnexion impossible", error));
+      });
     })();
   </script>
 </body>

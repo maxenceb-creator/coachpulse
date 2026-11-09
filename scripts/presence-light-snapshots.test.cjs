@@ -40,6 +40,22 @@ assert.equal(created.attendance['player-a'].minutes, 75);
 assert.equal(created.attendance['player-a'].comment, 'RAS');
 assert.equal(created.attendance['player-a'].attendanceId, 'attendance-a');
 
+const previouslySynced = {...created, cloudSyncedAt:'2026-11-09T10:00:00Z'};
+const offlineModified = service.markEventPending(previouslySynced, '2026-11-09T10:05:00Z');
+assert.equal(offlineModified.cloudSyncedAt, undefined, 'une modification hors ligne doit invalider l’acquittement cloud');
+assert.equal(service.isPendingEvent(offlineModified), true, 'la modification doit rester pending après rechargement');
+assert.equal(service.isPendingEvent({...previouslySynced, updatedAt:'2026-11-09T10:05:00Z'}), true, 'les anciens pending avec marqueur périmé doivent être reconnus');
+const afterOfflineReload = JSON.parse(JSON.stringify(offlineModified));
+assert.equal(service.isPendingEvent(afterOfflineReload), true, 'un rechargement hors ligne doit conserver le statut pending');
+const olderCloud = {...previouslySynced, attendance:{'player-a':{...created.attendance['player-a'], status:'absent'}}, updatedAt:'2026-11-09T10:01:00Z', cloudSyncedAt:'2026-11-09T10:01:01Z'};
+const pendingWithChange = {...afterOfflineReload, attendance:{'player-a':{...created.attendance['player-a'], status:'late', minutes:12, comment:'Transport'}}};
+const mergedPending = service.mergeEventVersions(pendingWithChange, olderCloud);
+assert.equal(mergedPending.attendance['player-a'].status, 'late', 'la fusion doit préserver la version locale pending face au cloud ancien');
+assert.equal(mergedPending.attendance['player-a'].comment, 'Transport');
+assert.equal(service.isPendingEvent(mergedPending), true, 'la fusion ne doit pas acquitter prématurément le pending');
+const afterReconnectAck = {...mergedPending, cloudSyncedAt:'2026-11-09T10:06:00Z'};
+assert.equal(service.isPendingEvent(afterReconnectAck), false, 'la confirmation cloud doit seule acquitter le pending rejoué');
+
 const modified = service.sanitizePresenceEvent({
   ...created,
   updatedAt:'2026-11-09T11:00:00Z',
@@ -58,6 +74,22 @@ assertLight(rows[0].playerSnapshot, 'payload attendance');
 assert.equal(rows[0].sessionId, 'presence-session-creation');
 assert.equal(rows[0].playerId, 'player-a');
 assert.equal(rows[0].status, 'R');
+
+const legacyDirectImages = service.sanitizePresenceEvent({
+  ...modified,
+  attendance:{'player-a':{
+    ...modified.attendance['player-a'], photo:imageData, image:imageData,
+    avatar:{src:imageData}, nested:{portrait:imageData, safe:'conservé'}, attachment:imageData
+  }}
+});
+const legacySerialized = JSON.stringify(legacyDirectImages.attendance['player-a']).toLowerCase();
+assert(!legacySerialized.includes('data:image'), 'les images Base64 legacy doivent être retirées récursivement');
+assert(!legacySerialized.includes('"photo"'), 'les champs photo directs doivent être retirés');
+assert.equal(legacyDirectImages.attendance['player-a'].nested.safe, 'conservé');
+assert.equal(legacyDirectImages.attendance['player-a'].status, 'late');
+assert.equal(legacyDirectImages.attendance['player-a'].minutes, 12);
+assert.equal(legacyDirectImages.attendance['player-a'].comment, 'Transport');
+assert.equal(legacyDirectImages.attendance['player-a'].attendanceId, 'attendance-a');
 
 const legacyStorage = {
   getItem(key){ return key === service.STORAGE_KEY ? JSON.stringify([event]) : null; },
@@ -84,6 +116,11 @@ assert.equal(storage.getJson(service.STORAGE_KEY, [])[0].id, modified.id, 'le fa
 const pageSource = fs.readFileSync('pages/presences.html', 'utf8');
 const appSource = fs.readFileSync('app.js', 'utf8');
 assert(pageSource.includes('byId.set(event.id, normalizePresenceEventForStorage(merged));'), 'les fusions local/cloud doivent repasser par la normalisation légère');
+assert(pageSource.includes('mergeEventVersions(current, event)'), 'une version locale pending doit rester prioritaire pendant la fusion');
+assert(pageSource.includes('if(!isPendingPresenceEvent(event)) return false;'), 'la reprise doit sélectionner tous les événements pending');
+assert(pageSource.includes('window.addEventListener("online"'), 'la reconnexion doit relancer explicitement la reprise des présences');
+assert(pageSource.includes('contextRefresh:true, syncPending:true, reason:"online"'), 'la reconnexion doit forcer lecture puis rejeu des pending');
+assert(pageSource.includes('events[index] = markPresenceEventPending'), 'une présence modifiée doit être marquée pending');
 assert(pageSource.includes('if(!persisted) warnPresenceLocalSaveFailure();'), 'la sauvegarde locale doit vérifier son retour');
 assert(pageSource.includes('code:"presence/local-save-failed"'), 'le formulaire ne doit pas annoncer une sauvegarde locale réussie après échec');
 assert(appSource.includes('const sanitizedEvent = service?.sanitizePresenceEvent'), 'le payload Firestore doit partir d’un événement assaini');
