@@ -6560,7 +6560,8 @@ async function presenceSaveEvent(event={}, options={}){
   }
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = presenceEventsService();
-  const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
+  const sanitizedEvent = service?.sanitizePresenceEvent ? service.sanitizePresenceEvent(event) : event;
+  const session = service?.sessionFromEvent ? service.sessionFromEvent(sanitizedEvent) : sanitizedEvent;
   const sessionId = String(session.sessionId || '').trim();
   if(!sessionId || sessionId.startsWith('presence-event-') || sessionId.startsWith('local-attendance-')){
     throw new Error('Identifiant de séance Présences invalide. Recharge les présences avant de réessayer.');
@@ -6603,11 +6604,11 @@ async function presenceSaveEvent(event={}, options={}){
       category:session.category || event.category || event.categorie || ''
     },
     procedure:presencePlainProcedure(session.procedure || event.procedure || event.sessionProcedure),
-    attendance:firestoreSafeData(event.attendance || {}),
+    attendance:firestoreSafeData(service?.sanitizeAttendanceMap ? service.sanitizeAttendanceMap(sanitizedEvent.attendance, sanitizedEvent) : sanitizedEvent.attendance || {}),
     embeddedAttendanceVersion:2
   };
   const safeSessionPayload = firestoreSafeData(sessionPayload);
-  const attendanceRows = (service?.attendanceRowsFromEvent ? service.attendanceRowsFromEvent(event) : [])
+  const attendanceRows = (service?.attendanceRowsFromEvent ? service.attendanceRowsFromEvent(sanitizedEvent) : [])
     .filter(row => row.playerId)
     .map(row => ({
       ...row,
@@ -6621,12 +6622,11 @@ async function presenceSaveEvent(event={}, options={}){
         teamIds:sessionTeamIds,
         procedure:presencePlainProcedure(row.sessionSnapshot?.procedure || sessionPayload.procedure)
       },
-      playerSnapshot:{
-        ...(row.playerSnapshot || {}),
+      playerSnapshot:service?.lightPlayerSnapshot ? service.lightPlayerSnapshot(row.playerSnapshot, {
         playerId:row.playerId,
         teamId:row.playerSnapshot?.teamId || row.teamId || primaryTeamId || '',
         teamIds:presenceTeamIdRefs(row.playerSnapshot, row, sessionTeamIds)
-      }
+      }) : row.playerSnapshot
     }))
     .filter(row => canAccessAnyPresenceTeam(row, row.playerSnapshot, row.sessionSnapshot, sessionTeamIds));
   const nextAttendanceIds = new Set(attendanceRows.map(row => row.attendanceId || row.id).filter(Boolean));

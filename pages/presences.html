@@ -1708,6 +1708,11 @@
         if(storage?.setJson) return storage.setJson(key, value, {recover:true});
         return false;
       }
+      function warnPresenceLocalSaveFailure(){
+        const message = "Attention : la sauvegarde locale des présences a échoué (stockage du navigateur saturé ou indisponible). Les changements restent seulement en mémoire dans cet onglet.";
+        console.warn(`[Présences] ${message}`);
+        setSessionMessage(message, "error");
+      }
       const PRESENCE_EVENTS_KEY = storageKeys.presenceEvents || "coachpulse:presenceEvents:v1";
       const PRESENCE_SETTINGS_KEY = storageKeys.presenceSettings || "coachpulse:presenceSettings:v1";
       const EVENT_KEY = storageKeys.methodologieEvents || "methodo_events_v24";
@@ -2150,13 +2155,11 @@
           const entry = attendanceEntry({attendance:{[playerId]:raw}, duration:normalized.duration}, playerId);
           if(!entry.status && !Number(entry.minutes || 0) && !String(entry.comment || "").trim()) return;
           const player = playerById(playerId, date);
-          const snapshot = {
-            ...playerSnapshotForAttendance(player, teamId, date),
-            ...(raw?.playerSnapshot || {}),
-            playerId,
-            teamId,
-            teamIds
-          };
+          const snapshot = lightPlayerSnapshot(
+            {playerId, teamId, teamIds},
+            raw?.playerSnapshot,
+            playerSnapshotForAttendance(player, teamId, date)
+          );
           normalized.attendance[playerId] = {
             ...entry,
             attendanceId:raw?.attendanceId || `local-attendance-${normalized.id}-${playerId}`,
@@ -2267,7 +2270,9 @@
         const compacted = window.CoachPulsePresenceEventsService?.compactStoredEvents
           ? window.CoachPulsePresenceEventsService.compactStoredEvents(stored)
           : stored;
-        setJson(PRESENCE_EVENTS_KEY, compacted);
+        const persisted = setJson(PRESENCE_EVENTS_KEY, compacted);
+        if(!persisted) warnPresenceLocalSaveFailure();
+        return persisted;
       }
       function queuePresenceEventsLocalSave(events){
         presenceEventsMemoryCache = filterPresenceEventsForCurrentContext(Array.isArray(events) ? events : []);
@@ -2286,7 +2291,8 @@
           const compacted = window.CoachPulsePresenceEventsService?.compactStoredEvents
             ? window.CoachPulsePresenceEventsService.compactStoredEvents(stored)
             : stored;
-          setJson(PRESENCE_EVENTS_KEY, compacted);
+          const persisted = setJson(PRESENCE_EVENTS_KEY, compacted);
+          if(!persisted) warnPresenceLocalSaveFailure();
         };
         presenceLocalSaveTimer = typeof requestIdleCallback === "function"
           ? requestIdleCallback(persist, {timeout:3000})
@@ -2297,9 +2303,9 @@
       }
       function markPresenceEventsSynced(eventIds=[]){
         const ids = new Set(eventIds.filter(Boolean));
-        if(!ids.size) return;
+        if(!ids.size) return true;
         const syncedAt = new Date().toISOString();
-        savePresenceEvents(loadPresenceEvents().map(event => ids.has(event.id) ? {...event, cloudSyncedAt:syncedAt} : event));
+        return savePresenceEvents(loadPresenceEvents().map(event => ids.has(event.id) ? {...event, cloudSyncedAt:syncedAt} : event));
       }
       function mergePresenceEvents(localEvents=[], cloudEvents=[]){
         const byId = new Map();
@@ -2310,7 +2316,8 @@
           const currentTime = Date.parse(current?.updatedAt || current?.createdAt || '') || 0;
           const nextTime = Date.parse(event.updatedAt || event.createdAt || '') || 0;
           const attendance = mergeAttendanceMaps(current?.attendance, event.attendance);
-          byId.set(event.id, !current || nextTime >= currentTime ? {...current, ...event, attendance} : {...event, ...current, attendance});
+          const merged = !current || nextTime >= currentTime ? {...current, ...event, attendance} : {...event, ...current, attendance};
+          byId.set(event.id, normalizePresenceEventForStorage(merged));
         });
         return [...byId.values()].sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
       }
@@ -2461,8 +2468,7 @@
             if(!latestEvent || isDeletedPresenceEvent(latestEvent)) return;
             await pushPresenceEventToCloud(latestEvent, "attendance-debounce");
             if(!presenceContextIsCurrent(token)) return;
-            markPresenceEventsSynced([eventId]);
-            setSessionMessage("Feuille de présence synchronisée.", "success");
+            if(markPresenceEventsSynced([eventId])) setSessionMessage("Feuille de présence synchronisée.", "success");
           }).catch(error => {
             if(!presenceContextIsCurrent(token)) return;
             setSessionMessage(`Sauvegarde cloud impossible : ${error?.message || error}.`, "error");
@@ -2943,7 +2949,7 @@
           teamId,
           ...(Array.isArray(seasonal.teamIds) ? seasonal.teamIds : [])
         ].map(value => String(value || "").trim()).filter(Boolean))];
-        return {
+        return lightPlayerSnapshot({
           playerId:seasonal.playerId || player?.playerId || "",
           nom:seasonal.nom || "",
           prenom:seasonal.prenom || "",
@@ -2952,8 +2958,19 @@
           teamId:seasonal.teamId || teamId || "",
           teamIds,
           categorie:seasonal.categorie || seasonal.category || "",
-          subCategory:seasonal.subCategory || seasonal.sousCategorie || "",
-          photo:seasonal.photo || ""
+          subCategory:seasonal.subCategory || seasonal.sousCategorie || ""
+        });
+      }
+      function lightPlayerSnapshot(...sources){
+        const service = window.CoachPulsePresenceEventsService;
+        if(service?.lightPlayerSnapshot) return service.lightPlayerSnapshot(...sources);
+        const rows = sources.filter(source => source && typeof source === "object");
+        const first = key => rows.map(source => String(source[key] || "").trim()).find(Boolean) || "";
+        return {
+          playerId:first("playerId"), nom:first("nom"), prenom:first("prenom"), displayName:first("displayName"),
+          team:first("team"), teamId:first("teamId"),
+          teamIds:[...new Set(rows.flatMap(source => Array.isArray(source.teamIds) ? source.teamIds : []).map(String).filter(Boolean))],
+          categorie:first("categorie"), subCategory:first("subCategory")
         };
       }
       function playersFromPresenceEvents(events){
@@ -3358,12 +3375,11 @@
         const fallbackSnapshot = previousRaw?.playerSnapshot || {};
         const playerSnapshot = player
           ? playerSnapshotForAttendance(player, teamId, dateValue)
-          : {
-            ...fallbackSnapshot,
+          : lightPlayerSnapshot({
             playerId,
             teamId:fallbackSnapshot.teamId || teamId || "",
             teamIds:eventTeamIds({teamId, teamIds:fallbackSnapshot.teamIds || []})
-          };
+          }, fallbackSnapshot);
         const teamIds = eventTeamIds({teamId, teamIds:playerSnapshot.teamIds || []});
         return previous ? {
           ...previous,
@@ -3372,14 +3388,14 @@
             : Number(previous.minutes || 0),
           teamId:playerSnapshot.teamId || teamId || "",
           teamIds,
-          playerSnapshot:{...playerSnapshot, teamIds}
+          playerSnapshot:lightPlayerSnapshot({playerId, teamIds}, playerSnapshot)
         } : {
           status:"present",
           minutes:Number(duration || 0),
           comment:"",
           teamId,
           teamIds,
-          playerSnapshot:{...playerSnapshot, teamIds}
+          playerSnapshot:lightPlayerSnapshot({playerId, teamIds}, playerSnapshot)
         };
       }
       function procedureMinutes(value){
@@ -3739,12 +3755,11 @@
             ...next,
             teamId:current.teamId || "",
             teamIds:current.teamIds || (current.teamId ? [current.teamId] : []),
-            playerSnapshot:{
-              ...(next.playerSnapshot || playerSnapshot),
+            playerSnapshot:lightPlayerSnapshot({
               playerId,
               teamId:current.teamId || "",
               teamIds:current.teamIds || (current.teamId ? [current.teamId] : [])
-            }
+            }, next.playerSnapshot || playerSnapshot)
           };
         }
         events[index] = {
@@ -3851,9 +3866,9 @@
             if(previousEvent){
               const updatedEvent = eventPayloadFromForm(form, previousEvent);
               nextEvents = previousEvents.map(item => item.id === updatedEvent.id ? updatedEvent : item);
-              savePresenceEvents(nextEvents);
+              if(!savePresenceEvents(nextEvents)) throw Object.assign(new Error("Sauvegarde locale impossible."), {code:"presence/local-save-failed"});
               await pushPresenceEventToCloud(updatedEvent, "session-form-update");
-              markPresenceEventsSynced([updatedEvent.id]);
+              if(!markPresenceEventsSynced([updatedEvent.id])) throw Object.assign(new Error("Marqueur de synchronisation non sauvegardé localement."), {code:"presence/local-save-failed"});
               selectedAttendanceEventId = updatedEvent.id;
               savedItems = [updatedEvent];
             }else{
@@ -3873,14 +3888,16 @@
                 recurrenceEnd:recurrence === "none" ? "" : recurrenceEnd
               }));
               nextEvents = [...previousEvents, ...savedItems];
-              savePresenceEvents(nextEvents);
+              if(!savePresenceEvents(nextEvents)) throw Object.assign(new Error("Sauvegarde locale impossible."), {code:"presence/local-save-failed"});
               selectedAttendanceEventId = savedItems[0]?.id || "";
               await Promise.all(savedItems.map(item => pushPresenceEventToCloud(item, "session-form-create")));
-              markPresenceEventsSynced(savedItems.map(item => item.id));
+              if(!markPresenceEventsSynced(savedItems.map(item => item.id))) throw Object.assign(new Error("Marqueur de synchronisation non sauvegardé localement."), {code:"presence/local-save-failed"});
             }
           }catch(error){
             render();
-            setSessionMessage(`Événement conservé en local, mais cloud non synchronisé : ${error?.message || error}.`, "error");
+            setSessionMessage(error?.code === "presence/local-save-failed"
+              ? "Attention : l’événement n’a pas pu être sauvegardé dans le stockage local. Il reste seulement en mémoire dans cet onglet."
+              : `Événement conservé en local, mais cloud non synchronisé : ${error?.message || error}.`, "error");
             return;
           }
           resetSessionForm();

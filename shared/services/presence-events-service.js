@@ -93,6 +93,30 @@
   function uniqueTexts(values=[]){
     return [...new Set(values.map(text).filter(Boolean))];
   }
+  function lightPlayerSnapshot(...sources){
+    const rows = sources.filter(source => source && typeof source === 'object');
+    const first = (...keys) => {
+      for(const source of rows){
+        for(const key of keys){
+          const value = text(source[key]);
+          if(value) return value;
+        }
+      }
+      return '';
+    };
+    const teamIds = uniqueTexts(rows.flatMap(source => Array.isArray(source.teamIds) ? source.teamIds : []));
+    return {
+      playerId:first('playerId', 'id'),
+      nom:first('nom', 'lastName'),
+      prenom:first('prenom', 'firstName'),
+      displayName:first('displayName', 'name'),
+      team:first('team'),
+      teamId:first('teamId'),
+      teamIds,
+      categorie:first('categorie', 'category'),
+      subCategory:first('subCategory', 'sousCategorie')
+    };
+  }
   function presenceTeamAliases(values=[]){
     const service = global.CoachPulseTeamsService || null;
     const refs = uniqueTexts(values);
@@ -142,18 +166,24 @@
       ...(Array.isArray(raw?.teamIds) ? raw.teamIds : []),
       ...teamIdsFromEvent(event)
     ]);
-    return {
-      playerId:text(snapshot.playerId || playerId),
-      nom:text(snapshot.nom || snapshot.lastName),
-      prenom:text(snapshot.prenom || snapshot.firstName),
-      displayName:text(snapshot.displayName || snapshot.name),
-      team:text(snapshot.team || event.team),
-      teamId:text(snapshot.teamId || raw?.teamId || event.teamId),
-      teamIds,
-      categorie:text(snapshot.categorie || snapshot.category || event.category || event.categorie),
-      subCategory:text(snapshot.subCategory || snapshot.sousCategorie),
-      photo:text(snapshot.photo)
-    };
+    return lightPlayerSnapshot(
+      {playerId, teamId:raw?.teamId, teamIds},
+      snapshot,
+      {team:event.team, teamId:event.teamId, categorie:event.category || event.categorie}
+    );
+  }
+  function sanitizeAttendanceMap(attendance={}, event={}){
+    if(!attendance || typeof attendance !== 'object') return {};
+    return Object.fromEntries(Object.entries(attendance).map(([playerId, raw]) => {
+      if(!raw || typeof raw !== 'object') return [playerId, raw];
+      return [playerId, {
+        ...raw,
+        playerSnapshot:playerSnapshotFromRaw(raw, playerId, event)
+      }];
+    }));
+  }
+  function sanitizePresenceEvent(event={}){
+    return {...event, attendance:sanitizeAttendanceMap(event.attendance, event)};
   }
   function sessionFromEvent(event={}){
     const sessionId = sessionIdFromEvent(event);
@@ -227,7 +257,7 @@
         teamId:text(raw?.teamId || playerSnapshot.teamId || event.teamId),
         teamIds,
         sessionSnapshot,
-        playerSnapshot:{...playerSnapshot, teamIds},
+        playerSnapshot:lightPlayerSnapshot(playerSnapshot, {playerId, teamIds}),
         team:text(event.team),
         date:text(event.date),
         status:entry.status,
@@ -319,6 +349,9 @@
     STORAGE_KEY,
     readEvents,
     compactStoredEvents,
+    lightPlayerSnapshot,
+    sanitizeAttendanceMap,
+    sanitizePresenceEvent,
     sessionIdFromEvent,
     sessionFromEvent,
     teamIdsFromEvent,
