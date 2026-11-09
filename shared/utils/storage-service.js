@@ -5,6 +5,10 @@
   const memory = new Map();
   const BACKUP_KEY_PREFIX = 'coachpulse:autoBackup';
   const LAST_AUTOSAVE_KEY = 'coachpulse:lastAutoSave';
+  const DURABLE_DB_NAME = 'coachpulse-durable-storage';
+  const DURABLE_STORE_NAME = 'snapshots';
+  const durableRevisions = new Map();
+  const durableWriteChains = new Map();
 
   function localStore(){
     try{
@@ -148,6 +152,100 @@
     return set(key, JSON.stringify(value), options);
   }
 
+  function durableMetaKey(key){ return `${key}:durableMeta`; }
+
+  function openDurableDb(){
+    return new Promise((resolve, reject) => {
+      if(!global.indexedDB) return reject(Object.assign(new Error('IndexedDB indisponible'), {code:'storage/indexeddb-unavailable'}));
+      let request;
+      try{ request = global.indexedDB.open(DURABLE_DB_NAME, 1); }
+      catch(error){ reject(error); return; }
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if(!db.objectStoreNames.contains(DURABLE_STORE_NAME)) db.createObjectStore(DURABLE_STORE_NAME, {keyPath:'key'});
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('Ouverture IndexedDB impossible'));
+      request.onblocked = () => reject(Object.assign(new Error('Ouverture IndexedDB bloquée'), {code:'storage/indexeddb-blocked'}));
+    });
+  }
+
+  async function durableDbRequest(mode, operation){
+    const db = await openDurableDb();
+    try{
+      return await new Promise((resolve, reject) => {
+        const transaction = db.transaction(DURABLE_STORE_NAME, mode);
+        const request = operation(transaction.objectStore(DURABLE_STORE_NAME));
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || transaction.error || new Error('Écriture IndexedDB impossible'));
+        transaction.onabort = () => reject(transaction.error || new Error('Transaction IndexedDB annulée'));
+      });
+    }finally{
+      try{ db.close(); }catch(_error){}
+    }
+  }
+
+  function readLocalDurableSnapshot(key, fallback){
+    const raw = get(key, null);
+    let value = fallback;
+    if(raw !== null && raw !== undefined && raw !== ''){
+      try{ value = JSON.parse(raw); }catch(_error){}
+    }
+    let revision = 0;
+    try{
+      const meta = JSON.parse(localStore()?.getItem(durableMetaKey(key)) || 'null');
+      revision = Number(meta?.revision) || 0;
+    }catch(_error){}
+    return {key, revision, value, source:'localStorage'};
+  }
+
+  async function getDurableJson(key, fallback){
+    const local = readLocalDurableSnapshot(key, fallback);
+    let indexed = null;
+    try{ indexed = await durableDbRequest('readonly', store => store.get(key)); }
+    catch(error){ console.warn('[CoachPulse persistence] Lecture IndexedDB indisponible', error); }
+    const validIndexed = indexed && Number(indexed.revision) > 0 && Object.prototype.hasOwnProperty.call(indexed, 'value');
+    const chosen = validIndexed && Number(indexed.revision) >= local.revision
+      ? {...indexed, source:'indexedDB'}
+      : local;
+    durableRevisions.set(key, Math.max(local.revision, Number(indexed?.revision) || 0));
+    memory.set(key, JSON.stringify(chosen.value));
+    return chosen;
+  }
+
+  function setDurableJson(key, value){
+    const previous = durableWriteChains.get(key) || Promise.resolve();
+    const write = previous.catch(() => {}).then(async () => {
+      const revision = Math.max(Date.now(), (durableRevisions.get(key) || 0) + 1);
+      const snapshot = {key, revision, savedAt:new Date(revision).toISOString(), value};
+      memory.set(key, JSON.stringify(value));
+      let indexedDbSaved = false;
+      let localStorageSaved = false;
+      let indexedDbError = null;
+      let localStorageError = null;
+      try{
+        await durableDbRequest('readwrite', store => store.put(snapshot));
+        indexedDbSaved = true;
+      }catch(error){ indexedDbError = error; }
+      const store = localStore();
+      if(store){
+        try{
+          store.setItem(key, JSON.stringify(value));
+          store.setItem(durableMetaKey(key), JSON.stringify({revision, savedAt:snapshot.savedAt}));
+          localStorageSaved = true;
+        }catch(error){ localStorageError = error; }
+      }else{
+        localStorageError = Object.assign(new Error('localStorage indisponible'), {code:'storage/localstorage-unavailable'});
+      }
+      if(indexedDbSaved || localStorageSaved) durableRevisions.set(key, revision);
+      return {ok:indexedDbSaved || localStorageSaved, revision, indexedDbSaved, localStorageSaved, indexedDbError, localStorageError};
+    }).finally(() => {
+      if(durableWriteChains.get(key) === write) durableWriteChains.delete(key);
+    });
+    durableWriteChains.set(key, write);
+    return write;
+  }
+
   function isPendingSync(){
     return get('coachpulse:pendingSync') === '1';
   }
@@ -170,6 +268,8 @@
     entries,
     getJson,
     setJson,
+    getDurableJson,
+    setDurableJson,
     isQuotaError,
     clearNonEssentialBackups,
     usage,
