@@ -2717,7 +2717,12 @@ async function teamProfileLoadData(options={}){
     }), {readErrors:payload.readErrors});
 	  directNames.forEach(name => { payload.collections[name] = directReads.values[name]; });
 	  const matchIds = payload.collections.matches.map(row => row.matchId || row.id).filter(Boolean);
-	  const medicalLinkedNames = ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps']
+	  const latestHomeMatch = homeDashboard ? homeLatestMatch(payload.collections.matches, []) : null;
+	  const latestHomeMatchId = latestHomeMatch?.row?.matchId || latestHomeMatch?.row?.id || '';
+	  const medicalLinkedCandidates = homeDashboard
+	    ? ['medicalAppointments','medicalFollowUps']
+	    : ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps'];
+	  const medicalLinkedNames = medicalLinkedCandidates
 	    .filter(canReadTeamProfileCollection);
     async function readOptionalMedical(name){
       const specs = [
@@ -2731,15 +2736,37 @@ async function teamProfileLoadData(options={}){
       })), {readErrors:payload.readErrors});
       return uniqueRows(specs.flatMap(([field]) => settled.values[field] || []));
     }
+	  async function readHomeMatchEvents(){
+	    if(!latestHomeMatchId) return [];
+	    const specs = [
+	      ['teamId', '=='],
+	      ['teamIds', 'array-contains']
+	    ];
+	    const settled = await firestoreQueryService().settleProfileReads(specs.map(([field, operator]) => ({
+	      name:field, critical:true,
+	      diagnostic:teamProfileDiagnostic('matchEvents', true, {field, operator, values:teamId, matchId:latestHomeMatchId}),
+	      read:async () => {
+	        const query = firebaseFns.query(
+	          firebaseFns.collection(db, 'matchEvents'),
+	          firebaseFns.where('matchId', '==', latestHomeMatchId),
+	          firebaseFns.where(field, operator, teamId)
+	        );
+	        return docsFromSnap(await firebaseFns.getDocs(query));
+	      }
+	    })), {readErrors:payload.readErrors});
+	    return uniqueRows(specs.flatMap(([field]) => settled.values[field] || []));
+	  }
     const detailSpecs = [
       ...(canReadTeamProfileCollection('matchEvents') ? [
-        {name:'teamMatchEvents', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true), read:() => firestoreQueryService().readMatchEventsByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('matchEvents', true)})},
-        {name:'matchEventsByMatch', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true, {field:'matchId', operator:'in', values:matchIds}), read:() => hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds, true) : Promise.resolve([])}
+	        homeDashboard
+	          ? {name:'homeMatchEvents', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true, {matchId:latestHomeMatchId}), read:readHomeMatchEvents}
+	          : {name:'teamMatchEvents', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true), read:() => firestoreQueryService().readMatchEventsByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('matchEvents', true)})},
+	        ...(!homeDashboard ? [{name:'matchEventsByMatch', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true, {field:'matchId', operator:'in', values:matchIds}), read:() => hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds, true) : Promise.resolve([])}] : [])
       ] : []),
       ...medicalLinkedNames.map(name => ({name, critical:true, diagnostic:teamProfileDiagnostic(name, true), read:() => readOptionalMedical(name)}))
     ];
     const detailReads = await firestoreQueryService().settleProfileReads(detailSpecs, {readErrors:payload.readErrors});
-	  payload.collections.matchEvents = uniqueRows([...(detailReads.values.teamMatchEvents || []), ...(detailReads.values.matchEventsByMatch || [])]);
+	  payload.collections.matchEvents = uniqueRows([...(detailReads.values.homeMatchEvents || []), ...(detailReads.values.teamMatchEvents || []), ...(detailReads.values.matchEventsByMatch || [])]);
 	  if(canReadTeamProfileCollection('sessions')){
 	    let cloudPresence;
 	    if(homeDashboard){

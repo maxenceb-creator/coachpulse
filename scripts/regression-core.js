@@ -47,7 +47,7 @@ function runtimeFirestore(documents, deniedCollections=[]){
   const firebaseFns = {
     collection(_db, name){ return {name}; },
     where(field, operator, value){ return {field, operator, value}; },
-    query(collectionRef, clause){ return {collectionRef, clause}; },
+    query(collectionRef, ...clauses){ return {collectionRef, clauses, clause:clauses[0]}; },
     doc(_db, collectionName, id){ return {collectionName, id}; },
     async getDoc(ref){
       reads.push({collection:ref.collectionName, operation:'GET', id:ref.id});
@@ -56,19 +56,19 @@ function runtimeFirestore(documents, deniedCollections=[]){
     },
     async getDocs(ref){
       const collectionName = ref.name || ref.collectionRef?.name;
-      const clause = ref.clause;
-      reads.push({collection:collectionName, operation:'LIST', ...(clause || {global:true})});
+      const clauses = ref.clauses || (ref.clause ? [ref.clause] : []);
+      reads.push({collection:collectionName, operation:'LIST', clauses, ...(clauses[0] || {global:true})});
       if(denied.has(collectionName)) throw Object.assign(new Error(`${collectionName} denied`), {code:'firestore/permission-denied'});
       const rows = documents[collectionName] || [];
-      if(!clause) return snapshot(rows);
+      if(!clauses.length) return snapshot(rows);
       const valueAt = (data, path) => path.split('.').reduce((value, key) => value?.[key], data);
-      const matching = rows.filter(row => {
+      const matching = rows.filter(row => clauses.every(clause => {
         const actual = valueAt(row.data, clause.field);
         if(clause.operator === 'in') return clause.value.includes(actual);
         if(clause.operator === 'array-contains-any') return Array.isArray(actual) && actual.some(value => clause.value.includes(value));
         if(clause.operator === 'array-contains') return Array.isArray(actual) && actual.includes(clause.value);
         return actual === clause.value;
-      });
+      }));
       return snapshot(matching);
     }
   };
@@ -650,7 +650,7 @@ function testProfileReadsStayCanonicalAndTeamScoped(){
   assert(!appSource.includes("readDocsByIds('players', aliases, true)"), 'La fiche joueuse ne doit jamais traiter les aliases texte comme des IDs de documents players.');
   const medicalTeamBlock = appSource.slice(
     appSource.indexOf('async function readOptionalMedical'),
-    appSource.indexOf('const detailReads = await firestoreQueryService().settleProfileReads')
+    appSource.indexOf('async function readHomeMatchEvents')
   );
   assert(medicalTeamBlock.includes("['teamId', '==']"), 'La fiche équipe doit lire les données médicales par teamId.');
   assert(!medicalTeamBlock.includes("['teamIds', 'array-contains']"), 'La fiche équipe ne doit pas lancer de LIST médicale directe teamIds array-contains non démontrable par les Rules.');
@@ -1726,6 +1726,7 @@ async function testTeamProfileRuntimeUsesOnlyTeamScopedQueries(){
     }),
     uniqueProfileRows:rows => rows, parseStoredJson:() => [], listTeams:async () => [{id:teamId,teamId,name:'U11 A'}],
     normalizePlayer:value => value, playerMatchesTeamIdForAnySeason:(row,id) => row.teamId === id || row.teamIds?.includes(id) || row.rosterTeamIds?.includes(id),
+    homeLatestMatch:matches => ({row:[...matches].sort((a,b) => new Date(b.date) - new Date(a.date))[0]}),
     canAccessPlayerRecord:row => row.teamId === teamId || row.teamIds?.includes(teamId) || row.rosterTeamIds?.includes(teamId),
     filterAuthorizedPlayers:rows => rows.filter(row => row.teamId === teamId || row.teamIds?.includes(teamId) || row.rosterTeamIds?.includes(teamId)),
     rowMatchesTeamId:(row,id) => row.teamId === id || row.teamIds?.includes(id),
@@ -1760,7 +1761,17 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       {id:teamB, data:{teamId:teamB}},
       {id:foreignTeam, data:{teamId:foreignTeam}}
     ],
-    players:[], matches:[], matchEvents:[],
+    players:[],
+    matches:[
+      {id:'match-old-a', data:{matchId:'match-old-a', teamId:teamA, teamIds:[teamA], date:'2026-08-01'}},
+      {id:'match-latest-a', data:{matchId:'match-latest-a', teamIds:[teamA], date:'2026-10-01'}},
+      {id:'match-b', data:{matchId:'match-b', teamId:teamB, teamIds:[teamB], date:'2026-11-01'}}
+    ],
+    matchEvents:[
+      {id:'event-old-a', data:{eventId:'event-old-a', matchId:'match-old-a', teamId:teamA, teamIds:[teamA]}},
+      {id:'event-latest-a', data:{eventId:'event-latest-a', matchId:'match-latest-a', teamIds:[teamA]}},
+      {id:'event-b', data:{eventId:'event-b', matchId:'match-b', teamId:teamB, teamIds:[teamB]}}
+    ],
     sessions:[
       {id:'presence-modern-a', data:{sessionId:'presence-modern-a', teamId:teamA, teamIds:[teamA], createdFromPresenceModule:true}},
       {id:'presence-legacy-a', data:{sessionId:'presence-legacy-a', teamIds:[teamA], source:'Présences'}},
@@ -1771,7 +1782,10 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
     technicalTests:[{id:'technical-a', data:{teamId:teamA, teamIds:[teamA]}}],
     physicalTests:[{id:'physical-a', data:{teamId:teamA, teamIds:[teamA]}}],
     injuries:[{id:'injury-a', data:{teamId:teamA}}],
-    injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[],
+    injuryUpdates:[{id:'injury-update-a', data:{teamId:teamA}}],
+    medicalAppointments:[{id:'appointment-a', data:{playerSnapshot:{teamIds:[teamA]}}}],
+    rehabRoutines:[{id:'rehab-a', data:{playerSnapshot:{teamId:teamA}}}],
+    medicalFollowUps:[{id:'follow-up-a', data:{teamId:teamA}}],
     workloads:[{id:'workload-a', data:{teamId:teamA, teamIds:[teamA]}}],
     convocations:[
       {id:'convocation-a', data:{teamId:teamA, teamIds:[teamA]}},
@@ -1825,6 +1839,7 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       }),
       uniqueProfileRows:rows => rows, parseStoredJson:() => [], listTeams:async () => documents.teams.map(row => ({id:row.id, ...row.data})),
       normalizePlayer:value => value, playerMatchesTeamIdForAnySeason:(row,id) => row.teamId === id || row.teamIds?.includes(id),
+      homeLatestMatch:matches => ({row:[...matches].sort((a,b) => new Date(b.date) - new Date(a.date))[0]}),
       canAccessPlayerRecord:row => permissions.canAccessPlayer(profile, row), filterAuthorizedPlayers:rows => permissions.filterAuthorizedPlayers(profile, rows),
       rowMatchesTeamId:(row,id) => row.teamId === id || row.teamIds?.includes(id), firestoreQueryService:() => queryService,
       reportFirestoreReadError:(error, diagnostic) => firestoreQueries.firestoreDiagnostic(error, diagnostic)
@@ -1879,6 +1894,26 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   const homeWithoutRights = await load(editorWithoutOptionalRights, teamA, [], {homeDashboard:true});
   assert.equal(homeWithoutRights.reads.some(read => forbiddenWithoutRights.includes(read.collection)), false, 'L’accueil Stats + teamProfile doit rester réduit aux cartes autorisées.');
   assert.equal(homeWithoutRights.reads.some(read => read.collection === 'players'), false, 'L’accueil ne doit pas relire le roster inutilement.');
+  assert.deepEqual(Array.from(homeWithoutRights.payload.collections.matchEvents, row => row.eventId), ['event-latest-a'], 'L’accueil doit conserver uniquement les événements du dernier match affiché.');
+  const homeMatchEventReads = homeWithoutRights.reads.filter(read => read.collection === 'matchEvents');
+  assert.equal(homeMatchEventReads.length, 2, 'L’accueil doit remplacer le double chargement par les deux variantes teamId/teamIds du dernier match.');
+  assert(homeMatchEventReads.every(read => read.clauses.some(clause => clause.field === 'matchId' && clause.value === 'match-latest-a')), 'Chaque lecture accueil doit cibler le dernier match affiché.');
+  assert(homeMatchEventReads.some(read => read.clauses.some(clause => clause.field === 'teamId')), 'La compatibilité teamId doit être conservée.');
+  assert(homeMatchEventReads.some(read => read.clauses.some(clause => clause.field === 'teamIds')), 'La compatibilité teamIds doit être conservée.');
+
+  const medicalProfile = {...editorWithoutOptionalRights, allowedModules:['teamProfile','stats','medical']};
+  const homeMedical = await load(medicalProfile, teamA, [], {homeDashboard:true});
+  assert.equal(homeMedical.reads.some(read => ['injuryUpdates','rehabRoutines'].includes(read.collection)), false, 'L’accueil ne doit charger ni injuryUpdates ni rehabRoutines.');
+  assert.deepEqual(Array.from(homeMedical.payload.collections.injuries, row => row.id), ['injury-a']);
+  assert.deepEqual(Array.from(homeMedical.payload.collections.medicalAppointments, row => row.id), ['appointment-a']);
+  assert.deepEqual(Array.from(homeMedical.payload.collections.medicalFollowUps, row => row.id), ['follow-up-a']);
+
+  const fullMedical = await load(medicalProfile, teamA);
+  assert.deepEqual(Array.from(fullMedical.payload.collections.matchEvents, row => row.eventId).sort(), ['event-latest-a','event-old-a'], 'La fiche équipe complète doit conserver tous les événements de l’équipe.');
+  assert.deepEqual(Array.from(fullMedical.payload.collections.injuryUpdates, row => row.id), ['injury-update-a']);
+  assert.deepEqual(Array.from(fullMedical.payload.collections.rehabRoutines, row => row.id), ['rehab-a']);
+  assert.deepEqual(Array.from(fullMedical.payload.collections.medicalAppointments, row => row.id), ['appointment-a']);
+  assert.deepEqual(Array.from(fullMedical.payload.collections.medicalFollowUps, row => row.id), ['follow-up-a']);
 
   const presenceRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','presences']});
   const presenceSessionReads = presenceRights.reads.filter(read => read.collection === 'sessions');
