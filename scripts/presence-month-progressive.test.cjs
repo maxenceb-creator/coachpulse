@@ -6,6 +6,23 @@ const appSource = fs.readFileSync('app.js', 'utf8');
 const pageSource = fs.readFileSync('pages/presences.html', 'utf8');
 const indexes = JSON.parse(fs.readFileSync('firestore.indexes.json', 'utf8'));
 
+function indexSignature(index){
+  const fields = index.fields.map(field => `${field.fieldPath}:${field.order || field.arrayConfig}`);
+  return `${index.collectionGroup}|${index.queryScope}|${fields.join('|')}`;
+}
+
+const indexSignatures = indexes.indexes.map(indexSignature);
+assert.equal(new Set(indexSignatures).size, indexSignatures.length, 'firestore.indexes.json ne doit contenir aucun index composite en doublon.');
+
+[
+  'sessions|COLLECTION|createdFromPresenceModule:ASCENDING|teamId:ASCENDING|date:DESCENDING',
+  'sessions|COLLECTION|createdFromPresenceModule:ASCENDING|teamIds:CONTAINS|date:DESCENDING',
+  'sessions|COLLECTION|source:ASCENDING|teamId:ASCENDING|date:DESCENDING',
+  'sessions|COLLECTION|source:ASCENDING|teamIds:CONTAINS|date:DESCENDING'
+].forEach(signature => {
+  assert(indexSignatures.includes(signature), `Index dashboard sessions manquant : ${signature}.`);
+});
+
 const monthlyStart = appSource.indexOf('async function presenceListEventsByMonth');
 const monthlyEnd = appSource.indexOf('async function presenceLoadEventAttendance', monthlyStart);
 const monthlyBlock = appSource.slice(monthlyStart, monthlyEnd);
