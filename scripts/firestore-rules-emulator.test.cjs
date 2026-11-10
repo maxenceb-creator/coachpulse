@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {Timestamp, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, query, setDoc, where, writeBatch} = require('firebase/firestore');
+const {Timestamp, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, limit, orderBy, query, setDoc, where, writeBatch} = require('firebase/firestore');
 
 async function main() {
   const playerSnapshotScopedCollections = [
@@ -222,7 +222,7 @@ async function main() {
       });
       await setDoc(doc(db, 'sessions', 'real-session'), {
         sessionId: 'real-session', teamId: 'team-u11-a', teamIds: ['team-u11-a'],
-        source: 'Présences', createdFromPresenceModule: true
+        date: '2026-11-10', source: 'Présences', createdFromPresenceModule: true
       });
       await setDoc(doc(db, 'attendance', 'real-attendance'), {
         attendanceId: 'real-attendance', sessionId: 'real-session', playerId: 'real-team-id',
@@ -522,11 +522,27 @@ async function main() {
       assertSucceeds(getDocs(query(collection(realAssistantDb, 'sessions'), where('source', '==', 'Présences'), where('teamIds', 'array-contains-any', ['team-u11-a']))))
     ]);
     assert.deepEqual([...mergeSnapshots(realSessionSnapshots).keys()], ['real-session']);
+    process.stdout.write('Checking bounded home dashboard session queries\n');
+    await Promise.all([
+      assertSucceeds(getDocs(query(
+        collection(realAssistantDb, 'sessions'), where('createdFromPresenceModule', '==', true),
+        where('teamId', 'in', ['team-u11-a']), where('date', '>=', '2026-11-10'), orderBy('date', 'asc'), limit(6)
+      ))),
+      assertSucceeds(getDocs(query(
+        collection(realAssistantDb, 'sessions'), where('source', '==', 'Présences'),
+        where('teamIds', 'array-contains-any', ['team-u11-a']), where('date', '<=', '2026-11-10'), orderBy('date', 'desc'), limit(6)
+      )))
+    ]);
+    await assertFails(getDocs(query(collection(realAssistantDb, 'sessions'), where('createdFromPresenceModule', '==', true), where('teamId', 'in', ['team-u13-a']), where('date', '>=', '2026-11-10'), orderBy('date', 'asc'), limit(6))));
     const realAttendanceSnapshots = await Promise.all([
       assertSucceeds(getDocs(query(collection(realAssistantDb, 'attendance'), where('teamId', 'in', ['team-u11-a'])))),
       assertSucceeds(getDocs(query(collection(realAssistantDb, 'attendance'), where('teamIds', 'array-contains-any', ['team-u11-a']))))
     ]);
     assert.deepEqual([...mergeSnapshots(realAttendanceSnapshots).keys()].sort(), ['real-attendance', 'real-attendance-history']);
+    await Promise.all([
+      assertSucceeds(getDocs(query(collection(realAssistantDb, 'attendance'), where('sessionId', '==', 'real-session'), where('teamId', 'in', ['team-u11-a'])))),
+      assertSucceeds(getDocs(query(collection(realAssistantDb, 'attendance'), where('sessionId', '==', 'real-session'), where('teamIds', 'array-contains-any', ['team-u11-a']))))
+    ]);
 
     await assertSucceeds(getDocs(query(collection(realAssistantDb, 'teams'), where(documentId(), 'in', ['team-u11-a']))));
     await assertFails(getDocs(query(collection(realAssistantDb, 'players'), where('playerId', 'in', ['real-team-id']))));

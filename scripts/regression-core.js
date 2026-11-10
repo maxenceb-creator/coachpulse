@@ -43,10 +43,14 @@ function sourceFunction(source, name){
 function runtimeFirestore(documents, deniedCollections=[]){
   const reads = [];
   const denied = new Set(deniedCollections);
-  const snapshot = rows => ({forEach(callback){ rows.forEach(row => callback({id:row.id, data:() => row.data})); }});
+  const documentSnapshot = row => ({id:row.id, data:() => row.data});
+  const snapshot = rows => ({forEach(callback){ rows.forEach(row => callback(documentSnapshot(row))); }});
   const firebaseFns = {
     collection(_db, name){ return {name}; },
-    where(field, operator, value){ return {field, operator, value}; },
+    where(field, operator, value){ return {type:'where', field, operator, value}; },
+    orderBy(field, direction='asc'){ return {type:'orderBy', field, direction}; },
+    limit(value){ return {type:'limit', value}; },
+    startAfter(value){ return {type:'startAfter', value}; },
     query(collectionRef, ...clauses){ return {collectionRef, clauses, clause:clauses[0]}; },
     doc(_db, collectionName, id){ return {collectionName, id}; },
     async getDoc(ref){
@@ -62,13 +66,28 @@ function runtimeFirestore(documents, deniedCollections=[]){
       const rows = documents[collectionName] || [];
       if(!clauses.length) return snapshot(rows);
       const valueAt = (data, path) => path.split('.').reduce((value, key) => value?.[key], data);
-      const matching = rows.filter(row => clauses.every(clause => {
+      const whereClauses = clauses.filter(clause => clause.type === 'where');
+      let matching = rows.filter(row => whereClauses.every(clause => {
         const actual = valueAt(row.data, clause.field);
         if(clause.operator === 'in') return clause.value.includes(actual);
         if(clause.operator === 'array-contains-any') return Array.isArray(actual) && actual.some(value => clause.value.includes(value));
         if(clause.operator === 'array-contains') return Array.isArray(actual) && actual.includes(clause.value);
+        if(clause.operator === '>=') return actual >= clause.value;
+        if(clause.operator === '<=') return actual <= clause.value;
         return actual === clause.value;
       }));
+      const ordered = clauses.find(clause => clause.type === 'orderBy');
+      if(ordered) matching.sort((a,b) => {
+        const comparison = String(valueAt(a.data, ordered.field) || '').localeCompare(String(valueAt(b.data, ordered.field) || ''));
+        return ordered.direction === 'desc' ? -comparison : comparison;
+      });
+      const cursor = clauses.find(clause => clause.type === 'startAfter')?.value;
+      if(cursor){
+        const cursorIndex = matching.findIndex(row => row.id === cursor.id);
+        if(cursorIndex >= 0) matching = matching.slice(cursorIndex + 1);
+      }
+      const max = clauses.find(clause => clause.type === 'limit')?.value;
+      if(Number.isFinite(max)) matching = matching.slice(0, max);
       return snapshot(matching);
     }
   };
@@ -1773,8 +1792,8 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       {id:'event-b', data:{eventId:'event-b', matchId:'match-b', teamId:teamB, teamIds:[teamB]}}
     ],
     sessions:[
-      {id:'presence-modern-a', data:{sessionId:'presence-modern-a', teamId:teamA, teamIds:[teamA], createdFromPresenceModule:true}},
-      {id:'presence-legacy-a', data:{sessionId:'presence-legacy-a', teamIds:[teamA], source:'Présences'}},
+      {id:'presence-modern-a', data:{sessionId:'presence-modern-a', teamId:teamA, teamIds:[teamA], date:'2026-11-10', createdFromPresenceModule:true}},
+      {id:'presence-legacy-a', data:{sessionId:'presence-legacy-a', teamIds:[teamA], date:'2026-11-11', source:'Présences'}},
       {id:'methodology-a', data:{sessionId:'methodology-a', teamId:teamA, teamIds:[teamA], source:'Méthodologie'}},
       {id:'presence-foreign', data:{sessionId:'presence-foreign', teamId:foreignTeam, teamIds:[foreignTeam], createdFromPresenceModule:true}}
     ],
@@ -1839,6 +1858,7 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       }),
       uniqueProfileRows:rows => rows, parseStoredJson:() => [], listTeams:async () => documents.teams.map(row => ({id:row.id, ...row.data})),
       normalizePlayer:value => value, playerMatchesTeamIdForAnySeason:(row,id) => row.teamId === id || row.teamIds?.includes(id),
+      homeDateValue:row => { const date = new Date(`${row.date || ''}T${row.startTime || '00:00'}:00`); return Number.isNaN(date.getTime()) ? null : date; },
       homeLatestMatch:matches => ({row:[...matches].sort((a,b) => new Date(b.date) - new Date(a.date))[0]}),
       canAccessPlayerRecord:row => permissions.canAccessPlayer(profile, row), filterAuthorizedPlayers:rows => permissions.filterAuthorizedPlayers(profile, rows),
       rowMatchesTeamId:(row,id) => row.teamId === id || row.teamIds?.includes(id), firestoreQueryService:() => queryService,
@@ -1924,10 +1944,18 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
 
   const homePresenceRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','presences']}, teamA, [], {homeDashboard:true});
   assert.equal(homePresenceRights.presenceListEventsCalls, 0, 'L’accueil ne doit jamais déclencher le chargement global des présences.');
-  assert.equal(homePresenceRights.reads.filter(read => read.collection === 'sessions').length, 2, 'L’accueil doit lire les séances uniquement par teamId/teamIds.');
+  assert(homePresenceRights.reads.filter(read => read.collection === 'sessions').length >= 4, 'L’accueil doit lire les candidats datés pour les formats modernes et historiques.');
+  assert(homePresenceRights.reads.filter(read => read.collection === 'sessions').every(read =>
+    read.clauses.some(clause => clause.type === 'orderBy' && clause.field === 'date')
+    && read.clauses.some(clause => clause.type === 'limit')
+    && read.clauses.some(clause => clause.field === 'teamId' || clause.field === 'teamIds')
+  ), 'Chaque lecture séance de l’accueil doit être datée, ordonnée, bornée et limitée à l’équipe.');
   assert.equal(homePresenceRights.reads.filter(read => read.collection === 'attendance').length, 2, 'L’accueil doit lire les présences uniquement par teamId/teamIds.');
-  assert(homePresenceRights.reads.filter(read => ['sessions','attendance'].includes(read.collection)).every(read => Array.from(read.value || []).length === 1 && Array.from(read.value)[0] === teamA), 'Chaque lecture Présences de l’accueil doit être limitée à l’équipe affichée.');
-  assert.deepEqual(Array.from(homePresenceRights.payload.collections.sessions, row => row.id).sort(), ['presence-legacy-a','presence-modern-a']);
+  assert(homePresenceRights.reads.filter(read => read.collection === 'attendance').every(read =>
+    read.clauses.some(clause => clause.field === 'sessionId' && clause.value === 'presence-modern-a')
+    && read.clauses.some(clause => clause.field === 'teamId' || clause.field === 'teamIds')
+  ), 'Les présences de l’accueil doivent cibler uniquement la dernière séance effectivement sélectionnée.');
+  assert.deepEqual(Array.from(homePresenceRights.payload.collections.sessions, row => row.id), ['presence-modern-a'], 'Une séance du jour doit être à la fois la dernière et la prochaine, sans charger la suivante.');
   assert.deepEqual(Array.from(homePresenceRights.payload.collections.attendance, row => row.id), ['attendance-a']);
 
   const testsRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','tests']});
@@ -2085,6 +2113,38 @@ async function testPlayerProfileRuntimeUsesCanonicalGetAndTeamScope(){
   assert.equal(cloud.reads.some(read => read.global), false, 'playerProfile non-admin ne doit lancer aucune LIST globale.');
 }
 
+async function testHomeDashboardPresenceQueriesStayBounded(){
+  const teamId = 'team-u13-a';
+  const cloud = runtimeFirestore({
+    sessions:[
+      {id:'retired-today', data:{sessionId:'retired-today', teamId, teamIds:[teamId], date:'2026-11-10', source:'Présences', season:'2025-2026'}},
+      {id:'next-valid', data:{sessionId:'next-valid', teamIds:[teamId], date:'2026-11-11', source:'Présences'}},
+      {id:'last-valid', data:{sessionId:'last-valid', teamId, date:'2026-11-09', createdFromPresenceModule:true}},
+      {id:'invalid-date', data:{sessionId:'invalid-date', teamId, date:'sans-date', createdFromPresenceModule:true}},
+      {id:'foreign', data:{sessionId:'foreign', teamId:'team-u15-a', date:'2026-11-10', createdFromPresenceModule:true}}
+    ],
+    attendance:[
+      {id:'last-attendance', data:{attendanceId:'last-attendance', sessionId:'last-valid', teamId, playerId:'player-a'}},
+      {id:'other-attendance', data:{attendanceId:'other-attendance', sessionId:'other-session', teamId, playerId:'player-b'}}
+    ]
+  });
+  const candidates = await firestoreQueries.readHomeDashboardSessionCandidates([teamId], {
+    firebaseFns:cloud.firebaseFns, db:{}, today:'2026-11-10', pageSize:1,
+    isEligible:row => row.season !== '2025-2026' && !Number.isNaN(Date.parse(row.date))
+  });
+  assert.deepEqual(candidates.map(row => row.id).sort(), ['last-valid','next-valid']);
+  const sessionReads = cloud.reads.filter(read => read.collection === 'sessions');
+  assert(sessionReads.some(read => read.clauses.some(clause => clause.type === 'startAfter')), 'Un candidat exclu doit déclencher la page bornée suivante.');
+  assert(sessionReads.every(read => read.clauses.some(clause => clause.type === 'limit' && clause.value === 1)), 'Aucune page de candidats ne doit être non bornée.');
+  assert(sessionReads.every(read => !read.global), 'L’accueil ne doit jamais retomber sur une lecture globale de sessions.');
+
+  const attendance = await firestoreQueries.readAttendanceForSessionByTeams('last-valid', [teamId], {firebaseFns:cloud.firebaseFns, db:{}});
+  assert.deepEqual(attendance.map(row => row.id), ['last-attendance']);
+  const attendanceReads = cloud.reads.filter(read => read.collection === 'attendance');
+  assert.equal(attendanceReads.length, 2, 'Les formats teamId et teamIds doivent être conservés pour la dernière séance.');
+  assert(attendanceReads.every(read => read.clauses.some(clause => clause.field === 'sessionId' && clause.value === 'last-valid')));
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -2131,6 +2191,7 @@ testProfileFirestoreDiagnosticsStayScoped();
 
 Promise.resolve()
   .then(testTeamScopedFirestoreQueryContract)
+  .then(testHomeDashboardPresenceQueriesStayBounded)
   .then(testTeamProfileRuntimeUsesOnlyTeamScopedQueries)
   .then(testTeamProfileOptionalReadsRespectEffectivePermissions)
   .then(testPlayerProfileRuntimeUsesCanonicalGetAndTeamScope)
