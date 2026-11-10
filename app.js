@@ -2770,13 +2770,62 @@ async function teamProfileLoadData(options={}){
 	  if(canReadTeamProfileCollection('sessions')){
 	    let cloudPresence;
 	    if(homeDashboard){
-	      const presenceReads = await firestoreQueryService().settleProfileReads([
-	        {name:'sessions', critical:true, diagnostic:teamProfileDiagnostic('sessions', true), read:() => firestoreQueryService().readSessionsByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('sessions', true)})},
-	        {name:'attendance', critical:true, diagnostic:teamProfileDiagnostic('attendance', true), read:() => firestoreQueryService().readAttendanceByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('attendance', true)})}
-	      ], {readErrors:payload.readErrors});
+	      const today = new Date();
+	      today.setHours(0,0,0,0);
+	      const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+	      const eligibleSession = row => rowMatchesTeamId(row, teamId)
+	        && isPresenceSessionVisibleToModule(row)
+	        && !isRetiredPresenceSeasonSession(row)
+	        && Boolean(homeDateValue(row));
+	      const localService = presenceEventsService();
+	      const localEvents = (localService?.readEvents?.() || []).filter(event =>
+	        localService?.teamIdsFromEvent?.(event)?.includes(teamId)
+	        && !localService?.isRetiredPresenceSeasonEvent?.(event)
+	      );
+	      const localSessions = localEvents.map(event => ({
+	        ...localService.sessionFromEvent(event),
+	        __homeLocalPending:localService.isPendingEvent?.(event) === true,
+	        cloudSyncedAt:event.cloudSyncedAt || ''
+	      })).filter(eligibleSession);
+	      const cloudSessions = await firestoreQueryService().readHomeDashboardSessionCandidates([teamId], {
+	        firebaseFns, db, today:todayKey, pageSize:6, isEligible:eligibleSession,
+	        diagnostic:teamProfileDiagnostic('sessions', true)
+	      });
+	      const mergedSessions = new Map();
+	      [...cloudSessions, ...localSessions].forEach(row => {
+	        const id = String(row.sessionId || row.id || '').trim();
+	        if(!id) return;
+	        const current = mergedSessions.get(id);
+	        if(!current){ mergedSessions.set(id, row); return; }
+	        const currentTime = Date.parse(current.updatedAtIso || current.updatedAt || current.createdAtIso || current.createdAt || 0) || 0;
+	        const rowTime = Date.parse(row.updatedAtIso || row.updatedAt || row.createdAtIso || row.createdAt || 0) || 0;
+	        if(row.__homeLocalPending || (!current.__homeLocalPending && rowTime >= currentTime)) mergedSessions.set(id, {...current, ...row});
+	      });
+	      const datedSessions = [...mergedSessions.values()].filter(eligibleSession).map(row => ({row, date:homeDateValue(row)}));
+	      const next = datedSessions.filter(item => item.date >= today).sort((a,b) => a.date - b.date)[0]?.row || null;
+	      const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+	      const last = datedSessions.filter(item => item.date < tomorrow).sort((a,b) => b.date - a.date)[0]?.row || null;
+	      const selectedSessions = uniqueRows([last, next].filter(Boolean));
+	      const lastSessionId = String(last?.sessionId || last?.id || '').trim();
+	      const cloudAttendance = lastSessionId
+	        ? await firestoreQueryService().readAttendanceForSessionByTeams(lastSessionId, [teamId], {
+	            firebaseFns, db, diagnostic:teamProfileDiagnostic('attendance', true, {sessionId:lastSessionId})
+	          })
+	        : [];
+	      const localAttendance = localEvents
+	        .filter(event => String(localService.sessionIdFromEvent?.(event) || '') === lastSessionId)
+	        .flatMap(event => (localService.attendanceRowsFromEvent?.(event) || []).map(row => ({
+	          ...row, __homeLocalPending:localService.isPendingEvent?.(event) === true
+	        })));
+	      const mergedAttendance = new Map();
+	      [...cloudAttendance, ...localAttendance].forEach(row => {
+	        const id = String(row.attendanceId || row.id || `${row.sessionId}:${row.playerId}`).trim();
+	        const current = mergedAttendance.get(id);
+	        if(!current || row.__homeLocalPending) mergedAttendance.set(id, current ? {...current, ...row} : row);
+	      });
 	      cloudPresence = {
-	        sessions:(presenceReads.values.sessions || []).filter(row => isPresenceSessionVisibleToModule(row) && !isRetiredPresenceSeasonSession(row)),
-	        attendance:presenceReads.values.attendance || []
+	        sessions:selectedSessions,
+	        attendance:[...mergedAttendance.values()]
 	      };
 	    }else{
 	      const presenceEvents = await presenceListEvents({forceRefresh:options.forceRefresh === true});
@@ -6597,6 +6646,7 @@ async function presenceSaveEvent(event={}, options={}){
   if(!canAccessAnyPresenceTeam(event)){
     throw new Error('Accès non autorisé à cette équipe.');
   }
+  invalidateAppDataCaches('teamProfiles');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = presenceEventsService();
   const sanitizedEvent = service?.sanitizePresenceEvent ? service.sanitizePresenceEvent(event) : event;
