@@ -34,6 +34,29 @@
   };
 
   function text(value){ return String(value ?? '').trim(); }
+  function isPendingEvent(event={}){
+    const syncedAt = Date.parse(event.cloudSyncedAt || 0) || 0;
+    const updatedAt = Date.parse(event.updatedAt || event.createdAt || 0) || 0;
+    return !syncedAt || updatedAt > syncedAt;
+  }
+  function markEventPending(event={}, updatedAt=new Date().toISOString()){
+    const {cloudSyncedAt:_cloudSyncedAt, ...pending} = event;
+    return {...pending, updatedAt};
+  }
+  function mergeEventVersions(current, next){
+    if(!current) return next;
+    if(!next) return current;
+    const currentPending = isPendingEvent(current);
+    const currentTime = Date.parse(current.updatedAt || current.createdAt || 0) || 0;
+    const nextTime = Date.parse(next.updatedAt || next.createdAt || 0) || 0;
+    const attendance = currentPending
+      ? {...(next.attendance || {}), ...(current.attendance || {})}
+      : {...(current.attendance || {}), ...(next.attendance || {})};
+    if(currentPending) return {...next, ...current, attendance};
+    return nextTime >= currentTime
+      ? {...current, ...next, attendance}
+      : {...next, ...current, attendance};
+  }
   function readJson(key, fallback){
     try{
       const value = global.localStorage?.getItem(key);
@@ -93,6 +116,30 @@
   function uniqueTexts(values=[]){
     return [...new Set(values.map(text).filter(Boolean))];
   }
+  function lightPlayerSnapshot(...sources){
+    const rows = sources.filter(source => source && typeof source === 'object');
+    const first = (...keys) => {
+      for(const source of rows){
+        for(const key of keys){
+          const value = text(source[key]);
+          if(value) return value;
+        }
+      }
+      return '';
+    };
+    const teamIds = uniqueTexts(rows.flatMap(source => Array.isArray(source.teamIds) ? source.teamIds : []));
+    return {
+      playerId:first('playerId', 'id'),
+      nom:first('nom', 'lastName'),
+      prenom:first('prenom', 'firstName'),
+      displayName:first('displayName', 'name'),
+      team:first('team'),
+      teamId:first('teamId'),
+      teamIds,
+      categorie:first('categorie', 'category'),
+      subCategory:first('subCategory', 'sousCategorie')
+    };
+  }
   function presenceTeamAliases(values=[]){
     const service = global.CoachPulseTeamsService || null;
     const refs = uniqueTexts(values);
@@ -142,18 +189,36 @@
       ...(Array.isArray(raw?.teamIds) ? raw.teamIds : []),
       ...teamIdsFromEvent(event)
     ]);
-    return {
-      playerId:text(snapshot.playerId || playerId),
-      nom:text(snapshot.nom || snapshot.lastName),
-      prenom:text(snapshot.prenom || snapshot.firstName),
-      displayName:text(snapshot.displayName || snapshot.name),
-      team:text(snapshot.team || event.team),
-      teamId:text(snapshot.teamId || raw?.teamId || event.teamId),
-      teamIds,
-      categorie:text(snapshot.categorie || snapshot.category || event.category || event.categorie),
-      subCategory:text(snapshot.subCategory || snapshot.sousCategorie),
-      photo:text(snapshot.photo)
-    };
+    return lightPlayerSnapshot(
+      {playerId, teamId:raw?.teamId, teamIds},
+      snapshot,
+      {team:event.team, teamId:event.teamId, categorie:event.category || event.categorie}
+    );
+  }
+  function sanitizeAttendanceMap(attendance={}, event={}){
+    if(!attendance || typeof attendance !== 'object') return {};
+    return Object.fromEntries(Object.entries(attendance).map(([playerId, raw]) => {
+      if(!raw || typeof raw !== 'object') return [playerId, raw];
+      const cleaned = stripEmbeddedImages(raw);
+      return [playerId, {
+        ...cleaned,
+        playerSnapshot:playerSnapshotFromRaw(cleaned, playerId, event)
+      }];
+    }));
+  }
+  function stripEmbeddedImages(value, key=''){
+    if(value == null) return value;
+    const imageKey = /^(?:photo|image|avatar|portrait|thumbnail|picture)(?:url|src|data)?$/i.test(String(key).replace(/[-_\s]/g, ''));
+    if(imageKey) return undefined;
+    if(typeof value === 'string') return /^data:image\//i.test(value.trim()) ? undefined : value;
+    if(Array.isArray(value)) return value.map(item => stripEmbeddedImages(item)).filter(item => item !== undefined);
+    if(typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value)
+      .map(([childKey, childValue]) => [childKey, stripEmbeddedImages(childValue, childKey)])
+      .filter(([, childValue]) => childValue !== undefined));
+  }
+  function sanitizePresenceEvent(event={}){
+    return {...event, attendance:sanitizeAttendanceMap(event.attendance, event)};
   }
   function sessionFromEvent(event={}){
     const sessionId = sessionIdFromEvent(event);
@@ -227,7 +292,7 @@
         teamId:text(raw?.teamId || playerSnapshot.teamId || event.teamId),
         teamIds,
         sessionSnapshot,
-        playerSnapshot:{...playerSnapshot, teamIds},
+        playerSnapshot:lightPlayerSnapshot(playerSnapshot, {playerId, teamIds}),
         team:text(event.team),
         date:text(event.date),
         status:entry.status,
@@ -263,9 +328,9 @@
   function compactStoredEvents(events=[], options={}){
     const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : 1536 * 1024;
     const rows = Array.isArray(events) ? events.filter(event => eventId(event)) : [];
-    const pending = rows.filter(event => !text(event.cloudSyncedAt));
+    const pending = rows.filter(isPendingEvent);
     const synced = rows
-      .filter(event => text(event.cloudSyncedAt))
+      .filter(event => !isPendingEvent(event))
       .sort((a,b) => (Date.parse(b.updatedAt || b.createdAt || b.cloudSyncedAt || 0) || 0) - (Date.parse(a.updatedAt || a.createdAt || a.cloudSyncedAt || 0) || 0));
     const kept = [...pending, ...synced];
     const bytes = value => {
@@ -319,6 +384,13 @@
     STORAGE_KEY,
     readEvents,
     compactStoredEvents,
+    isPendingEvent,
+    markEventPending,
+    mergeEventVersions,
+    stripEmbeddedImages,
+    lightPlayerSnapshot,
+    sanitizeAttendanceMap,
+    sanitizePresenceEvent,
     sessionIdFromEvent,
     sessionFromEvent,
     teamIdsFromEvent,

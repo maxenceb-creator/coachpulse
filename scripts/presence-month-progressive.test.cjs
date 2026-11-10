@@ -49,7 +49,7 @@ assert(pageSource.includes('presenceCompleteMonths.add(scopedMonthKey)'), 'Le mo
 assert(pageSource.includes('presenceMonthLoads.has(scopedMonthKey)'), 'Les lectures concurrentes du même contexte/mois doivent être dédupliquées.');
 assert(pageSource.includes('presenceAdjacentMonthKey(monthKey, offset)'), 'M-1 et M+1 doivent être préchargés.');
 assert(pageSource.includes('["reports","prevention"].includes(tab)'), 'Les vues historiques doivent conserver un chargement complet à la demande.');
-assert(pageSource.includes('if(event.cloudSyncedAt) return false;'), 'Un cache historique déjà synchronisé ne doit pas être repoussé après une lecture mensuelle.');
+assert(pageSource.includes('if(!isPendingPresenceEvent(event)) return false;'), 'Seuls les événements pending doivent être repoussés après une lecture mensuelle.');
 assert(pageSource.includes('function invalidatePresenceAccessContext'), 'Le changement de droits doit avoir un point d’invalidation unique.');
 assert(pageSource.includes('presenceContextIsCurrent(token)'), 'Les résultats asynchrones doivent vérifier leur génération avant application.');
 assert(pageSource.includes('stopPresenceEventsSubscription?.()'), 'Le listener du contexte précédent doit être détaché immédiatement.');
