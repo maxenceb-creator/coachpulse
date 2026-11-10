@@ -27,6 +27,70 @@ function importSpecifiers(source) {
   return [...source.matchAll(/(?:from|import)\s*\(?["']([^"']+)["']/g)].map(match => match[1]);
 }
 
+function createProfileHarness({online=false, durable=true, cacheSnapshot, defaultSnapshot, cacheError, defaultError}={}) {
+  const start = appSource.indexOf('function staffProfileAccessError');
+  const end = appSource.indexOf('function isAdminLikeProfile', start);
+  assert(start >= 0 && end > start, 'Helpers du bootstrap profil introuvables');
+  const context = {
+    navigator:{onLine:online},
+    db:{},
+    firebaseFns:{
+      doc(_db, collection, uid){ return {collection, uid}; },
+      async getDocFromCache(){ if(cacheError) throw cacheError; return cacheSnapshot; },
+      async getDoc(){ if(defaultError) throw defaultError; return defaultSnapshot; }
+    },
+    syncStateService:{snapshot(){ return {persistence:{durable}}; }},
+    normalizeLoadedStaffProfile(profile){ return {...profile}; },
+    Error,
+    String
+  };
+  vm.runInNewContext(`${appSource.slice(start, end)}\nglobalThis.profileTestApi={validateStaffProfileSnapshot,readUserProfileSnapshot};`, context, {filename:'app-profile-bootstrap.js'});
+  return context.profileTestApi;
+}
+
+function profileSnapshot(data, exists=true) {
+  return {exists(){ return exists; }, data(){ return data; }};
+}
+
+async function testOfflineProfileBootstrap() {
+  const user = {uid:'staff-a'};
+  const active = profileSnapshot({uid:'staff-a', status:'ACTIVE', role:'ENTRAINEUR'});
+  let api = createProfileHarness({cacheSnapshot:active});
+  let result = await api.readUserProfileSnapshot(user);
+  assert.strictEqual(result.source, 'cache');
+  assert.strictEqual(api.validateStaffProfileSnapshot(user, result.snap).uid, 'staff-a');
+
+  api = createProfileHarness({cacheError:new Error('cache miss')});
+  await assert.rejects(() => api.readUserProfileSnapshot(user), error => error.code === 'staff/cache-unavailable');
+
+  api = createProfileHarness({cacheSnapshot:profileSnapshot({}, false)});
+  result = await api.readUserProfileSnapshot(user);
+  assert.throws(() => api.validateStaffProfileSnapshot(user, result.snap), error => error.code === 'staff/profile-missing');
+
+  api = createProfileHarness({cacheSnapshot:profileSnapshot({uid:'staff-a', status:'INACTIVE'})});
+  result = await api.readUserProfileSnapshot(user);
+  assert.throws(() => api.validateStaffProfileSnapshot(user, result.snap), error => error.code === 'staff/profile-inactive');
+
+  api = createProfileHarness({cacheSnapshot:profileSnapshot({uid:'staff-b', status:'ACTIVE'})});
+  result = await api.readUserProfileSnapshot(user);
+  assert.throws(() => api.validateStaffProfileSnapshot(user, result.snap), error => error.code === 'staff/profile-uid-mismatch');
+
+  api = createProfileHarness({durable:false, cacheSnapshot:active});
+  await assert.rejects(() => api.readUserProfileSnapshot(user), error => error.code === 'staff/cache-unavailable');
+
+  api = createProfileHarness({online:true, defaultError:new Error('network unavailable')});
+  await assert.rejects(() => api.readUserProfileSnapshot(user), error => error.code === 'staff/profile-read-unavailable');
+
+  const authProfileCatch = appSource.slice(
+    appSource.indexOf("await trackLoadingTask('profile:load'"),
+    appSource.indexOf('// Le cache local est purgé', appSource.indexOf("await trackLoadingTask('profile:load'"))
+  );
+  assert(!authProfileCatch.includes('clearFirebaseAuthBrowserCache'), 'Une erreur réseau/cache efface encore la session Auth');
+  const listener = appSource.slice(appSource.indexOf('function startStaffProfileSubscription'), appSource.indexOf('async function initFirebase'));
+  assert(listener.includes("$('#authError').textContent = 'Profil staff révoqué ou supprimé.'"));
+  assert(listener.includes('setLocked(true);'), 'Une révocation distante ne verrouille pas l’interface');
+}
+
 class FakeCache {
   constructor() {
     this.entries = new Map();
@@ -90,6 +154,7 @@ class FakeCacheStorage {
 }
 
 async function run() {
+  await testOfflineProfileBootstrap();
   const firebaseDir = 'vendor/firebase/10.12.5';
   const firebaseFiles = [
     `${firebaseDir}/firebase-app.js`,
