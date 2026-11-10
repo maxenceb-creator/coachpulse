@@ -1163,9 +1163,9 @@ function routeTo(key){
 
 async function loadFirebaseFns(){
   if(firebaseFns) return firebaseFns;
-  const app = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js');
-  const authMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
-  const fs = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js');
+  const app = await import('./vendor/firebase/10.12.5/firebase-app.js');
+  const authMod = await import('./vendor/firebase/10.12.5/firebase-auth.js');
+  const fs = await import('./vendor/firebase/10.12.5/firebase-firestore.js');
   firebaseFns = {...app, ...authMod, ...fs};
   installFirebasePerfInstrumentation();
   installFirestorePermissionDiagnostics();
@@ -1218,6 +1218,50 @@ async function configureAuthPersistence(){
   }
 }
 
+function staffProfileAccessError(code, message, cause){
+  const error = new Error(message);
+  error.code = code;
+  if(cause) error.cause = cause;
+  return error;
+}
+
+function validateStaffProfileSnapshot(user, snap){
+  if(!user?.uid) throw staffProfileAccessError('auth/invalid-user', 'Session Firebase invalide. Reconnecte-toi.');
+  if(!snap?.exists?.()) throw staffProfileAccessError('staff/profile-missing', 'Profil staff autorisé indisponible. Une connexion en ligne est requise.');
+  const data = snap.data() || {};
+  if(data.uid && String(data.uid) !== String(user.uid)){
+    throw staffProfileAccessError('staff/profile-uid-mismatch', 'Le profil staff local ne correspond pas à la session Firebase.');
+  }
+  const profile = normalizeLoadedStaffProfile({...data, uid:user.uid});
+  if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(profile.status || '').toUpperCase())){
+    throw staffProfileAccessError('staff/profile-inactive', 'Compte inactif. Contacte un administrateur.');
+  }
+  return profile;
+}
+
+function isOfflineProfileBootstrap(){
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+async function readUserProfileSnapshot(user){
+  const ref = firebaseFns.doc(db, 'staff_members', user.uid);
+  if(isOfflineProfileBootstrap()){
+    if(syncStateService.snapshot().persistence.durable !== true){
+      throw staffProfileAccessError('staff/cache-unavailable', 'Cache sécurisé indisponible. Une connexion en ligne est requise.');
+    }
+    try{
+      return {ref, snap:await firebaseFns.getDocFromCache(ref), source:'cache'};
+    }catch(error){
+      throw staffProfileAccessError('staff/cache-unavailable', 'Profil staff absent ou illisible dans le cache local.', error);
+    }
+  }
+  try{
+    return {ref, snap:await firebaseFns.getDoc(ref), source:'default'};
+  }catch(error){
+    throw staffProfileAccessError('staff/profile-read-unavailable', 'Validation du profil staff temporairement indisponible.', error);
+  }
+}
+
 function isAdminLikeProfile(profile={}){
   const service = permissionsService();
   if(service?.isAdminRole) return service.isAdminRole(profile);
@@ -1227,16 +1271,17 @@ function isAdminLikeProfile(profile={}){
 }
 
 async function ensureUserProfile(user){
-  const ref = firebaseFns.doc(db, 'staff_members', user.uid);
-  const snap = await firebaseFns.getDoc(ref);
+  const {ref, snap, source} = await readUserProfileSnapshot(user);
   const service = permissionsService();
   if(snap.exists()){
-    currentProfile = normalizeLoadedStaffProfile({uid:user.uid, ...snap.data()});
-    if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(currentProfile.status || '').toUpperCase())) throw new Error('Compte inactif. Contacte un administrateur.');
-    const loginPatch = {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email};
-    await firebaseFns.setDoc(ref, loginPatch, {merge:true});
+    currentProfile = validateStaffProfileSnapshot(user, snap);
+    if(source !== 'cache'){
+      const loginPatch = {lastLoginAt:firebaseFns.serverTimestamp(), email:user.email};
+      await firebaseFns.setDoc(ref, loginPatch, {merge:true}).catch(error => console.warn('Mise à jour de connexion différée', cleanError(error)));
+    }
     return currentProfile;
   }
+  if(source === 'cache') throw staffProfileAccessError('staff/profile-missing', 'Profil staff absent du cache local. Une connexion en ligne est requise.');
   const role = 'ENTRAINEUR';
   const permissionLevel = 'LECTEUR';
   currentProfile = service?.defaultProfile ? service.defaultProfile(user, role, permissionLevel) : {uid:user.uid, email:user.email, name:user.displayName || user.email, role, permissionLevel, scope:'CoachPulse', status:'ACTIVE'};
@@ -1257,10 +1302,22 @@ function startStaffProfileSubscription(){
   const loadingOperation = safeLoadingCall('start', ['profile:listen', {kind:'sync', diagnostic:profileDiagnostic}]);
   const unsubscribe = firebaseFns.onSnapshot(firebaseFns.doc(db, 'staff_members', uid), snap => {
     try{ loadingOperation?.end?.(); }catch(_error){}
-    if(!snap.exists() || currentUser?.uid !== uid) return;
-    const next = normalizeLoadedStaffProfile({uid, ...snap.data()});
-    if(['ARCHIVED','INACTIVE','DISABLED'].includes(String(next.status || '').toUpperCase())){
-      logout();
+    if(currentUser?.uid !== uid) return;
+    if(!snap.exists()){
+      currentProfile = null;
+      setLocked(true);
+      $('#authError').textContent = 'Profil staff révoqué ou supprimé.';
+      notifyFramesAccessUpdated();
+      return;
+    }
+    let next;
+    try{
+      next = validateStaffProfileSnapshot(currentUser, snap);
+    }catch(error){
+      currentProfile = null;
+      setLocked(true);
+      $('#authError').textContent = cleanError(error);
+      notifyFramesAccessUpdated();
       return;
     }
     currentProfile = next;
@@ -1313,7 +1370,10 @@ async function initFirebaseInternal(){
           await trackLoadingTask('profile:load', {kind:'loading', diagnostic:{function:'ensureUserProfile', module:'authentication', scope:'user', collection:'staff_members', operation:'get'}}, () => ensureUserProfile(user));
         }catch(e){
           $('#authError').textContent = cleanError(e);
-          await clearFirebaseAuthBrowserCache('profile-load-failed');
+          currentProfile = null;
+          stopRealtimeSync();
+          stopStaffProfileSubscription();
+          notifyFramesAccessUpdated();
           setLocked(true);
           return;
         }

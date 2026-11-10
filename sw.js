@@ -1,13 +1,17 @@
-const CACHE_NAME = 'coachpulse-v6-4-98-local-first-sync-state';
+const CACHE_NAME = 'coachpulse-v6-4-99-offline-bootstrap';
 const APP_CACHE_PREFIX = 'coachpulse-';
 const CORE_ASSETS = [
   './', './index.html', './manifest.json', './app.js', './css/responsive.css',
   './shared/services/players-service.js',
+  './shared/services/firestore-query-service.js',
   './shared/services/teams-service.js',
   './shared/services/permissions-service.js',
   './shared/services/player-measurements-service.js',
   './shared/services/match-statistics-service.js',
+  './shared/services/match-persistence-service.js',
+  './shared/services/post-match-transactional-persistence-service.js',
   './shared/services/presence-events-service.js',
+  './shared/services/presence-access-context-service.js',
   './shared/services/technical-tests-service.js',
   './shared/utils/client-write-protocol.js',
   './shared/utils/storage-service.js',
@@ -17,6 +21,9 @@ const CORE_ASSETS = [
   './shared/utils/sync-state-service.js',
   './shared/ui/global-loading-indicator.js',
   './shared/ui/global-sync-indicator.js',
+  './vendor/firebase/10.12.5/firebase-app.js',
+  './vendor/firebase/10.12.5/firebase-auth.js',
+  './vendor/firebase/10.12.5/firebase-firestore.js',
   './assets/coachpulse-logo-transparent.png', './assets/coachpulse-logo-clean.png', './assets/asse-logo-officiel.png', './assets/asse-logo.svg',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-1024.png',
   './pages/coach-stats.html', './pages/methodologie.html', './pages/presences.html', './pages/tests-techniques.html', './pages/tests-techniques/testsTechniquesConfig.js', './pages/tests-athletiques.html', './pages/tests-athletiques/testsAthletiquesConfig.js', './pages/data-hub.html', './pages/admin-database.html', './pages/suivi-medical.html', './pages/player-profile.html', './pages/team-profile.html',
@@ -44,23 +51,35 @@ function cacheResponse(request, response) {
   return response;
 }
 
+function matchCurrentCache(request) {
+  return caches.open(CACHE_NAME).then(cache => cache.match(request).then(cached => {
+    if(cached) return cached;
+    const url = new URL(typeof request === 'string' ? request : request.url, self.location.href);
+    if(url.origin !== self.location.origin || !url.search) return undefined;
+    // CORE_ASSETS are immutable inside a versioned cache. Ignoring only the
+    // query string in that cache lets ?v= URLs resolve without reaching an
+    // older CoachPulse cache or masking a required cache-version bump.
+    return cache.match(request, {ignoreSearch:true});
+  }));
+}
+
 function networkFirst(request) {
   const freshRequest = new Request(request, {cache: 'no-store'});
   return fetch(freshRequest)
     .then(response => cacheResponse(request, response))
-    .catch(() => caches.match(request).then(cached => cached || caches.match('./index.html')));
+    .catch(() => matchCurrentCache(request).then(cached => cached || matchCurrentCache('./index.html')));
 }
 
 function cacheFirst(request) {
-  return caches.match(request).then(cached => cached || fetch(request).then(response => cacheResponse(request, response)));
+  return matchCurrentCache(request).then(cached => cached || fetch(request).then(response => cacheResponse(request, response)));
 }
 
 function staleWhileRevalidate(request) {
-  return caches.match(request).then(cached => {
+  return matchCurrentCache(request).then(cached => {
     const refresh = fetch(new Request(request, {cache:'no-store'}))
       .then(response => cacheResponse(request, response))
       .catch(() => null);
-    return cached || refresh.then(response => response || caches.match('./index.html'));
+    return cached || refresh.then(response => response || matchCurrentCache('./index.html'));
   });
 }
 
@@ -100,5 +119,5 @@ self.addEventListener('fetch', event => {
     event.respondWith(staleWhileRevalidate(event.request));
     return;
   }
-  event.respondWith(cacheFirst(event.request).catch(() => caches.match('./index.html')));
+  event.respondWith(cacheFirst(event.request).catch(() => matchCurrentCache('./index.html')));
 });
