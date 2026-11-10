@@ -1163,9 +1163,9 @@ function routeTo(key){
 
 async function loadFirebaseFns(){
   if(firebaseFns) return firebaseFns;
-  const app = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js');
-  const authMod = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
-  const fs = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js');
+  const app = await import('./vendor/firebase/10.12.5/firebase-app.js');
+  const authMod = await import('./vendor/firebase/10.12.5/firebase-auth.js');
+  const fs = await import('./vendor/firebase/10.12.5/firebase-firestore.js');
   firebaseFns = {...app, ...authMod, ...fs};
   installFirebasePerfInstrumentation();
   installFirestorePermissionDiagnostics();

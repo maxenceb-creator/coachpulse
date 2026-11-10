@@ -22,6 +22,7 @@ const entries = [
   'shared/services',
   'shared/utils',
   'shared/ui',
+  'vendor/firebase/10.12.5',
   'data'
 ];
 
