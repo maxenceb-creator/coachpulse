@@ -2741,8 +2741,20 @@ async function teamProfileLoadData(options={}){
     const detailReads = await firestoreQueryService().settleProfileReads(detailSpecs, {readErrors:payload.readErrors});
 	  payload.collections.matchEvents = uniqueRows([...(detailReads.values.teamMatchEvents || []), ...(detailReads.values.matchEventsByMatch || [])]);
 	  if(canReadTeamProfileCollection('sessions')){
-	    const presenceEvents = await presenceListEvents({forceRefresh:options.forceRefresh === true});
-	    const cloudPresence = presenceEventsService()?.collectionsFromEvents(presenceEvents) || {sessions:[], attendance:[]};
+	    let cloudPresence;
+	    if(homeDashboard){
+	      const presenceReads = await firestoreQueryService().settleProfileReads([
+	        {name:'sessions', critical:true, diagnostic:teamProfileDiagnostic('sessions', true), read:() => firestoreQueryService().readSessionsByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('sessions', true)})},
+	        {name:'attendance', critical:true, diagnostic:teamProfileDiagnostic('attendance', true), read:() => firestoreQueryService().readAttendanceByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('attendance', true)})}
+	      ], {readErrors:payload.readErrors});
+	      cloudPresence = {
+	        sessions:(presenceReads.values.sessions || []).filter(row => isPresenceSessionVisibleToModule(row) && !isRetiredPresenceSeasonSession(row)),
+	        attendance:presenceReads.values.attendance || []
+	      };
+	    }else{
+	      const presenceEvents = await presenceListEvents({forceRefresh:options.forceRefresh === true});
+	      cloudPresence = presenceEventsService()?.collectionsFromEvents(presenceEvents) || {sessions:[], attendance:[]};
+	    }
 	    payload.collections.sessions = uniqueRows((cloudPresence.sessions || []).filter(row => rowMatchesTeamId(row, teamId)));
 	    const sessionIds = new Set(payload.collections.sessions.map(row => row.sessionId || row.id).filter(Boolean));
 	    payload.collections.attendance = uniqueRows((cloudPresence.attendance || []).filter(row => rowMatchesTeamId(row, teamId) || sessionIds.has(row.sessionId)));

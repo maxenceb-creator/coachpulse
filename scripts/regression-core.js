@@ -1788,6 +1788,7 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   async function load(profile, teamId=teamA, deniedCollections=[], loadOptions={}){
     const cloud = runtimeFirestore(documents, deniedCollections);
     const diagnostics = [];
+    let presenceListEventsCalls = 0;
     const queryService = {
       ...firestoreQueries,
       readTeamScopedByIdOrIds(name, teamIds, options){
@@ -1806,7 +1807,10 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       hasGlobalDataAccess:() => profile.permissionLevel === 'ADMIN', currentSeason:() => '2026-2027', recordPerfEvent() {},
       appDataCache:{teamProfiles:new Map()}, DATA_CACHE_TTL_MS:0, cloneData:value => structuredClone(value),
       collectCentralFirestoreDocs:() => ({}),
+      isPresenceSessionVisibleToModule:row => row.createdFromPresenceModule === true || row.source === 'Présences',
+      isRetiredPresenceSeasonSession:() => false,
       presenceListEvents:async () => {
+        presenceListEventsCalls += 1;
         cloud.reads.push({collection:'sessions', operation:'LIST', constraints:['createdFromPresenceModule == true','teamId/teamIds scoped']});
         cloud.reads.push({collection:'sessions', operation:'LIST', constraints:['source == Présences','teamId/teamIds scoped']});
         cloud.reads.push({collection:'attendance', operation:'LIST', constraints:['teamId/teamIds scoped']});
@@ -1827,9 +1831,9 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
     });
     vm.runInContext(sourceFunction(fs.readFileSync('app.js','utf8'), 'teamProfileLoadData'), context);
     try{
-      return {payload:await context.teamProfileLoadData({teamId, forceRefresh:true, ...loadOptions}), reads:cloud.reads, diagnostics};
+      return {payload:await context.teamProfileLoadData({teamId, forceRefresh:true, ...loadOptions}), reads:cloud.reads, diagnostics, presenceListEventsCalls};
     }catch(error){
-      return {error, reads:cloud.reads, diagnostics};
+      return {error, reads:cloud.reads, diagnostics, presenceListEventsCalls};
     }
   }
 
@@ -1882,6 +1886,14 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   assert(presenceSessionReads.every(read => read.constraints?.some(value => value.includes('teamId/teamIds'))), 'Chaque requête séance doit rester limitée au périmètre équipe.');
   assert.equal(presenceRights.payload.collections.sessions.some(row => row.id === 'methodology-a' || row.id === 'presence-foreign'), false, 'Présences ne doit exposer ni séance méthodologie ni séance étrangère.');
   assert.deepEqual(Array.from(presenceRights.payload.collections.sessions, row => row.id).sort(), ['presence-legacy-a','presence-modern-a']);
+
+  const homePresenceRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','presences']}, teamA, [], {homeDashboard:true});
+  assert.equal(homePresenceRights.presenceListEventsCalls, 0, 'L’accueil ne doit jamais déclencher le chargement global des présences.');
+  assert.equal(homePresenceRights.reads.filter(read => read.collection === 'sessions').length, 2, 'L’accueil doit lire les séances uniquement par teamId/teamIds.');
+  assert.equal(homePresenceRights.reads.filter(read => read.collection === 'attendance').length, 2, 'L’accueil doit lire les présences uniquement par teamId/teamIds.');
+  assert(homePresenceRights.reads.filter(read => ['sessions','attendance'].includes(read.collection)).every(read => Array.from(read.value || []).length === 1 && Array.from(read.value)[0] === teamA), 'Chaque lecture Présences de l’accueil doit être limitée à l’équipe affichée.');
+  assert.deepEqual(Array.from(homePresenceRights.payload.collections.sessions, row => row.id).sort(), ['presence-legacy-a','presence-modern-a']);
+  assert.deepEqual(Array.from(homePresenceRights.payload.collections.attendance, row => row.id), ['attendance-a']);
 
   const testsRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','tests']});
   assert.equal(testsRights.reads.filter(read => ['technicalTests','physicalTests'].includes(read.collection)).length, 4, 'Tests doit lire uniquement les tests techniques et physiques par teamId/teamIds.');
