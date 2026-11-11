@@ -73,6 +73,36 @@ test('premiere ecriture versionnee', async () => {
   assert.equal(mock.store.match.revision, 1);
 });
 
+test('premiere ecriture exhaustive sans revision distante cree match et evenements', async () => {
+  const mock = mockFirestore();
+  const result = await save(mock, {
+    expectedEventsRevision:undefined,
+    nextEventsComplete:true,
+    nextEvents:[{eventId:'first-event',type:'goal'}]
+  });
+  assert.equal(result.ok,true);
+  assert.equal(result.revision,1);
+  assert.equal(result.eventsRevision,1);
+  assert.equal(mock.store.match.revision,1);
+  assert.equal(mock.store.events.get('first-event').matchId,'match-1');
+});
+
+test('premiere ecriture sans evenement reste autorisee', async () => {
+  const mock = mockFirestore();
+  const result = await save(mock, {expectedEventsRevision:undefined,nextEventsComplete:true,nextEvents:[]});
+  assert.equal(result.ok,true);
+  assert.equal(result.revision,1);
+  assert.equal(result.eventsRevision,1);
+  assert.equal(mock.store.events.size,0);
+});
+
+test('premiere ecriture hors equipe est refusee avant Firestore', async () => {
+  const mock = mockFirestore();
+  const result = await save(mock, {matchSnapshot:{...baseMatch,teamId:'team-u16-a'}});
+  assert.equal(result.code,'TEAM_SCOPE_DENIED');
+  assert.equal(mock.commits.length,0);
+});
+
 test('revision attendue identique et increment atomique', async () => {
   const mock = mockFirestore({match:{...baseMatch,revision:4,historical:'kept'}});
   const result = await save(mock, {expectedRevision:4});

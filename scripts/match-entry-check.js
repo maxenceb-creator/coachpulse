@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const firestoreQueries = require('../shared/services/firestore-query-service.js');
 const matchStatistics = require('../shared/services/match-statistics-service.js');
 const postMatchPersistence = require('../shared/services/post-match-transactional-persistence-service.js');
+const teams = require('../shared/services/teams-service.js');
 
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -76,6 +77,7 @@ function matchHarness() {
   run(`
     renderAll=()=>{};renderLive=()=>{};renderPitch=()=>{};
     buildSystem=()=>{};buildZones=()=>{};showUndo=()=>{};flash=()=>{};showTab=()=>{};
+    matchSyncWait=async()=>{};
     state.team='U13 A';state.teamId='team-u13-a';state.called=ROSTER.slice();
     state.lineup={GB:ROSTER[0],BU:ROSTER[1]};state.bench=[ROSTER[2]];
     ensure();state.selected=ROSTER[1];
@@ -100,7 +102,7 @@ function firestoreHarness() {
     canEditModule: () => true, canViewModule: () => true,
     getCurrentPermissionLevel: () => 'SAISIE', getCurrentUserRole: () => 'ENTRAINEUR_ADJOINT',
     getAuthorizedTeamIds: () => ['team-u13-a'],
-    teamsService: () => ({canonicalTeamId: () => 'team-u13-a'}),
+    teamsService: () => teams,
     firestoreQueryService: () => firestoreQueries,
     seasonFromDate: () => '2026-2027',
     stableFirestoreId: (...parts) => parts.filter(Boolean).join('-'),
@@ -472,6 +474,58 @@ async function main() {
     assert.equal(h.state().savedMatches.length, 1);
   });
 
+  await test('imported matches canonicalize unambiguous legacy teams and reject ambiguous scopes', () => {
+    const h = matchHarness();
+    const legacy = JSON.parse(h.run(`JSON.stringify(coachNormalizeMatch({id:'legacy-u11',team:'U11',teamId:'U11',players:{},log:[{action:'But',ts:1}]}))`));
+    assert.equal(legacy.matchId,'legacy-u11');
+    assert.equal(legacy.teamId,'team-u11-a');
+    assert.deepEqual(legacy.teamIds,['team-u11-a']);
+    assert.equal(legacy.syncStatus,'pendingSync');
+    assert.equal(legacy.revision,0);
+    assert.equal(legacy.eventsRevision,0);
+    assert(legacy.log[0].eventId);
+
+    const canonical = JSON.parse(h.run(`JSON.stringify(coachNormalizeMatch({id:'canonical-u11',team:'U11 A',teamId:'team-u11-a',players:{},log:[]}))`));
+    assert.equal(canonical.teamId,'team-u11-a');
+    assert.deepEqual(canonical.teamIds,['team-u11-a']);
+
+    const ambiguous = JSON.parse(h.run(`JSON.stringify(coachNormalizeMatch({id:'ambiguous-u13',team:'U13',teamId:'U13',players:{},log:[]}))`));
+    assert.equal(ambiguous.teamId,'');
+    assert.deepEqual(ambiguous.teamIds,[]);
+
+    const cloud = firestoreHarness();
+    assert.equal(cloud.sandbox.normalizeMatchForFirestore({id:'legacy-app',team:'U11',teamId:'U11'}).teamId,'team-u11-a');
+    assert.equal(cloud.sandbox.normalizeMatchForFirestore({id:'ambiguous-app',team:'U13',teamId:'U13'}).teamId,'');
+  });
+
+  await test('legacy match imports preserve or deterministically create every event identity', () => {
+    const h = matchHarness();
+    const normalize = source => JSON.parse(h.run(`JSON.stringify(coachNormalizeMatch(${JSON.stringify(source)}))`));
+    const base = {id:'legacy-events',team:'U11',teamId:'U11',players:{}};
+    const fromLog = normalize({...base,log:[{action:'But',ts:1}]});
+    const fromEvents = normalize({...base,events:[{action:'Passe',ts:2}]});
+    const fromActions = normalize({...base,actions:[{action:'Tir',ts:3}]});
+    assert(fromLog.log[0].eventId);
+    assert(fromEvents.log[0].eventId);
+    assert(fromActions.log[0].eventId);
+
+    const existing = normalize({...base,log:[{eventId:'cloud-event-id',action:'But'}]});
+    const historical = normalize({...base,log:[{id:'historical-event-id',action:'But'}]});
+    assert.equal(existing.log[0].eventId,'cloud-event-id');
+    assert.equal(historical.log[0].eventId,'historical-event-id');
+
+    const source = {...base,log:[{action:'But',ts:10},{action:'But',ts:11}]};
+    const first = normalize(source);
+    const second = normalize(source);
+    assert.deepEqual(first.log.map(event=>event.eventId),second.log.map(event=>event.eventId));
+    assert.notEqual(first.log[0].eventId,first.log[1].eventId);
+
+    const cloud = firestoreHarness();
+    const normalized = cloud.sandbox.normalizeMatchForFirestore(first);
+    assert(first.log.every(event=>event.eventId));
+    assert(normalized.events.every(event=>event.eventId));
+  });
+
   await test('pendingSync, synced, syncError, network retry and idempotent Firestore writes', async () => {
     const h = matchHarness();
     const cloud = firestoreHarness();
@@ -557,9 +611,162 @@ async function main() {
     assert(h.state().savedMatches[0].syncError);
     cloud.sandbox.canEditModule = () => true;
     await h.listeners.get('online')();
+    assert.equal(h.state().savedMatches[0].syncStatus, 'syncError');
+    assert.equal(await h.run('retrySavedMatch(state.savedMatches[0])'), true);
     assert.equal(h.state().savedMatches[0].syncStatus, 'synced');
     assert.equal(h.state().savedMatches[0].syncError, '');
     assert.deepEqual([...cloud.documents.keys()], refsAfterLegacyRecovery);
+  });
+
+  await test('automatic Match sync only processes pendingSync and online ignores syncError', async () => {
+    const h = matchHarness();
+    h.run(`
+      state.savedMatches=[
+        {id:'pending',matchId:'pending',teamId:'team-u13-a',players:{},log:[],syncStatus:'pendingSync'},
+        {id:'terminal',matchId:'terminal',teamId:'team-u13-a',players:{},log:[],syncStatus:'syncError',syncErrorCode:'permission-denied'}
+      ];
+      window.matchSyncCalls=[];
+      parent.CoachPulseCentralData={matchSavePostMatchTransactional:async match=>{matchSyncCalls.push(match.matchId);return{revision:1,eventsRevision:1,updatedAtIso:'2026-11-11T10:00:00Z'}}};
+    `);
+    await h.run('syncPendingMatches({silent:true})');
+    assert.deepEqual(Array.from(h.run('matchSyncCalls')), ['pending']);
+    await h.listeners.get('online')();
+    assert.deepEqual(Array.from(h.run('matchSyncCalls')), ['pending']);
+    assert.equal(h.state().savedMatches.find(match => match.matchId === 'terminal').syncStatus, 'syncError');
+  });
+
+  await test('missing cloud API finishes without a lock and a sequential explicit sync can start', async () => {
+    const h = matchHarness();
+    h.run(`
+      state.savedMatches=[{id:'api-late',matchId:'api-late',teamId:'team-u13-a',players:{},log:[],syncStatus:'pendingSync'}];
+      window.noApiAttempt=syncSavedMatch(state.savedMatches[0],{silent:true});
+      window.matchSyncCalls=0;
+      parent.CoachPulseCentralData={matchSavePostMatchTransactional:async()=>{matchSyncCalls++;return{revision:1,eventsRevision:1}}};
+      window.apiReadyAttempt=syncSavedMatch(state.savedMatches[0],{silent:true});
+    `);
+    assert.equal(await h.run('noApiAttempt'), false);
+    assert.equal(await h.run('apiReadyAttempt'), true);
+    assert.equal(h.run('matchSyncCalls'), 1);
+    assert.equal(h.state().savedMatches[0].syncStatus, 'synced');
+    assert.equal(h.run('matchSyncLocks.size'), 0);
+  });
+
+  await test('per-match lock is released after success and terminal failure', async () => {
+    const success = matchHarness();
+    success.run(`
+      state.savedMatches=[{id:'success',matchId:'success',teamId:'team-u13-a',players:{},log:[],syncStatus:'pendingSync'}];
+      window.matchSyncCalls=0;
+      parent.CoachPulseCentralData={matchSavePostMatchTransactional:async()=>{matchSyncCalls++;return{revision:matchSyncCalls,eventsRevision:matchSyncCalls}}};
+    `);
+    assert.equal(await success.run('syncSavedMatch(state.savedMatches[0],{silent:true})'), true);
+    success.run("state.savedMatches[0].syncStatus='pendingSync'");
+    assert.equal(await success.run('syncSavedMatch(state.savedMatches[0],{silent:true})'), true);
+    assert.equal(success.run('matchSyncCalls'), 2);
+    assert.equal(success.run('matchSyncLocks.size'), 0);
+
+    const failure = matchHarness();
+    failure.run(`
+      state.savedMatches=[{id:'failure',matchId:'failure',teamId:'team-u13-a',players:{},log:[],syncStatus:'pendingSync'}];
+      window.matchSyncCalls=0;
+      parent.CoachPulseCentralData={matchSavePostMatchTransactional:async()=>{matchSyncCalls++;throw Object.assign(new Error('denied'),{code:'firestore/permission-denied'})}};
+    `);
+    assert.equal(await failure.run('syncSavedMatch(state.savedMatches[0],{silent:true})'), false);
+    assert.equal(failure.run('matchSyncLocks.size'), 0);
+    assert.equal(await failure.run('retrySavedMatch(state.savedMatches[0])'), false);
+    assert.equal(failure.run('matchSyncCalls'), 2);
+    assert.equal(failure.run('matchSyncLocks.size'), 0);
+  });
+
+  await test('terminal Match errors and quota breaker stop after one attempt', async () => {
+    for(const fixture of [
+      {code:'firestore/permission-denied', expected:'permission-denied'},
+      {code:'firestore/resource-exhausted', expected:'resource-exhausted'},
+      {code:'firestore/unauthenticated', expected:'unauthenticated'},
+      {code:'firestore/failed-precondition', expected:'failed-precondition'},
+      {code:'REVISION_CONFLICT', expected:'revision-conflict', conflict:true}
+    ]){
+      const h = matchHarness();
+      h.run(`
+        state.savedMatches=[{id:'terminal',matchId:'terminal',teamId:'team-u13-a',players:{},log:[],syncStatus:'pendingSync'}];
+        window.matchSyncCalls=0;
+        parent.CoachPulseCentralData={matchSavePostMatchTransactional:async()=>{matchSyncCalls++;throw Object.assign(new Error('terminal'),${JSON.stringify(fixture)})}};
+      `);
+      await h.run('syncPendingMatches({silent:true})');
+      assert.equal(h.run('matchSyncCalls'), 1, fixture.code);
+      assert.equal(h.state().savedMatches[0].syncStatus, 'syncError', fixture.code);
+      assert.equal(h.state().savedMatches[0].syncErrorCode, fixture.expected, fixture.code);
+      await h.run('syncPendingMatches({silent:true})');
+      await h.listeners.get('online')();
+      assert.equal(h.run('matchSyncCalls'), 1, fixture.code);
+    }
+  });
+
+  await test('transient Match errors use exactly three bounded attempts', async () => {
+    for(const code of ['firestore/unavailable','firestore/deadline-exceeded','firestore/aborted']){
+      const h = matchHarness();
+      h.run(`
+        state.savedMatches=[{id:'transient',matchId:'transient',teamId:'team-u13-a',players:{},log:[],syncStatus:'pendingSync'}];
+        matchSyncWait=async()=>{};window.matchSyncCalls=0;
+        parent.CoachPulseCentralData={matchSavePostMatchTransactional:async()=>{matchSyncCalls++;throw Object.assign(new Error('transient'),{code:${JSON.stringify(code)}})}};
+      `);
+      await h.run('syncPendingMatches({silent:true})');
+      assert.equal(h.run('matchSyncCalls'), 3, code);
+      assert.equal(h.state().savedMatches[0].syncStatus, 'syncError', code);
+    }
+  });
+
+  await test('global pending mutex and per-match lock join concurrent calls', async () => {
+    const h = matchHarness();
+    h.run(`
+      state.savedMatches=[{id:'locked',matchId:'locked',teamId:'team-u13-a',players:{},log:[],syncStatus:'pendingSync'}];
+      window.matchSyncCalls=0;window.releaseMatchSync=null;
+      parent.CoachPulseCentralData={matchSavePostMatchTransactional:async()=>{matchSyncCalls++;await new Promise(resolve=>{releaseMatchSync=resolve});return{revision:1,eventsRevision:1}}};
+      window.pendingOne=syncPendingMatches({silent:true});window.pendingTwo=syncPendingMatches({silent:true});
+    `);
+    assert.equal(h.run('pendingOne===pendingTwo'), true);
+    assert.equal(h.run('matchSyncCalls'), 1);
+    h.run('releaseMatchSync()');
+    await h.run('Promise.all([pendingOne,pendingTwo])');
+
+    h.run(`
+      state.savedMatches[0].syncStatus='pendingSync';matchSyncCalls=0;releaseMatchSync=null;
+      window.savedOne=syncSavedMatch(state.savedMatches[0],{silent:true});window.savedTwo=syncSavedMatch(state.savedMatches[0],{silent:true});
+    `);
+    assert.equal(h.run('savedOne===savedTwo'), true);
+    assert.equal(h.run('matchSyncCalls'), 1);
+    h.run('releaseMatchSync()');
+    await h.run('Promise.all([savedOne,savedTwo])');
+  });
+
+  await test('failed reconcile never starts a pending Match write', async () => {
+    const h = matchHarness();
+    h.run(`
+      state.savedMatches=[{id:'pending',matchId:'pending',teamId:'team-u13-a',players:{},log:[],syncStatus:'pendingSync'}];
+      window.matchSyncCalls=0;
+      parent.CoachPulseCentralData={
+        matchSyncCapabilities:()=>({available:true,canRead:true}),
+        matchListFromFirestore:async()=>{throw Object.assign(new Error('denied'),{code:'firestore/permission-denied'})},
+        matchSavePostMatchTransactional:async()=>{matchSyncCalls++;return{revision:1,eventsRevision:1}}
+      };
+    `);
+    assert.equal(await h.run('reconcileMatchesWithCloud()'), false);
+    assert.equal(h.run('matchSyncCalls'), 0);
+    assert.equal(h.state().savedMatches[0].syncStatus, 'pendingSync');
+  });
+
+  await test('manual retry makes one explicit attempt and a failure does not loop', async () => {
+    const h = matchHarness();
+    h.run(`
+      state.savedMatches=[{id:'manual',matchId:'manual',teamId:'team-u13-a',players:{},log:[],syncStatus:'syncError',syncErrorCode:'permission-denied'}];
+      window.matchSyncCalls=0;
+      parent.CoachPulseCentralData={matchSavePostMatchTransactional:async()=>{matchSyncCalls++;throw Object.assign(new Error('denied'),{code:'firestore/permission-denied'})}};
+    `);
+    assert.equal(await h.run('retrySavedMatch(state.savedMatches[0])'), false);
+    assert.equal(h.run('matchSyncCalls'), 1);
+    assert.equal(h.state().savedMatches[0].syncStatus, 'syncError');
+    await h.run('syncPendingMatches({silent:true})');
+    await h.listeners.get('online')();
+    assert.equal(h.run('matchSyncCalls'), 1);
   });
 
   await test('historical retry initializes safely, reloads events and preserves the local draft', async () => {
