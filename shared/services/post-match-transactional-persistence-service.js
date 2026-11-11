@@ -226,7 +226,7 @@
             conflict:true, expectedEventsRevision:expectedEventsRevisionInfo.revision, remoteEventsRevision:remoteEventsRevisionInfo.revision
           });
         }
-        if(input.nextEventsComplete === true && input.expectedEventsRevision === undefined){
+        if(documentExists(remoteMatchSnapshot) && input.nextEventsComplete === true && input.expectedEventsRevision === undefined){
           return failure('EXPECTED_EVENTS_REVISION_REQUIRED', "La liste exhaustive ne peut pas etre prouvee sans revision d'evenements attendue.", {conflict:true});
         }
         const nextEventsRevision = remoteEventsRevisionInfo.revision + 1;

@@ -195,6 +195,7 @@ function compactTeamKey(v){return String(v||'').toUpperCase().normalize('NFD').r
 function officialTeamById(id){return officialTeams().find(t=>String(t.teamId)===String(id))||null}
 function officialTeamByName(name){const key=compactTeamKey(name);return officialTeams().find(t=>compactTeamKey(t.name)===key)||null}
 function officialTeamForValue(value){const direct=officialTeamById(value)||officialTeamByName(value);if(direct)return direct;const raw=String(value||'').toUpperCase();if(raw==='R1'||raw.includes('SENIOR')||raw.includes('SÉNIOR'))return officialTeamByName('R1');const n=Number((raw.match(/\d+/)||[])[0]||0);if(!n)return null;if(n<=7)return officialTeamByName('U7 A');if(n<=9)return officialTeamByName('U9 A');if(n<=11)return officialTeamByName('U11 A');if(n<=14)return officialTeamByName('U13 A');if(n<=16)return officialTeamByName('U16 A');return officialTeamByName('U19')}
+function canonicalImportedMatchTeamId(raw={}){const refs=[raw.teamId,raw.team_id,raw.teamSnapshot?.teamId,raw.teamSnapshot?.name,raw.team,raw.equipe].map(value=>String(value||'').trim()).filter(Boolean),teams=officialTeams();for(const ref of refs){const exact=teams.find(team=>String(team.teamId)===ref||String(team.name).toUpperCase()===ref.toUpperCase());if(exact)return exact.teamId}for(const ref of refs){const category=ref.replace(/^(?:team-)+/i,'').replace(/[-_ ]+/g,' ').trim().toUpperCase();if(/^U\d+$/.test(category)){const matches=teams.filter(team=>String(team.category||'').toUpperCase()===category);if(matches.length!==1)return'';return matches[0].teamId}const mapped=officialTeamForValue(ref);if(mapped)return mapped.teamId}return''}
 function syncStateTeam(team){const t=officialTeamForValue(team||state.teamId||state.team);if(t){state.teamId=t.teamId;state.team=t.name}else{state.teamId='';state.team=String(team||state.team||'')}}
 function buildTeamSelect(){const sel=document.getElementById('team');if(!sel)return;const teams=officialTeams();const current=state.teamId||officialTeamForValue(state.team)?.teamId||'';sel.innerHTML='<option value="">Choisir une équipe...</option>'+teams.map(t=>`<option value="${t.teamId}">${t.name}</option>`).join('');sel.value=current}
 function matchStatistics(){return window.CoachPulseMatchStatistics}
@@ -217,46 +218,99 @@ function compactSyncedMatchForStorage(match){const compact={};SYNCED_MATCH_SUMMA
 function storageSnapshot(){return {...state,savedMatches:(state.savedMatches||[]).map(match=>match?.syncStatus==='synced'?compactSyncedMatchForStorage(match):match)} }
 function save(){const stored=window.CoachStatsStorage.setJson('coachStatsV170',storageSnapshot(),{recover:true});if(stored===false)CoachStatsNotify?.error?.('Stockage du navigateur saturé : les dernières modifications restent en mémoire uniquement.');try{window.parent?.postMessage({type:'coachpulse-local-change',key:'coachStatsV170'},'*')}catch(_){}return stored}
 
-function stableMatchEventId(matchId,event,index){return String(event?.eventId||['event',matchId,event?.ts||event?.t||index,event?.playerId||event?.player||'',event?.key||event?.action||'',index].join('-').toLowerCase().replace(/[^a-z0-9_-]+/g,'-')).slice(0,120)}
+function stableMatchEventId(matchId,event,index){return String(event?.eventId||event?.id||['event',matchId,event?.ts||event?.t||index,event?.playerId||event?.player||'',event?.key||event?.action||'',index].join('-').toLowerCase().replace(/[^a-z0-9_-]+/g,'-')).slice(0,120)}
 function ensureSavedMatchIdentity(match,index=0){if(!match||typeof match!=='object')return match;match.matchId=match.matchId||match.id||('legacy-'+(match.createdAt||match.date||index).toString().replace(/[^a-zA-Z0-9_-]+/g,'-'));match.id=match.id||match.matchId;match.log=match.log||match.events||match.actions||[];match.log.forEach((event,eventIndex)=>{event.eventId=stableMatchEventId(match.matchId,event,eventIndex)});normalizeMatchPlayerTimes(match.players);match.syncStatus=match.syncStatus||'pendingSync';return match}
 function matchCloudApi(){try{return window.parent?.CoachPulseCentralData||null}catch(_){return null}}
-async function syncSavedMatch(match,{silent=false}={}){
-  ensureSavedMatchIdentity(match);
+const MATCH_SYNC_MAX_ATTEMPTS=3;
+const MATCH_SYNC_BASE_DELAY_MS=700;
+const matchSyncLocks=new Map();
+let pendingMatchesSyncPromise=null;
+let matchSyncCircuitBreaker=null;
+function matchSyncErrorCode(error){return String(error?.code||error?.cause?.code||'unknown').toLowerCase().replace(/^firestore\//,'').replace(/_/g,'-')}
+function classifyMatchSyncError(error){
+  const code=matchSyncErrorCode(error);
+  const message=String(error?.message||error||'').toLowerCase();
+  if(code==='resource-exhausted'||message.includes('resource-exhausted')||message.includes('quota'))return{code:'resource-exhausted',kind:'quota',terminal:true};
+  if(code==='permission-denied'||code==='unauthenticated'||code==='failed-precondition'||error?.conflict===true||code.includes('revision-conflict')||code==='expected-events-revision-required'||code==='events-revision-required')return{code,kind:'terminal',terminal:true};
+  if(['unavailable','deadline-exceeded','aborted','network-request-failed'].includes(code)||message.includes('network')||message.includes('réseau')||message.includes('hors ligne'))return{code:code==='unknown'?'network':code,kind:'transient',terminal:false};
+  return{code,kind:'terminal',terminal:true};
+}
+function matchSyncWait(attempt){
+  const exponential=MATCH_SYNC_BASE_DELAY_MS*Math.pow(2,Math.max(0,attempt-1));
+  const jitter=Math.floor(Math.random()*Math.max(1,Math.round(exponential*.25)));
+  return new Promise(resolve=>setTimeout(resolve,exponential+jitter));
+}
+function matchSyncFailureMessage(classification){
+  if(classification.code==='permission-denied')return'Synchronisation refusée par les autorisations. Le match reste local ; utilisez Réessayer après correction des droits.';
+  if(classification.code==='resource-exhausted')return'Quota Firestore atteint. Les synchronisations automatiques Match sont suspendues ; le match reste local.';
+  if(classification.code==='unauthenticated')return'Session Firebase expirée. Reconnectez-vous avant de réessayer.';
+  if(classification.code==='failed-precondition'||classification.code.includes('conflict')||classification.code.includes('revision'))return'Le match distant a changé ou exige une action préalable. Le brouillon local est conservé.';
+  return'Synchronisation impossible. Le match reste sauvegardé localement.';
+}
+async function performSavedMatchSync(match,{silent=false,manual=false}={}){
   const api=matchCloudApi();
   if(!api?.matchSavePostMatchTransactional){match.syncStatus='pendingSync';save();if(!silent)CoachStatsNotify.warn('Match sauvegardé localement · synchronisation cloud en attente.');return false}
-  match.syncStatus='pendingSync';match.syncError='';save();
-  try{
-    const result=await api.matchSavePostMatchTransactional(match,{nextEventsComplete:true,deletionStrategy:match.deletionStrategy||'PHYSICAL'});
-    match.syncStatus='synced';match.syncedAt=result.updatedAtIso||new Date().toISOString();match.syncNote='';match.revision=result.revision;match.eventsRevision=result.eventsRevision;
-    match.syncError='';save();renderAll();
-    if(!silent)CoachStatsNotify.success('Match sauvegardé localement et synchronisé dans le cloud ✅');
-    return true;
-  }catch(error){
-    if(error?.upgradeRequired===true&&!silent&&api?.matchPrepareHistoricalEventsRevision&&api?.matchListFromFirestore){
-      const confirmed=await CoachStatsNotify.ask("Ce match historique doit être préparé avant sa première sauvegarde exhaustive. Continuer sans modifier ni supprimer ses événements ?",{confirmLabel:'Préparer'});
-      if(confirmed){
-        try{
-          const localEvents=[...(match.log||[])];
-          const prepared=await api.matchPrepareHistoricalEventsRevision(match);
-          const cloud=await api.matchListFromFirestore({teamId:match.teamId});
-          const remote=cloud.find(item=>String(item.matchId||item.id)===String(match.matchId||match.id));
-          if(!remote||!Number.isSafeInteger(remote.eventsRevision)||remote.eventsRevision!==prepared.eventsRevision||remote.revision!==prepared.revision)throw new Error("Le match préparé n'a pas pu être vérifié après rechargement.");
-          const mergedEvents=new Map((remote.log||remote.events||[]).map(event=>[String(event.eventId||event.id||''),event]).filter(([id])=>id));
-          localEvents.forEach(event=>{const id=String(event.eventId||event.id||'');if(id)mergedEvents.set(id,event)});
-          Object.assign(match,remote,{log:[...mergedEvents.values()],events:undefined,revision:prepared.revision,eventsRevision:prepared.eventsRevision,syncStatus:'pendingSync',syncError:'',cloudReference:false});
-          save();renderAll();
-          return syncSavedMatch(match,{silent:false});
-        }catch(prepareError){
-          match.syncStatus='syncError';match.syncError=String(prepareError?.message||prepareError);save();renderAll();CoachStatsNotify.error(`${match.syncError} Le brouillon local a été conservé.`);return false;
+  if(matchSyncCircuitBreaker&&!manual)return false;
+  match.syncStatus='pendingSync';match.syncError='';match.syncErrorCode='';save();
+  let lastError=null;
+  for(let attempt=1;attempt<=MATCH_SYNC_MAX_ATTEMPTS;attempt++){
+    try{
+      const result=await api.matchSavePostMatchTransactional(match,{nextEventsComplete:true,deletionStrategy:match.deletionStrategy||'PHYSICAL'});
+      match.syncStatus='synced';match.syncedAt=result.updatedAtIso||new Date().toISOString();match.syncNote='';match.revision=result.revision;match.eventsRevision=result.eventsRevision;
+      match.syncError='';match.syncErrorCode='';match.syncAttempts=attempt;matchSyncCircuitBreaker=null;save();renderAll();
+      if(!silent)CoachStatsNotify.success('Match sauvegardé localement et synchronisé dans le cloud ✅');
+      return true;
+    }catch(error){
+      lastError=error;
+      const classification=classifyMatchSyncError(error);
+      if(error?.upgradeRequired===true&&!silent&&api?.matchPrepareHistoricalEventsRevision&&api?.matchListFromFirestore){
+        const confirmed=await CoachStatsNotify.ask("Ce match historique doit être préparé avant sa première sauvegarde exhaustive. Continuer sans modifier ni supprimer ses événements ?",{confirmLabel:'Préparer'});
+        if(confirmed){
+          try{
+            const localEvents=[...(match.log||[])];
+            const prepared=await api.matchPrepareHistoricalEventsRevision(match);
+            const cloud=await api.matchListFromFirestore({teamId:match.teamId});
+            const remote=cloud.find(item=>String(item.matchId||item.id)===String(match.matchId||match.id));
+            if(!remote||!Number.isSafeInteger(remote.eventsRevision)||remote.eventsRevision!==prepared.eventsRevision||remote.revision!==prepared.revision)throw new Error("Le match préparé n'a pas pu être vérifié après rechargement.");
+            const mergedEvents=new Map((remote.log||remote.events||[]).map(event=>[String(event.eventId||event.id||''),event]).filter(([id])=>id));
+            localEvents.forEach(event=>{const id=String(event.eventId||event.id||'');if(id)mergedEvents.set(id,event)});
+            Object.assign(match,remote,{log:[...mergedEvents.values()],events:undefined,revision:prepared.revision,eventsRevision:prepared.eventsRevision,syncStatus:'pendingSync',syncError:'',syncErrorCode:'',cloudReference:false});
+            save();renderAll();
+            return performSavedMatchSync(match,{silent:false,manual:true});
+          }catch(prepareError){lastError=prepareError}
         }
       }
+      if(classification.kind==='quota')matchSyncCircuitBreaker={code:classification.code,openedAt:new Date().toISOString()};
+      if(classification.terminal||attempt===MATCH_SYNC_MAX_ATTEMPTS)break;
+      await matchSyncWait(attempt);
     }
-    match.syncStatus=navigator.onLine?'syncError':'pendingSync';match.syncError=String(error?.message||error);save();renderAll();
-    if(!silent)CoachStatsNotify.warn(error?.upgradeRequired?'Préparation annulée · le match local reste intact.':'Match sauvegardé localement · synchronisation cloud à réessayer.');
-    return false;
   }
+  const classification=classifyMatchSyncError(lastError);
+  match.syncStatus=navigator.onLine?'syncError':'pendingSync';match.syncError=String(lastError?.message||lastError);match.syncErrorCode=classification.code;match.syncAttempts=MATCH_SYNC_MAX_ATTEMPTS;save();renderAll();
+  if(!silent)CoachStatsNotify.warn(matchSyncFailureMessage(classification));
+  return false;
 }
-async function syncPendingMatches({silent=true}={}){for(const match of state.savedMatches||[]){if(match.syncStatus!=='synced')await syncSavedMatch(match,{silent})}}
+function syncSavedMatch(match,options={}){
+  ensureSavedMatchIdentity(match);
+  const api=matchCloudApi();
+  if(!api?.matchSavePostMatchTransactional)return performSavedMatchSync(match,options);
+  const key=String(match.matchId||match.id);
+  if(matchSyncLocks.has(key))return matchSyncLocks.get(key);
+  const operation=performSavedMatchSync(match,options).finally(()=>matchSyncLocks.delete(key));
+  matchSyncLocks.set(key,operation);
+  return operation;
+}
+async function retrySavedMatch(match){
+  if(!match)return false;
+  match.syncStatus='pendingSync';match.syncError='';match.syncErrorCode='';save();renderAll();
+  return syncSavedMatch(match,{silent:false,manual:true});
+}
+function syncPendingMatches({silent=true}={}){
+  if(pendingMatchesSyncPromise)return pendingMatchesSyncPromise;
+  if(matchSyncCircuitBreaker)return false;
+  pendingMatchesSyncPromise=(async()=>{for(const match of state.savedMatches||[]){if(match.syncStatus==='pendingSync')await syncSavedMatch(match,{silent,automatic:true})}return true})().finally(()=>{pendingMatchesSyncPromise=null});
+  return pendingMatchesSyncPromise;
+}
 async function reconcileMatchesWithCloud(){
   const api=matchCloudApi();if(!api?.matchListFromFirestore)return;const capabilities=api.matchSyncCapabilities?.();if(capabilities&&(!capabilities.available||!capabilities.canRead))return;
   try{
@@ -264,7 +318,7 @@ async function reconcileMatchesWithCloud(){
     cloud.forEach(raw=>{const id=String(raw.matchId||raw.id);const local=byId.get(id);if(!local){raw.syncStatus='synced';ensureSavedMatchIdentity(raw);state.savedMatches.push(raw);changed=true;return}const cloudTime=Date.parse(raw.updatedAtIso||raw.createdAt||raw.date||0)||0;const localTime=Date.parse(local.updatedAtIso||local.syncedAt||local.createdAt||local.date||0)||0;if(local.cloudReference===true||(local.syncStatus==='synced'&&cloudTime>localTime)){Object.assign(local,raw,{syncStatus:'synced',cloudReference:false});ensureSavedMatchIdentity(local);changed=true}});
     (state.savedMatches||[]).forEach(match=>{ensureSavedMatchIdentity(match);if(match.syncStatus==='synced'&&!cloudIds.has(String(match.matchId||match.id))){match.syncStatus='pendingSync';match.syncNote='';changed=true}});
     if(changed){save();renderAll()}await syncPendingMatches({silent:true});
-  }catch(error){console.warn('Récupération des matchs Firestore indisponible',error);await syncPendingMatches({silent:true})}
+  }catch(error){console.warn('Récupération des matchs Firestore indisponible',error);return false}
 }
 window.addEventListener('online',()=>syncPendingMatches({silent:true}));
 
@@ -680,7 +734,7 @@ function saveAndNewMatch(){if(!currentMatchHasData()){CoachStatsNotify.warn('Auc
 async function deleteSavedMatch(id){if(!(await CoachStatsNotify.ask('Supprimer ce match sauvegardé ?', {danger:true, confirmLabel:'Supprimer'})))return;state.savedMatches=state.savedMatches.filter(m=>m.id!==id);save();renderAll()}
 async function restoreSavedMatch(id){let m=state.savedMatches.find(x=>x.id===id);if(!m)return;if(m.cloudReference===true){const api=matchCloudApi();if(!navigator.onLine||!api?.matchListFromFirestore){CoachStatsNotify.warn('Ce match synchronisé doit être rechargé depuis le cloud. Réessayez lorsque la connexion est disponible.');return}try{const cloud=await api.matchListFromFirestore({teamId:m.teamId});const remote=cloud.find(item=>String(item.matchId||item.id)===String(m.matchId||m.id));if(!remote)throw new Error('Match distant introuvable.');Object.assign(m,remote,{syncStatus:'synced',cloudReference:false});ensureSavedMatchIdentity(m)}catch(error){CoachStatsNotify.error(`${error?.message||'Rechargement impossible.'} Le match en cours reste intact.`);return}}if(currentMatchHasData()&&!(await CoachStatsNotify.ask('Charger ce match remplacera le match en cours non sauvegardé. Continuer ?')))return;state.matchId=m.matchId||m.id||state.matchId;state.team=m.team;state.teamId=m.teamId||'';syncStateTeam(state.teamId||state.team);state.opponent=m.opponent;state.matchType=normalizeMatchType(m.matchType||m.match_type||m.competition)||'';state.format=m.format;state.system=m.system;state.elapsed=m.elapsed;state.running=false;state.phase='terminé';state.matchEnded=true;state.called=[...m.called];state.lineup={...m.lineup};state.bench=[...m.bench];state.players=JSON.parse(JSON.stringify(m.players));normalizeMatchPlayerTimes(state.players);state.opp=JSON.parse(JSON.stringify(m.opp));state.log=JSON.parse(JSON.stringify(m.log));buildSystem();save();renderAll();showTab('bilan',document.querySelectorAll('.tabs button')[2])}
 function aggregateSaved(){const agg={matches:state.savedMatches.length,scoreUs:0,scoreThem:0,elapsed:0,opp:{tirCadreAdv:0,tirNonCadreAdv:0,centreAdv:0,progressionAdv:0,entree20Adv:0,butAdv:0},players:{}};ROSTER.forEach(n=>agg.players[n]=blank());state.savedMatches.forEach(m=>{agg.scoreUs+=m.scoreUs||0;agg.scoreThem+=m.scoreThem||0;agg.elapsed+=m.elapsed||0;['tirCadreAdv','tirNonCadreAdv','centreAdv','progressionAdv','entree20Adv','butAdv'].forEach(k=>agg.opp[k]+=(m.opp?.[k]||0));Object.entries(m.players||{}).forEach(([n,p])=>{if(!agg.players[n])agg.players[n]=blank();['seconds','but','passe','tirCadre','tirNonCadre','centre','progression','entree20','recup'].forEach(k=>agg.players[n][k]+=(p?.[k]||0));Object.entries(p?.positionSeconds||{}).forEach(([pos,sec])=>{agg.players[n].positionSeconds[pos]=(agg.players[n].positionSeconds[pos]||0)+(sec||0)})})});return agg}
-function renderTournamentPanel(){const list=state.savedMatches||[];const total=aggregateSaved();const tk=document.getElementById('tournamentKpis');if(tk)tk.innerHTML=[['Matchs',list.length],['Buts',`${total.scoreUs}-${total.scoreThem}`],['Temps total',fmt(total.elapsed)],['Équipe',state.team||'—']].map(x=>`<div class="tournamentKpi"><b>${x[1]}</b>${x[0]}</div>`).join('');const html=list.length?list.slice().reverse().map((m,i)=>{const id=JSON.stringify(m.id);const matchId=JSON.stringify(m.matchId||m.id);const sync=m.syncStatus==='synced'?'☁️ Cloud synchronisé':m.syncStatus==='syncError'?'⚠️ Erreur cloud · local sécurisé':m.syncStatus==='conflict'?'⚠️ Conflit · brouillon conservé':'⏳ Synchronisation en attente';return `<div class="savedMatch"><div><b>${m.team||'ASSE'} ${m.scoreUs??'—'}-${m.scoreThem??'—'} ${m.opponent||'Adversaire'}</b><small>${m.elapsed==null?'Durée inconnue':fmt(m.elapsed)} · ${m.format?`Foot à ${m.format}`:'Format inconnu'} · ${m.system||'Composition inconnue'} · ${new Date(m.createdAt||m.date).toLocaleDateString('fr-FR')} · ${sync}</small></div><div class="tools"><button onclick='restoreSavedMatch(${id})'>Voir</button><button class="good" onclick='CoachPulsePostMatchEditor.editMatch(${matchId})'>✏️ Modifier les statistiques</button>${m.syncStatus==='synced'?'':`<button class="warn" onclick='syncSavedMatch(state.savedMatches.find(x=>String(x.id)===String(${id})))'>Réessayer</button>`}<button class="bad" onclick='deleteSavedMatch(${id})'>×</button></div></div>`}).join(''):'<div class="savedMatch"><div><b>Aucun match sauvegardé</b><small>Après un match, clique sur “Sauvegarder ce match”.</small></div></div>';const mh=document.getElementById('matchHistory');if(mh)mh.innerHTML=html;const mb=document.getElementById('savedMatchesBilan');if(mb)mb.innerHTML=html;const g=document.getElementById('savedGlobalKpis');if(g)g.innerHTML=[['Matchs sauvegardés',list.length],['Score cumulé',`${total.scoreUs}-${total.scoreThem}`],['Buts ASSE',total.scoreUs],['Buts encaissés',total.scoreThem],['Temps cumulé',fmt(total.elapsed)],['Joueuses utilisées',Object.values(total.players).filter(p=>p.seconds>0).length]].map(x=>`<div class="kpi visual"><b>${x[1]}</b>${x[0]}</div>`).join('')}
+function renderTournamentPanel(){const list=state.savedMatches||[];const total=aggregateSaved();const tk=document.getElementById('tournamentKpis');if(tk)tk.innerHTML=[['Matchs',list.length],['Buts',`${total.scoreUs}-${total.scoreThem}`],['Temps total',fmt(total.elapsed)],['Équipe',state.team||'—']].map(x=>`<div class="tournamentKpi"><b>${x[1]}</b>${x[0]}</div>`).join('');const html=list.length?list.slice().reverse().map((m,i)=>{const id=JSON.stringify(m.id);const matchId=JSON.stringify(m.matchId||m.id);const sync=m.syncStatus==='synced'?'☁️ Cloud synchronisé':m.syncStatus==='syncError'?'⚠️ Erreur cloud · local sécurisé':m.syncStatus==='conflict'?'⚠️ Conflit · brouillon conservé':'⏳ Synchronisation en attente';return `<div class="savedMatch"><div><b>${m.team||'ASSE'} ${m.scoreUs??'—'}-${m.scoreThem??'—'} ${m.opponent||'Adversaire'}</b><small>${m.elapsed==null?'Durée inconnue':fmt(m.elapsed)} · ${m.format?`Foot à ${m.format}`:'Format inconnu'} · ${m.system||'Composition inconnue'} · ${new Date(m.createdAt||m.date).toLocaleDateString('fr-FR')} · ${sync}</small></div><div class="tools"><button onclick='restoreSavedMatch(${id})'>Voir</button><button class="good" onclick='CoachPulsePostMatchEditor.editMatch(${matchId})'>✏️ Modifier les statistiques</button>${m.syncStatus==='synced'?'':`<button class="warn" onclick='retrySavedMatch(state.savedMatches.find(x=>String(x.id)===String(${id})))'>Réessayer</button>`}<button class="bad" onclick='deleteSavedMatch(${id})'>×</button></div></div>`}).join(''):'<div class="savedMatch"><div><b>Aucun match sauvegardé</b><small>Après un match, clique sur “Sauvegarder ce match”.</small></div></div>';const mh=document.getElementById('matchHistory');if(mh)mh.innerHTML=html;const mb=document.getElementById('savedMatchesBilan');if(mb)mb.innerHTML=html;const g=document.getElementById('savedGlobalKpis');if(g)g.innerHTML=[['Matchs sauvegardés',list.length],['Score cumulé',`${total.scoreUs}-${total.scoreThem}`],['Buts ASSE',total.scoreUs],['Buts encaissés',total.scoreThem],['Temps cumulé',fmt(total.elapsed)],['Joueuses utilisées',Object.values(total.players).filter(p=>p.seconds>0).length]].map(x=>`<div class="kpi visual"><b>${x[1]}</b>${x[0]}</div>`).join('')}
 
 function emptyZones(){return {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0}}
 function heatmapCounts(side,player=null){const counts=emptyZones();state.log.forEach(r=>{if(!r.zone)return;const z=String(r.zone);if(side==='adv'&&r.player==='Adversaire')counts[z]=(counts[z]||0)+1;if(side==='us'&&r.player!=='Adversaire'&&r.player!=='Match'&&(!player||r.player===player)&&(!r.key||r.key==='recup'))counts[z]=(counts[z]||0)+1});return counts}
@@ -779,7 +833,7 @@ function coachImportLaunch(){const input=document.getElementById('coachImportFil
 function coachImportJSON(txt,file){const data=JSON.parse(txt);ensure();let added=0;if(Array.isArray(data.savedMatches))added+=coachAppendMatches(data.savedMatches);if(data.currentMatch)added+=coachAppendMatches([data.currentMatch]);if(Array.isArray(data.matches))added+=coachAppendMatches(data.matches);if(data.state&&Array.isArray(data.state.savedMatches))added+=coachAppendMatches(data.state.savedMatches);if(!added&&coachLooksLikeMatch(data))added+=coachAppendMatches([data]);if(!added)throw new Error('aucun match trouvé dans ce JSON');save();renderAll();coachImportStatus(`${added} match(s) importé(s) depuis ${file.name}.`);CoachStatsNotify.success(`${added} match(s) importé(s) ✅`)}
 function coachLooksLikeMatch(m){return m&&typeof m==='object'&&(m.players||m.log||m.team||m.opponent||m.scoreUs!==undefined)}
 function coachAppendMatches(matches){ensure();state.savedMatches=state.savedMatches||[];let added=0;(matches||[]).forEach(raw=>{if(!coachLooksLikeMatch(raw))return;const m=coachNormalizeMatch(raw);const exists=state.savedMatches.some(x=>String(x.id||'')===String(m.id||''));if(exists)m.id=m.id+'_imp_'+Date.now()+'_'+Math.floor(Math.random()*9999);state.savedMatches.push(m);added++;});return added}
-function coachNormalizeMatch(raw){const m=JSON.parse(JSON.stringify(raw||{}));m.id=m.id||('import_'+Date.now()+'_'+Math.floor(Math.random()*9999));m.createdAt=m.createdAt||m.date_match||m.date||new Date().toISOString();m.team=m.team||m.equipe||state.team||'ASSE';m.teamId=m.teamId||m.team_id||officialTeamForValue(m.team)?.teamId||state.teamId||'';m.opponent=m.opponent||m.adversaire||'Adversaire';m.matchType=normalizeMatchType(m.matchType||m.match_type||m.competition);m.matchTypeLabel=matchTypeLabel(m.matchType);m.format=String(m.format||m.format_jeu||state.format||'8');m.system=m.system||m.systeme||state.system||'3-2-2';m.elapsed=Number(m.elapsed||m.temps_secondes||0)||0;m.scoreUs=Number(m.scoreUs||m.score_asse||0)||0;m.scoreThem=Number(m.scoreThem||m.score_adv||m.scoreThem||0)||0;m.opp=m.opp||{};m.players=matchPlayersWithIds(m.players||{},m.teamId,m.team);m.called=m.called||Object.keys(m.players||{});m.lineup=m.lineup||{};m.bench=m.bench||[];m.log=matchLogWithIds(m.log||[],m.teamId,m.team);return m}
+function coachNormalizeMatch(raw){const m=JSON.parse(JSON.stringify(raw||{}));m.id=m.id||('import_'+Date.now()+'_'+Math.floor(Math.random()*9999));m.matchId=m.matchId||m.id;m.createdAt=m.createdAt||m.date_match||m.date||new Date().toISOString();m.team=m.team||m.equipe||state.team||'ASSE';m.teamId=canonicalImportedMatchTeamId({...m,team:m.team});m.teamIds=m.teamId?[m.teamId]:[];m.opponent=m.opponent||m.adversaire||'Adversaire';m.matchType=normalizeMatchType(m.matchType||m.match_type||m.competition);m.matchTypeLabel=matchTypeLabel(m.matchType);m.format=String(m.format||m.format_jeu||state.format||'8');m.system=m.system||m.systeme||state.system||'3-2-2';m.elapsed=Number(m.elapsed||m.temps_secondes||0)||0;m.scoreUs=Number(m.scoreUs||m.score_asse||0)||0;m.scoreThem=Number(m.scoreThem||m.score_adv||m.scoreThem||0)||0;m.opp=m.opp||{};m.players=matchPlayersWithIds(m.players||{},m.teamId,m.team);m.called=m.called||Object.keys(m.players||{});m.lineup=m.lineup||{};m.bench=m.bench||[];m.log=matchLogWithIds(m.log||m.events||m.actions||[],m.teamId,m.team);m.revision=Number.isSafeInteger(m.revision)?m.revision:0;m.eventsRevision=Number.isSafeInteger(m.eventsRevision)?m.eventsRevision:0;m.entryMode=m.entryMode||'FULL_POST_MATCH';m.statsSource=m.statsSource||'EVENTS';m.syncStatus='pendingSync';return ensureSavedMatchIdentity(m)}
 function coachParseCSV(text){const sep=((text.split('\n')[0]||'').match(/;/g)||[]).length>=((text.split('\n')[0]||'').match(/,/g)||[]).length?';':',';const rows=[];let row=[],cell='',q=false;for(let i=0;i<text.length;i++){const c=text[i],n=text[i+1];if(c==='"'&&q&&n==='"'){cell+='"';i++;continue}if(c==='"'){q=!q;continue}if(c===sep&&!q){row.push(cell);cell='';continue}if((c==='\n'||c==='\r')&&!q){if(c==='\r'&&n==='\n')i++;row.push(cell);if(row.some(x=>String(x).trim()!==''))rows.push(row);row=[];cell='';continue}cell+=c}row.push(cell);if(row.some(x=>String(x).trim()!==''))rows.push(row);return rows}
 function coachImportCSV(txt,file){const rows=coachParseCSV(txt);if(rows.length<2)throw new Error('CSV vide');const head=rows[0].map(h=>String(h).trim());const idx=Object.fromEntries(head.map((h,i)=>[h,i]));const get=(r,k)=>r[idx[k]]??'';const by={};function matchFor(id){id=id||('csv_'+file.name);if(!by[id])by[id]={id:id,createdAt:'',team:state.team||'ASSE',teamId:state.teamId||'',opponent:'Adversaire',format:state.format||'8',system:state.system||'3-2-2',elapsed:0,scoreUs:0,scoreThem:0,opp:{},players:{},called:[],lineup:{},bench:[],log:[]};return by[id]}rows.slice(1).forEach(r=>{const id=get(r,'match_id')||get(r,'id')||('csv_'+file.name);const m=matchFor(id);m.createdAt=get(r,'date_match')||m.createdAt||new Date().toISOString();m.team=get(r,'equipe')||m.team;m.teamId=get(r,'team_id')||m.teamId||officialTeamForValue(m.team)?.teamId||'';m.opponent=get(r,'adversaire')||m.opponent;m.format=get(r,'format')||m.format;m.system=get(r,'systeme')||m.system;if('score_asse' in idx)m.scoreUs=Number(get(r,'score_asse'))||0;if('score_adv' in idx)m.scoreThem=Number(get(r,'score_adv'))||0;if('temps_secondes' in idx || 'joueuse' in idx){const n=get(r,'joueuse');if(n){m.players[n]=m.players[n]||blank();m.called=Array.from(new Set([...(m.called||[]),n]));const p=m.players[n];const snap=matchPlayerSnapshot(n,m.teamId,m.team);p.playerId=get(r,'player_id')||p.playerId||snap.playerId||'';p.playerName=p.playerName||snap.playerName||n;p.teamId=p.teamId||m.teamId||snap.teamId||'';p.team=p.team||m.team||snap.team||'';p.playerSnapshot={...(p.playerSnapshot||{}),...snap,playerId:p.playerId,teamId:p.teamId,team:p.team};p.seconds=Number(get(r,'temps_secondes'))||p.seconds||0;p.but=Number(get(r,'but'))||p.but||0;p.passe=Number(get(r,'passe_decisive'))||p.passe||0;p.tirCadre=Number(get(r,'tir_cadre'))||p.tirCadre||0;p.tirNonCadre=Number(get(r,'tir_non_cadre'))||p.tirNonCadre||0;p.centre=Number(get(r,'centre'))||p.centre||0;p.progression=Number(get(r,'progression'))||p.progression||0;p.recup=Number(get(r,'recuperation'))||p.recup||0;const poste=get(r,'poste_actuel');if(poste&&poste!=='Banc')m.lineup[poste]=n;}}if('action' in idx){const logPlayer=get(r,'joueuse');const snap=matchPlayerSnapshot(logPlayer,m.teamId,m.team);m.log.push({t:get(r,'temps'),player:logPlayer,playerId:get(r,'player_id')||snap.playerId||'',teamId:m.teamId||snap.teamId||'',playerSnapshot:snap,action:get(r,'action'),ts:Date.now()});}if('buts_adv' in idx)m.opp.butAdv=Number(get(r,'buts_adv'))||m.opp.butAdv||0;if('tirs_cadres_adv' in idx)m.opp.tirCadreAdv=Number(get(r,'tirs_cadres_adv'))||m.opp.tirCadreAdv||0;if('tirs_non_cadres_adv' in idx)m.opp.tirNonCadreAdv=Number(get(r,'tirs_non_cadres_adv'))||m.opp.tirNonCadreAdv||0;if('centres_adv' in idx)m.opp.centreAdv=Number(get(r,'centres_adv'))||m.opp.centreAdv||0;if('progressions_adv' in idx)m.opp.progressionAdv=Number(get(r,'progressions_adv'))||m.opp.progressionAdv||0;});const list=Object.values(by).filter(coachLooksLikeMatch);const added=coachAppendMatches(list);if(!added)throw new Error('aucun match exploitable dans ce CSV');save();renderAll();coachImportStatus(`${added} match(s) importé(s) depuis ${file.name}.`);CoachStatsNotify.success(`${added} match(s) importé(s) depuis le CSV ✅`)}
 function coachImportPDF(file){ensure();state.importedPDFs=state.importedPDFs||[];state.importedPDFs.push({name:file.name,size:file.size||0,type:file.type||'application/pdf',importedAt:new Date().toLocaleString('fr-FR')});save();renderAll();coachImportStatus(`PDF ajouté : ${file.name}. Les statistiques d’un PDF ne sont pas extraites automatiquement.`);CoachStatsNotify.success('PDF importé comme document de suivi ✅')}

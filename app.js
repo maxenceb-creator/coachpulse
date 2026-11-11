@@ -5043,12 +5043,33 @@ function matchAssociatedPlayerIds(raw={}){
 function matchSyncCapabilities(){
   return {available:!!(db && currentUser), online:navigator.onLine, canRead:canViewModule('stats'), canWrite:canEditModule('stats')};
 }
+function canonicalMatchTeamId(raw={}){
+  const service=teamsService();
+  const rows=service?.officialTeamRows?.()||[];
+  const references=[raw.teamId,raw.team_id,raw.teamSnapshot?.teamId,raw.teamSnapshot?.name,raw.team,raw.equipe]
+    .map(value=>String(value||'').trim()).filter(Boolean);
+  for(const reference of references){
+    const exact=rows.find(row=>String(row.teamId||row.id)===reference||String(row.name||'').toUpperCase()===reference.toUpperCase());
+    if(exact)return String(exact.teamId||exact.id);
+  }
+  for(const reference of references){
+    const categoryReference=reference.replace(/^(?:team-)+/i,'').replace(/[-_ ]+/g,' ').trim().toUpperCase();
+    if(/^U\d+$/.test(categoryReference)){
+      const categoryMatches=rows.filter(row=>String(row.category||'').toUpperCase()===categoryReference);
+      if(categoryMatches.length!==1)return'';
+      return String(categoryMatches[0].teamId||categoryMatches[0].id);
+    }
+    const candidate=service?.canonicalTeamId?.(reference)||'';
+    if(candidate&&rows.some(row=>String(row.teamId||row.id)===candidate))return candidate;
+  }
+  return'';
+}
 function normalizeMatchForFirestore(raw={}){
   const matchId = matchDocumentId(raw);
   const createdAt = raw.createdAt || raw.date || new Date().toISOString();
   const team = raw.team || raw.equipe || '';
-  const teamId = raw.teamId || raw.team_id || raw.teamSnapshot?.teamId || teamsService()?.canonicalTeamId?.(team) || '';
-  const teamIds = [...new Set([teamId, ...(raw.teamIds || [])].filter(Boolean))];
+  const teamId = canonicalMatchTeamId(raw);
+  const teamIds = [...new Set([teamId,...(raw.teamIds||[]).map(value=>canonicalMatchTeamId({teamId:value}))].filter(Boolean))];
   const season = raw.season || seasonFromDate(createdAt);
   const matchTypeRaw = String(raw.matchType || raw.match_type || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const matchType = ['championship','championnat','league'].includes(matchTypeRaw) ? 'championship'

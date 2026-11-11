@@ -328,6 +328,36 @@ async function main() {
     });
 
     const db = environment.authenticatedContext('coach').firestore();
+    if (process.env.RULES_MATCH_EVENT_LOAD) {
+      const loadDb = environment.authenticatedContext('realAssistant').firestore();
+      for (const count of process.env.RULES_MATCH_EVENT_LOAD.split(',').map(Number)) {
+        const matchId = `load-match-${count}`;
+        const batch = writeBatch(loadDb);
+        batch.set(doc(loadDb, 'matches', matchId), {
+          matchId, teamId:'team-u11-a', teamIds:['team-u11-a'],
+          revision:1, eventsRevision:count > 0 ? 1 : 0, entryMode:'FULL_POST_MATCH'
+        });
+        for (let index = 0; index < count; index += 1) {
+          const eventId = `load-event-${count}-${index}`;
+          batch.set(doc(loadDb, 'matchEvents', eventId), {
+            eventId, matchId, teamId:'team-u11-a', teamIds:['team-u11-a']
+          });
+        }
+        try {
+          await batch.commit();
+          process.stdout.write(`MATCH_EVENT_LOAD ${count} PASS\n`);
+        } catch (error) {
+          process.stdout.write(`MATCH_EVENT_LOAD ${count} FAIL ${error.code || 'unknown'} ${String(error.message || '').includes('1000 expressions') ? 'EXPRESSION_LIMIT' : 'OTHER'}\n`);
+        }
+      }
+      return;
+    }
+    if (process.env.RULES_MATCH_AUTHORIZED_READ_ONLY === '1') {
+      process.stdout.write('Checking matches authorized read\n');
+      await assertSucceeds(getDoc(doc(db, 'matches', 'mU11')));
+      process.stdout.write('Match authorized read check passed\n');
+      return;
+    }
     for (const [collection, prefix] of [
       ['players', 'p'], ['matches', 'm'], ['sessions', 's'], ['matchEvents', 'e'],
       ['attendance', 'a'], ['technicalTests', 't'], ['injuries', 'i']
@@ -664,6 +694,66 @@ async function main() {
     await assertSucceeds(deleteDoc(doc(adminDb, 'players', 'pDeleteAdmin')));
     process.stdout.write('Checking authorized match update\n');
     await assertSucceeds(setDoc(doc(db, 'matches', 'mU11'), {score: '1-0'}, {merge:true}));
+    process.stdout.write('Checking scoped first match creation\n');
+    assert.equal((await assertSucceeds(getDoc(doc(realAssistantDb, 'matches', 'new-real-empty')))).exists(), false);
+    await assertFails(getDoc(doc(readerDb, 'matches', 'new-reader-empty')));
+    await assertFails(getDoc(doc(realAssistantDb, 'matches', 'mU13')));
+    await assertSucceeds(setDoc(doc(realAssistantDb, 'matches', 'new-real-no-events'), {
+      matchId:'new-real-no-events', teamId:'team-u11-a', teamIds:['team-u11-a'],
+      revision:1, eventsRevision:0, entryMode:'FULL_POST_MATCH'
+    }));
+    await assertFails(setDoc(doc(realAssistantDb, 'matches', 'new-real-foreign'), {
+      matchId:'new-real-foreign', teamId:'team-u13-a', teamIds:['team-u13-a'],
+      revision:1, eventsRevision:0, entryMode:'FULL_POST_MATCH'
+    }));
+    const firstMatchWithEvents = writeBatch(realAssistantDb);
+    firstMatchWithEvents.set(doc(realAssistantDb, 'matches', 'new-real-with-events'), {
+      matchId:'new-real-with-events', teamId:'team-u11-a', teamIds:['team-u11-a'],
+      revision:1, eventsRevision:1, entryMode:'FULL_POST_MATCH'
+    });
+    firstMatchWithEvents.set(doc(realAssistantDb, 'matchEvents', 'new-real-event'), {
+      eventId:'new-real-event', matchId:'new-real-with-events', teamId:'team-u11-a', teamIds:['team-u11-a']
+    });
+    await assertSucceeds(firstMatchWithEvents.commit());
+    const mismatchedFirstEvent = writeBatch(realAssistantDb);
+    mismatchedFirstEvent.set(doc(realAssistantDb, 'matches', 'new-real-mismatch'), {
+      matchId:'new-real-mismatch', teamId:'team-u11-a', teamIds:['team-u11-a'], revision:1, eventsRevision:1
+    });
+    mismatchedFirstEvent.set(doc(realAssistantDb, 'matchEvents', 'new-real-mismatch-event'), {
+      eventId:'new-real-mismatch-event', matchId:'other-match', teamId:'team-u11-a', teamIds:['team-u11-a']
+    });
+    await assertFails(mismatchedFirstEvent.commit());
+    const wrongTeamFirstEvent = writeBatch(realAssistantDb);
+    wrongTeamFirstEvent.set(doc(realAssistantDb, 'matches', 'new-real-wrong-event-team'), {
+      matchId:'new-real-wrong-event-team', teamId:'team-u11-a', teamIds:['team-u11-a'], revision:1, eventsRevision:1
+    });
+    wrongTeamFirstEvent.set(doc(realAssistantDb, 'matchEvents', 'new-real-wrong-event-team-event'), {
+      eventId:'new-real-wrong-event-team-event', matchId:'new-real-wrong-event-team', teamId:'team-u13-a', teamIds:['team-u13-a']
+    });
+    await assertFails(wrongTeamFirstEvent.commit());
+    const noStatsFirstEvent = writeBatch(assistantDb);
+    noStatsFirstEvent.set(doc(assistantDb, 'matches', 'new-no-stats-match'), {
+      matchId:'new-no-stats-match', teamId:'U11', teamIds:['U11'], revision:1, eventsRevision:1
+    });
+    noStatsFirstEvent.set(doc(assistantDb, 'matchEvents', 'new-no-stats-event'), {
+      eventId:'new-no-stats-event', matchId:'new-no-stats-match', teamId:'U11', teamIds:['U11']
+    });
+    await assertFails(noStatsFirstEvent.commit());
+    const unauthenticatedDb = environment.unauthenticatedContext().firestore();
+    const unauthenticatedFirstEvent = writeBatch(unauthenticatedDb);
+    unauthenticatedFirstEvent.set(doc(unauthenticatedDb, 'matches', 'new-unauthenticated-match'), {
+      matchId:'new-unauthenticated-match', teamId:'team-u11-a', teamIds:['team-u11-a'], revision:1, eventsRevision:1
+    });
+    unauthenticatedFirstEvent.set(doc(unauthenticatedDb, 'matchEvents', 'new-unauthenticated-event'), {
+      eventId:'new-unauthenticated-event', matchId:'new-unauthenticated-match', teamId:'team-u11-a', teamIds:['team-u11-a']
+    });
+    await assertFails(unauthenticatedFirstEvent.commit());
+    await assertFails(setDoc(doc(realAssistantDb, 'matchEvents', 'new-event-without-match'), {
+      eventId:'new-event-without-match', matchId:'missing-match', teamId:'team-u11-a', teamIds:['team-u11-a']
+    }));
+    await assertSucceeds(setDoc(doc(adminDb, 'matches', 'new-admin-match'), {
+      matchId:'new-admin-match', teamId:'team-u13-a', teamIds:['team-u13-a'], revision:1, eventsRevision:0
+    }));
     process.stdout.write('Checking match event revision protocol\n');
     await assertFails(setDoc(doc(db, 'matchEvents', 'legacyCreate'), {eventId:'legacyCreate', matchId:'mU11', teamId:'U11'}));
     await assertFails(setDoc(doc(db, 'matchEvents', 'eU11'), {type:'legacy-update'}, {merge:true}));
