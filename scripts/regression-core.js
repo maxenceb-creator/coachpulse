@@ -1830,8 +1830,17 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       }
     };
     const quietConsole = {...console, error() {}, info() {}};
+    class FixedDate extends Date {
+      constructor(...args){
+        super(...(args.length ? args : ['2026-11-10T12:00:00']));
+      }
+      static now(){
+        return new Date('2026-11-10T12:00:00').getTime();
+      }
+    }
+
     const context = vm.createContext({
-      console:quietConsole, Date, Map, Set, JSON,
+      console:quietConsole, Date:FixedDate, Map, Set, JSON,
       db:{}, currentUser:{uid:'staff'}, firebaseFns:cloud.firebaseFns,
       measureAsync:(_name, read) => read(),
       canViewModule:moduleId => permissions.canReadModule(profile, {id:moduleId, active:true}),
