@@ -547,6 +547,12 @@ service cloud.firestore {
         && canAccessModule('stats');
     }
 
+    function canReadMissingMatchEventForWrite(eventId) {
+      return !exists(/databases/$(database)/documents/matchEvents/$(eventId))
+        && canWriteData()
+        && canAccessModule('stats');
+    }
+
     function canListMatchEventRecords(data) {
       return canListMatchRecords(data);
     }
@@ -989,7 +995,8 @@ service cloud.firestore {
     }
 
     match /matchEvents/{eventId} {
-      allow get: if (canReadData() && canAccessModule('stats') && canAccessMatchScopedData(resource.data))
+      allow get: if canReadMissingMatchEventForWrite(eventId)
+        || (canReadData() && canAccessModule('stats') && canAccessMatchScopedData(resource.data))
         || (canReadData() && canAccessModule('playerProfile') && canAccessMatchScopedData(resource.data));
       allow list: if canListMatchEventRecords(resource.data);
       allow create: if canCreateInitialMatchEvent(request.resource.data)
