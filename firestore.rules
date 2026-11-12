@@ -110,6 +110,23 @@ service cloud.firestore {
       return canEditData() && (canAccessModule('database') || canAccessModule('dataHub'));
     }
 
+    function canDeletePlayerData(data) {
+      let profile = staffDoc().data;
+      let staffRole = profile.get('role', 'NONE');
+      let level = profile.get('permissionLevel', legacyPermissionFromRoleValue(staffRole));
+      let modules = profileListFrom(profile, 'allowedModules');
+      let teams = authorizedTeamsFrom(profile);
+      return signedIn()
+        && exists(staffPath(request.auth.uid))
+        && !(profile.get('status', 'ACTIVE') in ['ARCHIVED', 'INACTIVE', 'DISABLED'])
+        && level in ['EDITEUR', 'ADMIN']
+        && (level == 'ADMIN' || staffRole == 'ADMIN' || modules.size() == 0 || modules.hasAny(['database']))
+        && (level == 'ADMIN'
+          || teams.hasAny([data.get('teamId', '')])
+          || data.get('teamIds', []).hasAny(teams)
+          || data.get('rosterTeamIds', []).hasAny(teams));
+    }
+
     function canDeleteCoreData(data) {
       return canManageCoreData() && canAccessScopedData(data);
     }
@@ -524,6 +541,12 @@ service cloud.firestore {
           || data.get('teamIds', []).hasAny(teams));
     }
 
+    function canReadMissingMatchForWrite(matchId) {
+      return !exists(/databases/$(database)/documents/matches/$(matchId))
+        && canWriteData()
+        && canAccessModule('stats');
+    }
+
     function canListMatchEventRecords(data) {
       return canListMatchRecords(data);
     }
@@ -576,6 +599,19 @@ service cloud.firestore {
         && level in ['SAISIE', 'EDITEUR', 'ADMIN']
         && moduleAllowedFrom(modules, level, staffRole, 'stats')
         && (level == 'ADMIN' || canAccessMatchEventScope(data, teams));
+    }
+
+    function canCreateInitialMatchEvent(data) {
+      let matchId = data.get('matchId', '');
+      let matchPath = /databases/$(database)/documents/matches/$(matchId);
+      let after = getAfter(matchPath).data;
+      return matchId != ''
+        && !exists(matchPath)
+        && after.get('matchId', '') == matchId
+        && data.get('teamId', '') != ''
+        && data.get('teamId', '') == after.get('teamId', '')
+        && after.get('revision', -1) == 1
+        && after.get('eventsRevision', -1) == 1;
     }
 
     function hasValidRevision(data, field) {
@@ -906,8 +942,7 @@ service cloud.firestore {
         && request.resource.data.status in ['ACTIVE', 'ARCHIVED', 'active', 'injured', 'left', 'archived']
         && canAccessDirectData(resource.data)
         && canAccessDirectData(request.resource.data);
-      allow delete: if canWriteSportData() && canAccessModule('tests')
-        && (canAccessDirectData(resource.data) || moduleScopeAllowsAllPlayers('tests'));
+      allow delete: if canDeletePlayerData(resource.data);
     }
 
     match /teams/{teamId} {
@@ -939,14 +974,15 @@ service cloud.firestore {
     }
 
     match /matches/{matchId} {
-      allow get: if canReadData()
-        && (canAccessModule('stats') || canAccessModule('playerProfile'))
-        && canAccessDirectData(resource.data);
+      allow get: if canReadMissingMatchForWrite(matchId)
+        || (canReadData()
+          && (canAccessModule('stats') || canAccessModule('playerProfile'))
+          && canAccessDirectData(resource.data));
       allow list: if canListMatchRecords(resource.data);
       allow create: if canWriteDirectModuleData('stats', request.resource.data, request.resource.data)
         && (!request.resource.data.keys().hasAny(['eventsRevision'])
           || (hasValidRevision(request.resource.data, 'eventsRevision')
-            && request.resource.data.eventsRevision == 0));
+            && request.resource.data.eventsRevision in [0, 1]));
       allow update: if canWriteDirectModuleData('stats', resource.data, request.resource.data)
         && validEventsRevisionTransition(resource.data, request.resource.data);
       allow delete: if noDelete();
@@ -956,8 +992,9 @@ service cloud.firestore {
       allow get: if (canReadData() && canAccessModule('stats') && canAccessMatchScopedData(resource.data))
         || (canReadData() && canAccessModule('playerProfile') && canAccessMatchScopedData(resource.data));
       allow list: if canListMatchEventRecords(resource.data);
-      allow create: if canWriteMatchEventData(request.resource.data, request.resource.data)
-        && eventWriteUsesAtomicMatchRevision({}, request.resource.data);
+      allow create: if canCreateInitialMatchEvent(request.resource.data)
+        || (canWriteMatchEventData(request.resource.data, request.resource.data)
+          && eventWriteUsesAtomicMatchRevision({}, request.resource.data));
       allow update: if canWriteMatchEventData(resource.data, request.resource.data)
         && eventWriteUsesAtomicMatchRevision(resource.data, request.resource.data);
       allow delete: if canDeleteMatchEventData(resource.data)
