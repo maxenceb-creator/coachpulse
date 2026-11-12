@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {Timestamp, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, limit, orderBy, query, setDoc, where, writeBatch} = require('firebase/firestore');
+const {Timestamp, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, limit, orderBy, query, runTransaction, setDoc, where, writeBatch} = require('firebase/firestore');
 
 async function main() {
   const playerSnapshotScopedCollections = [
@@ -753,6 +753,70 @@ async function main() {
     }));
     await assertSucceeds(setDoc(doc(adminDb, 'matches', 'new-admin-match'), {
       matchId:'new-admin-match', teamId:'team-u13-a', teamIds:['team-u13-a'], revision:1, eventsRevision:0
+    }));
+    process.stdout.write('Checking missing match event reads in atomic first-match transactions\n');
+    const createFirstMatchInTransaction = (transactionDb, suffix, eventCount, overrides = {}) => runTransaction(transactionDb, async transaction => {
+      const matchId = `transaction-match-${suffix}`;
+      const eventRefs = Array.from({length:eventCount}, (_value, index) =>
+        doc(transactionDb, 'matchEvents', `transaction-event-${suffix}-${index + 1}`));
+      const snapshots = await Promise.all(eventRefs.map(eventRef => transaction.get(eventRef)));
+      assert.equal(snapshots.every(snapshot => !snapshot.exists()), true);
+      const matchTeamId = overrides.matchTeamId || 'team-u11-a';
+      transaction.set(doc(transactionDb, 'matches', matchId), {
+        matchId, teamId:matchTeamId, teamIds:[matchTeamId], revision:1,
+        eventsRevision:eventCount > 0 ? 1 : 0, entryMode:'FULL_POST_MATCH'
+      });
+      eventRefs.forEach((eventRef, index) => {
+        const eventMatchId = overrides.eventMatchId || matchId;
+        const eventTeamId = overrides.eventTeamId || matchTeamId;
+        transaction.set(eventRef, {
+          eventId:eventRef.id, matchId:eventMatchId, teamId:eventTeamId, teamIds:[eventTeamId], minute:index + 1
+        });
+      });
+    });
+    for (const eventCount of [0, 1, 20]) {
+      await assertSucceeds(createFirstMatchInTransaction(realAssistantDb, `allowed-${eventCount}`, eventCount));
+    }
+    for (const [label, deniedDb] of [
+      ['unauthenticated', unauthenticatedDb], ['inactive', inactiveDb],
+      ['reader', readerDb], ['without-stats', assistantDb]
+    ]) {
+      await assertFails(createFirstMatchInTransaction(deniedDb, label, 1));
+    }
+    const missingWithoutWrite = await assertSucceeds(runTransaction(realAssistantDb, transaction =>
+      transaction.get(doc(realAssistantDb, 'matchEvents', 'transaction-event-read-only'))));
+    assert.equal(missingWithoutWrite.exists(), false);
+    await assertFails(runTransaction(realAssistantDb, async transaction => {
+      await transaction.get(doc(realAssistantDb, 'matchEvents', 'eU13'));
+    }));
+    await assertFails(createFirstMatchInTransaction(realAssistantDb, 'mismatched-match', 1, {
+      eventMatchId:'another-match'
+    }));
+    await assertFails(createFirstMatchInTransaction(realAssistantDb, 'mismatched-team', 1, {
+      eventTeamId:'team-u13-a'
+    }));
+    await assertFails(runTransaction(realAssistantDb, async transaction => {
+      const eventRef = doc(realAssistantDb, 'matchEvents', 'transaction-event-missing-match-write');
+      assert.equal((await transaction.get(eventRef)).exists(), false);
+      transaction.set(eventRef, {
+        eventId:eventRef.id, matchId:'transaction-match-not-written',
+        teamId:'team-u11-a', teamIds:['team-u11-a']
+      });
+    }));
+    await assertFails(runTransaction(realAssistantDb, async transaction => {
+      const validEventRef = doc(realAssistantDb, 'matchEvents', 'transaction-event-mixed-valid');
+      const invalidEventRef = doc(realAssistantDb, 'matchEvents', 'transaction-event-mixed-invalid');
+      await Promise.all([transaction.get(validEventRef), transaction.get(invalidEventRef)]);
+      transaction.set(doc(realAssistantDb, 'matches', 'transaction-match-mixed'), {
+        matchId:'transaction-match-mixed', teamId:'team-u11-a', teamIds:['team-u11-a'],
+        revision:1, eventsRevision:1
+      });
+      transaction.set(validEventRef, {
+        eventId:validEventRef.id, matchId:'transaction-match-mixed', teamId:'team-u11-a', teamIds:['team-u11-a']
+      });
+      transaction.set(invalidEventRef, {
+        eventId:invalidEventRef.id, matchId:'transaction-match-mixed', teamId:'team-u13-a', teamIds:['team-u13-a']
+      });
     }));
     process.stdout.write('Checking match event revision protocol\n');
     await assertFails(setDoc(doc(db, 'matchEvents', 'legacyCreate'), {eventId:'legacyCreate', matchId:'mU11', teamId:'U11'}));
