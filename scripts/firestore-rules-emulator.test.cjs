@@ -43,6 +43,11 @@ async function main() {
         teamIds: ['team-u11-a'],
         allowedTeamIds: ['team-u11-a']
       });
+      await setDoc(doc(db, 'staff_members', 'foreignTeamStats'), {
+        status: 'ACTIVE', role: 'ENTRAINEUR_ADJOINT', permissionLevel: 'EDITEUR',
+        allowedModules: ['stats'], authorizedTeamIds: ['team-u13-a'],
+        teamIds: ['team-u13-a'], allowedTeamIds: ['team-u13-a']
+      });
       await setDoc(doc(db, 'staff_members', 'teamMedicalCoach'), {
         status: 'ACTIVE', role: 'ENTRAINEUR', permissionLevel: 'EDITEUR',
         allowedModules: ['medical', 'teamProfile'],
@@ -375,6 +380,7 @@ async function main() {
     const assistantDb = environment.authenticatedContext('assistant').firestore();
     const statsAssistantDb = environment.authenticatedContext('statsAssistant').firestore();
     const realAssistantDb = environment.authenticatedContext('realAssistant').firestore();
+    const foreignTeamStatsDb = environment.authenticatedContext('foreignTeamStats').firestore();
     const editorDb = environment.authenticatedContext('editor').firestore();
     const databaseEditorDb = environment.authenticatedContext('databaseEditor').firestore();
     const adminModuleEditorDb = environment.authenticatedContext('adminModuleEditor').firestore();
@@ -777,6 +783,7 @@ async function main() {
     for (const eventCount of [0, 1, 20]) {
       await assertSucceeds(createFirstMatchInTransaction(realAssistantDb, `allowed-${eventCount}`, eventCount));
     }
+    await assertFails(createFirstMatchInTransaction(foreignTeamStatsDb, 'foreign-team-rights', 1));
     for (const [label, deniedDb] of [
       ['unauthenticated', unauthenticatedDb], ['inactive', inactiveDb],
       ['reader', readerDb], ['without-stats', assistantDb]
