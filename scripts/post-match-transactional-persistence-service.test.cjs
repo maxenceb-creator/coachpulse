@@ -187,14 +187,37 @@ test('match historique peut initialiser eventsRevision sans suppression avec une
 
 test('preparation historique dediee initialise uniquement le match sans toucher aux evenements', async () => {
   const events=[{eventId:'legacy-1',matchId:'match-1',value:1},{eventId:'legacy-2',matchId:'match-1',value:2}];
-  const mock=mockFirestore({match:{...baseMatch,revision:0,legacy:'kept'},events});
+  const mock=mockFirestore({match:{...baseMatch,legacy:'kept'},events});
   const result=await initialize(mock);
   assert.equal(result.code,'EVENTS_REVISION_INITIALIZED');
   assert.equal(result.eventsRevision,0);
   assert.equal(mock.store.match.revision,1);
+  assert.equal(mock.store.match.matchId,'match-1');
   assert.equal(mock.store.match.legacy,'kept');
   assert.deepEqual([...mock.store.events.values()],events);
   assert.equal(mock.commits[0].filter(write=>write.ref.collection==='matchEvents').length,0);
+  const matchWrite=mock.commits[0].find(write=>write.ref.collection==='matches');
+  assert.deepEqual(Object.keys(matchWrite.data).sort(), [
+    'eventsRevision', 'eventsRevisionInitializedAt', 'matchId', 'revision', 'updatedAt'
+  ]);
+  assert.deepEqual(matchWrite.options,{merge:true});
+});
+
+test('preparation historique accepte une revision valide existante', async () => {
+  const mock=mockFirestore({match:{...baseMatch,revision:4}});
+  const result=await initialize(mock,{expectedRevision:4});
+  assert.equal(result.code,'EVENTS_REVISION_INITIALIZED');
+  assert.equal(result.previousRevision,4);
+  assert.equal(result.revision,5);
+  assert.equal(mock.store.match.eventsRevision,0);
+});
+
+test('preparation historique refuse une revision distante invalide', async () => {
+  const mock=mockFirestore({match:{...baseMatch,revision:'0'},events:[{eventId:'keep',matchId:'match-1'}]});
+  const result=await initialize(mock);
+  assert.equal(result.code,'INVALID_REMOTE_REVISION');
+  assert.equal(mock.commits.length,0);
+  assert.equal(mock.store.events.has('keep'),true);
 });
 
 test('ajout concurrent pendant la preparation est conserve', async () => {
