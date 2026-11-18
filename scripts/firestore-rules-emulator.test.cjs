@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertSucceeds, assertFails} = require('@firebase/rules-unit-testing');
-const {Timestamp, collection, deleteField, doc, documentId, getDoc, getDocs, query, runTransaction, setDoc, where, writeBatch} = require('firebase/firestore');
+const {Timestamp, collection, deleteDoc, deleteField, doc, documentId, getDoc, getDocs, limit, orderBy, query, runTransaction, serverTimestamp, setDoc, where, writeBatch} = require('firebase/firestore');
 
 async function main() {
   const playerSnapshotScopedCollections = [
@@ -170,8 +170,11 @@ async function main() {
       await setDoc(doc(db, 'matchEvents', 'eTeamIdsOnly'), {
         eventId: 'eTeamIdsOnly', matchId: 'mTeamIdsOnly', teamIds: ['U11']
       });
-      await setDoc(doc(db, 'matches', 'mHistorical'), {matchId:'mHistorical', teamId:'U11', revision:4});
+      await setDoc(doc(db, 'matches', 'mHistorical'), {matchId:'mHistorical', teamId:'U11'});
       await setDoc(doc(db, 'matchEvents', 'eHistorical'), {eventId:'eHistorical', matchId:'mHistorical', teamId:'U11'});
+      await setDoc(doc(db, 'matches', 'mHistoricalVersioned'), {matchId:'mHistoricalVersioned', teamId:'U11', revision:4});
+      await setDoc(doc(db, 'matches', 'mHistoricalInvalid'), {matchId:'mHistoricalInvalid', teamId:'U11', revision:'4'});
+      await setDoc(doc(db, 'matches', 'mHistoricalForeign'), {matchId:'mHistoricalForeign', teamId:'U13'});
       await setDoc(doc(db, 'matches', 'mAssistant'), {matchId:'mAssistant', teamId:'U11', revision:0, eventsRevision:0});
       await setDoc(doc(db, 'players', 'pDual'), {
         playerId: 'pDual', teamId: 'U13', teamIds: ['U13', 'U11'], status: 'ACTIVE'
@@ -582,7 +585,9 @@ async function main() {
     await assertFails(getDocs(collection(unsupportedAllPlayersDb, 'players')));
     process.stdout.write('Checking team-scoped match and event queries\n');
     const matchesByTeamId = await assertSucceeds(getDocs(query(collection(db, 'matches'), where('teamId', '==', 'U11'))));
-    assert.deepEqual(matchesByTeamId.docs.map(snapshot => snapshot.id).sort(), ['mAssistant', 'mHistorical', 'mU11']);
+    assert.deepEqual(matchesByTeamId.docs.map(snapshot => snapshot.id).sort(), [
+      'mAssistant', 'mHistorical', 'mHistoricalInvalid', 'mHistoricalVersioned', 'mU11'
+    ]);
     const matchesByTeamIds = await assertSucceeds(getDocs(query(collection(db, 'matches'), where('teamIds', 'array-contains', 'U11'))));
     assert.deepEqual(matchesByTeamIds.docs.map(snapshot => snapshot.id), ['mTeamIdsOnly']);
     await assertFails(getDocs(query(collection(db, 'matches'), where('teamId', 'in', ['U11', 'U13']))));
@@ -683,6 +688,32 @@ async function main() {
     await assertFails(setDoc(doc(db, 'matches', 'mU11'), {eventsRevision:deleteField()}, {merge:true}));
     await assertFails(setDoc(doc(db, 'matches', 'mU11'), {eventsRevision:-1}, {merge:true}));
 
+    await assertFails(setDoc(doc(db, 'matches', 'mHistorical'), {
+      matchId:'mHistorical', revision:1, eventsRevision:0,
+      eventsRevisionInitializedAt:serverTimestamp(), updatedAt:serverTimestamp(),
+      opponent:'Unauthorized initialization change'
+    }, {merge:true}));
+    for (const forbiddenPatch of [
+      {teamId:'U13'},
+      {teamIds:['U13']},
+      {matchId:'changed-match-id'}
+    ]) {
+      await assertFails(setDoc(doc(db, 'matches', 'mHistorical'), {
+        matchId:'mHistorical', revision:1, eventsRevision:0,
+        eventsRevisionInitializedAt:serverTimestamp(), updatedAt:serverTimestamp(),
+        ...forbiddenPatch
+      }, {merge:true}));
+    }
+    const initializeHistoricalWithEvent = writeBatch(db);
+    initializeHistoricalWithEvent.set(doc(db, 'matches', 'mHistorical'), {
+      matchId:'mHistorical', revision:1, eventsRevision:1,
+      eventsRevisionInitializedAt:serverTimestamp(), updatedAt:serverTimestamp()
+    }, {merge:true});
+    initializeHistoricalWithEvent.set(doc(db, 'matchEvents', 'eHistoricalDuringInitialization'), {
+      eventId:'eHistoricalDuringInitialization', matchId:'mHistorical', teamId:'U11'
+    });
+    await assertFails(initializeHistoricalWithEvent.commit());
+
     const addEvent = writeBatch(db);
     addEvent.set(doc(db, 'matches', 'mU11'), {revision:1, eventsRevision:1}, {merge:true});
     addEvent.set(doc(db, 'matchEvents', 'newU11'), {eventId:'newU11', matchId:'mU11', teamId:'U11'});
@@ -714,9 +745,32 @@ async function main() {
 
     await assertSucceeds(getDoc(doc(db, 'matches', 'mHistorical')));
     const initializeHistorical = writeBatch(db);
-    initializeHistorical.set(doc(db, 'matches', 'mHistorical'), {revision:5, eventsRevision:0}, {merge:true});
+    initializeHistorical.set(doc(db, 'matches', 'mHistorical'), {
+      matchId:'mHistorical', revision:1, eventsRevision:0,
+      eventsRevisionInitializedAt:serverTimestamp(), updatedAt:serverTimestamp()
+    }, {merge:true});
     await assertSucceeds(initializeHistorical.commit());
+    assert.equal((await getDoc(doc(db, 'matches', 'mHistorical'))).data().matchId, 'mHistorical');
     assert.equal((await assertSucceeds(getDoc(doc(db, 'matchEvents', 'eHistorical')))).exists(), true);
+    await assertFails(setDoc(doc(db, 'matches', 'mHistorical'), {
+      revision:deleteField(), eventsRevision:deleteField()
+    }, {merge:true}));
+    await assertSucceeds(setDoc(doc(db, 'matches', 'mHistoricalVersioned'), {
+      matchId:'mHistoricalVersioned', revision:5, eventsRevision:0,
+      eventsRevisionInitializedAt:serverTimestamp(), updatedAt:serverTimestamp()
+    }, {merge:true}));
+    await assertFails(setDoc(doc(db, 'matches', 'mHistoricalInvalid'), {
+      matchId:'mHistoricalInvalid', revision:1, eventsRevision:0,
+      eventsRevisionInitializedAt:serverTimestamp(), updatedAt:serverTimestamp()
+    }, {merge:true}));
+    await assertFails(setDoc(doc(db, 'matches', 'mHistoricalForeign'), {
+      matchId:'mHistoricalForeign', revision:1, eventsRevision:0,
+      eventsRevisionInitializedAt:serverTimestamp(), updatedAt:serverTimestamp()
+    }, {merge:true}));
+    await assertFails(setDoc(doc(readerDb, 'matches', 'mHistorical'), {
+      matchId:'mHistorical', revision:2, eventsRevision:0,
+      eventsRevisionInitializedAt:serverTimestamp(), updatedAt:serverTimestamp()
+    }, {merge:true}));
 
     const assistantEvent = writeBatch(statsAssistantDb);
     assistantEvent.set(doc(statsAssistantDb, 'matches', 'mAssistant'), {revision:1, eventsRevision:1}, {merge:true});
