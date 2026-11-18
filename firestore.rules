@@ -626,6 +626,16 @@ service cloud.firestore {
         && data[field] >= 0;
     }
 
+    function validMatchRevisionIncrement(before, after) {
+      return hasValidRevision(after, 'revision')
+        && (
+          (hasValidRevision(before, 'revision')
+            && after.revision == before.revision + 1)
+          || (!before.keys().hasAny(['revision'])
+            && after.revision == 1)
+        );
+    }
+
     function matchRevisionAdvancesForEvent(matchId) {
       let matchPath = /databases/$(database)/documents/matches/$(matchId);
       let before = get(matchPath).data;
@@ -658,15 +668,20 @@ service cloud.firestore {
         && matchRevisionAdvancesForEvent(before.matchId);
     }
 
-    function validEventsRevisionTransition(before, after) {
+    function validEventsRevisionTransition(before, after, matchId) {
       let beforeHasRevision = before.keys().hasAny(['eventsRevision']);
       let afterHasRevision = after.keys().hasAny(['eventsRevision']);
       return (!beforeHasRevision && !afterHasRevision)
         || (!beforeHasRevision && hasValidRevision(after, 'eventsRevision')
           && after.eventsRevision in [0, 1]
-          && hasValidRevision(before, 'revision')
-          && hasValidRevision(after, 'revision')
-          && after.revision == before.revision + 1)
+          && after.diff(before).affectedKeys().hasOnly([
+            'matchId', 'revision', 'eventsRevision', 'eventsRevisionInitializedAt', 'updatedAt'
+          ])
+          && after.get('matchId', '') == matchId
+          && (!before.keys().hasAny(['matchId']) || before.matchId == after.matchId)
+          && after.get('eventsRevisionInitializedAt', null) == request.time
+          && after.get('updatedAt', null) == request.time
+          && validMatchRevisionIncrement(before, after))
         || (beforeHasRevision
           && hasValidRevision(before, 'eventsRevision')
           && hasValidRevision(after, 'eventsRevision')
@@ -990,7 +1005,7 @@ service cloud.firestore {
           || (hasValidRevision(request.resource.data, 'eventsRevision')
             && request.resource.data.eventsRevision in [0, 1]));
       allow update: if canWriteDirectModuleData('stats', resource.data, request.resource.data)
-        && validEventsRevisionTransition(resource.data, request.resource.data);
+        && validEventsRevisionTransition(resource.data, request.resource.data, matchId);
       allow delete: if noDelete();
     }
 
