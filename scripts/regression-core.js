@@ -43,11 +43,15 @@ function sourceFunction(source, name){
 function runtimeFirestore(documents, deniedCollections=[]){
   const reads = [];
   const denied = new Set(deniedCollections);
-  const snapshot = rows => ({forEach(callback){ rows.forEach(row => callback({id:row.id, data:() => row.data})); }});
+  const documentSnapshot = row => ({id:row.id, data:() => row.data});
+  const snapshot = rows => ({forEach(callback){ rows.forEach(row => callback(documentSnapshot(row))); }});
   const firebaseFns = {
     collection(_db, name){ return {name}; },
-    where(field, operator, value){ return {field, operator, value}; },
-    query(collectionRef, clause){ return {collectionRef, clause}; },
+    where(field, operator, value){ return {type:'where', field, operator, value}; },
+    orderBy(field, direction='asc'){ return {type:'orderBy', field, direction}; },
+    limit(value){ return {type:'limit', value}; },
+    startAfter(value){ return {type:'startAfter', value}; },
+    query(collectionRef, ...clauses){ return {collectionRef, clauses, clause:clauses[0]}; },
     doc(_db, collectionName, id){ return {collectionName, id}; },
     async getDoc(ref){
       reads.push({collection:ref.collectionName, operation:'GET', id:ref.id});
@@ -56,19 +60,34 @@ function runtimeFirestore(documents, deniedCollections=[]){
     },
     async getDocs(ref){
       const collectionName = ref.name || ref.collectionRef?.name;
-      const clause = ref.clause;
-      reads.push({collection:collectionName, operation:'LIST', ...(clause || {global:true})});
+      const clauses = ref.clauses || (ref.clause ? [ref.clause] : []);
+      reads.push({collection:collectionName, operation:'LIST', clauses, ...(clauses[0] || {global:true})});
       if(denied.has(collectionName)) throw Object.assign(new Error(`${collectionName} denied`), {code:'firestore/permission-denied'});
       const rows = documents[collectionName] || [];
-      if(!clause) return snapshot(rows);
+      if(!clauses.length) return snapshot(rows);
       const valueAt = (data, path) => path.split('.').reduce((value, key) => value?.[key], data);
-      const matching = rows.filter(row => {
+      const whereClauses = clauses.filter(clause => clause.type === 'where');
+      let matching = rows.filter(row => whereClauses.every(clause => {
         const actual = valueAt(row.data, clause.field);
         if(clause.operator === 'in') return clause.value.includes(actual);
         if(clause.operator === 'array-contains-any') return Array.isArray(actual) && actual.some(value => clause.value.includes(value));
         if(clause.operator === 'array-contains') return Array.isArray(actual) && actual.includes(clause.value);
+        if(clause.operator === '>=') return actual >= clause.value;
+        if(clause.operator === '<=') return actual <= clause.value;
         return actual === clause.value;
+      }));
+      const ordered = clauses.find(clause => clause.type === 'orderBy');
+      if(ordered) matching.sort((a,b) => {
+        const comparison = String(valueAt(a.data, ordered.field) || '').localeCompare(String(valueAt(b.data, ordered.field) || ''));
+        return ordered.direction === 'desc' ? -comparison : comparison;
       });
+      const cursor = clauses.find(clause => clause.type === 'startAfter')?.value;
+      if(cursor){
+        const cursorIndex = matching.findIndex(row => row.id === cursor.id);
+        if(cursorIndex >= 0) matching = matching.slice(cursorIndex + 1);
+      }
+      const max = clauses.find(clause => clause.type === 'limit')?.value;
+      if(Number.isFinite(max)) matching = matching.slice(0, max);
       return snapshot(matching);
     }
   };
@@ -650,7 +669,7 @@ function testProfileReadsStayCanonicalAndTeamScoped(){
   assert(!appSource.includes("readDocsByIds('players', aliases, true)"), 'La fiche joueuse ne doit jamais traiter les aliases texte comme des IDs de documents players.');
   const medicalTeamBlock = appSource.slice(
     appSource.indexOf('async function readOptionalMedical'),
-    appSource.indexOf('const detailReads = await firestoreQueryService().settleProfileReads')
+    appSource.indexOf('async function readHomeMatchEvents')
   );
   assert(medicalTeamBlock.includes("['teamId', '==']"), 'La fiche équipe doit lire les données médicales par teamId.');
   assert(!medicalTeamBlock.includes("['teamIds', 'array-contains']"), 'La fiche équipe ne doit pas lancer de LIST médicale directe teamIds array-contains non démontrable par les Rules.');
@@ -852,7 +871,7 @@ function testAccessRegressionSurfaceStaysComplete(){
   assert(appSource.includes('const batch = firebaseFns.writeBatch(db);'), 'La séance et ses présences doivent être sauvegardées dans le même batch Firestore.');
   assert(appSource.includes("Cette séance a été supprimée définitivement"), 'Une séance supprimée ne doit pas pouvoir être recréée depuis un cache ancien.');
   const presencePageSource = fs.readFileSync('pages/presences.html', 'utf8');
-  assert(presencePageSource.includes('await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents);'), 'Les suppressions historiques doivent être réconciliées au chargement du calendrier.');
+  assert(presencePageSource.includes('await reconcileDeletedPresenceEventsFromCloud(activeCloudEvents, token);'), 'Les suppressions historiques doivent être réconciliées avec le contexte du chargement du calendrier.');
   assert(presencePageSource.indexOf('await deletePresenceEventFromCloud(event);') < presencePageSource.indexOf('await markPresenceEventDeleted(eventId, {event, syncCloud:true});'), 'Le calendrier ne doit masquer une séance qu’après confirmation de Firebase.');
   const mergeWorkflowSource = fs.readFileSync('.github/workflows/firebase-hosting-merge.yml', 'utf8');
   assert(!mergeWorkflowSource.includes('deploy --only firestore:rules'), 'Le merge sur main ne doit jamais publier les Rules Firestore.');
@@ -1272,6 +1291,18 @@ function testPlayerArchiveUsesDirectStatusPatch(){
   assert(!body.includes('adminUpdatePlayer('), 'L’archivage ne doit pas repasser par la mise à jour complète de fiche.');
 }
 
+function testSyncLogsQueryKeepsOrderAndServerLimit(){
+  const appSource = fs.readFileSync('app.js', 'utf8');
+  const match = appSource.match(/async function readSyncLogs[\s\S]*?\n}\nasync function adminListPlayers/);
+  assert(match, 'La fonction readSyncLogs doit rester disponible.');
+  const body = match[0];
+  const orderPosition = body.indexOf("firebaseFns.orderBy('date','desc')");
+  const limitPosition = body.indexOf('firebaseFns.limit(limit)');
+  assert(orderPosition >= 0, 'Les syncLogs doivent rester triés par date décroissante.');
+  assert(limitPosition > orderPosition, 'La limite Firestore doit être appliquée après le tri attendu.');
+  assert(!body.includes('logs.length < limit'), 'La limitation ne doit plus être faite après lecture côté client.');
+}
+
 function testPresenceInteractionsStayNonBlocking(){
   const appSource = fs.readFileSync('app.js', 'utf8');
   const presenceSource = fs.readFileSync('pages/presences.html', 'utf8');
@@ -1281,7 +1312,7 @@ function testPresenceInteractionsStayNonBlocking(){
   assert(!appSource.includes("setInterval(snapshotLocalData, 15000)"), 'La sauvegarde complète ne doit plus être exécutée toutes les 15 secondes.');
   assert(presenceSource.includes('schedulePresenceEventCloudSave(eventId);'), 'Les clics de présence doivent utiliser une sauvegarde cloud regroupée.');
   assert(!presenceSource.includes('await pushPresenceEventToCloud(events[index]);'), 'Un clic de présence ne doit pas attendre directement l’écriture Firestore complète.');
-  assert(presenceSource.includes('return !cloudEvent || eventSyncStamp(event) > eventSyncStamp(cloudEvent);'), 'Les séances déjà présentes dans le cloud ne doivent pas être réenvoyées au chargement.');
+  assert(presenceSource.includes('if(!isPendingPresenceEvent(event)) return false;'), 'Les séances acquittées ne doivent pas être réenvoyées, contrairement aux modifications pending.');
   assert(presenceSource.includes('requestIdleCallback(persist, {timeout:3000})'), 'La persistance locale volumineuse doit attendre une période inactive du navigateur.');
   assert(presenceSource.includes('updateAttendanceDetailUi(events[index], playerId, patch);'), 'Un clic de présence doit mettre à jour uniquement la ligne concernée.');
   assert(presenceSource.includes('addEventListener("dblclick", event =>'), 'Le calendrier doit réserver le double-clic à la création d’un événement.');
@@ -1714,6 +1745,7 @@ async function testTeamProfileRuntimeUsesOnlyTeamScopedQueries(){
     }),
     uniqueProfileRows:rows => rows, parseStoredJson:() => [], listTeams:async () => [{id:teamId,teamId,name:'U11 A'}],
     normalizePlayer:value => value, playerMatchesTeamIdForAnySeason:(row,id) => row.teamId === id || row.teamIds?.includes(id) || row.rosterTeamIds?.includes(id),
+    homeLatestMatch:matches => ({row:[...matches].sort((a,b) => new Date(b.date) - new Date(a.date))[0]}),
     canAccessPlayerRecord:row => row.teamId === teamId || row.teamIds?.includes(teamId) || row.rosterTeamIds?.includes(teamId),
     filterAuthorizedPlayers:rows => rows.filter(row => row.teamId === teamId || row.teamIds?.includes(teamId) || row.rosterTeamIds?.includes(teamId)),
     rowMatchesTeamId:(row,id) => row.teamId === id || row.teamIds?.includes(id),
@@ -1748,10 +1780,20 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       {id:teamB, data:{teamId:teamB}},
       {id:foreignTeam, data:{teamId:foreignTeam}}
     ],
-    players:[], matches:[], matchEvents:[],
+    players:[],
+    matches:[
+      {id:'match-old-a', data:{matchId:'match-old-a', teamId:teamA, teamIds:[teamA], date:'2026-08-01'}},
+      {id:'match-latest-a', data:{matchId:'match-latest-a', teamIds:[teamA], date:'2026-10-01'}},
+      {id:'match-b', data:{matchId:'match-b', teamId:teamB, teamIds:[teamB], date:'2026-11-01'}}
+    ],
+    matchEvents:[
+      {id:'event-old-a', data:{eventId:'event-old-a', matchId:'match-old-a', teamId:teamA, teamIds:[teamA]}},
+      {id:'event-latest-a', data:{eventId:'event-latest-a', matchId:'match-latest-a', teamIds:[teamA]}},
+      {id:'event-b', data:{eventId:'event-b', matchId:'match-b', teamId:teamB, teamIds:[teamB]}}
+    ],
     sessions:[
-      {id:'presence-modern-a', data:{sessionId:'presence-modern-a', teamId:teamA, teamIds:[teamA], createdFromPresenceModule:true}},
-      {id:'presence-legacy-a', data:{sessionId:'presence-legacy-a', teamIds:[teamA], source:'Présences'}},
+      {id:'presence-modern-a', data:{sessionId:'presence-modern-a', teamId:teamA, teamIds:[teamA], date:'2026-11-10', createdFromPresenceModule:true}},
+      {id:'presence-legacy-a', data:{sessionId:'presence-legacy-a', teamIds:[teamA], date:'2026-11-11', source:'Présences'}},
       {id:'methodology-a', data:{sessionId:'methodology-a', teamId:teamA, teamIds:[teamA], source:'Méthodologie'}},
       {id:'presence-foreign', data:{sessionId:'presence-foreign', teamId:foreignTeam, teamIds:[foreignTeam], createdFromPresenceModule:true}}
     ],
@@ -1759,7 +1801,10 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
     technicalTests:[{id:'technical-a', data:{teamId:teamA, teamIds:[teamA]}}],
     physicalTests:[{id:'physical-a', data:{teamId:teamA, teamIds:[teamA]}}],
     injuries:[{id:'injury-a', data:{teamId:teamA}}],
-    injuryUpdates:[], medicalAppointments:[], rehabRoutines:[], medicalFollowUps:[],
+    injuryUpdates:[{id:'injury-update-a', data:{teamId:teamA}}],
+    medicalAppointments:[{id:'appointment-a', data:{playerSnapshot:{teamIds:[teamA]}}}],
+    rehabRoutines:[{id:'rehab-a', data:{playerSnapshot:{teamId:teamA}}}],
+    medicalFollowUps:[{id:'follow-up-a', data:{teamId:teamA}}],
     workloads:[{id:'workload-a', data:{teamId:teamA, teamIds:[teamA]}}],
     convocations:[
       {id:'convocation-a', data:{teamId:teamA, teamIds:[teamA]}},
@@ -1776,6 +1821,7 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   async function load(profile, teamId=teamA, deniedCollections=[], loadOptions={}){
     const cloud = runtimeFirestore(documents, deniedCollections);
     const diagnostics = [];
+    let presenceListEventsCalls = 0;
     const queryService = {
       ...firestoreQueries,
       readTeamScopedByIdOrIds(name, teamIds, options){
@@ -1784,8 +1830,17 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       }
     };
     const quietConsole = {...console, error() {}, info() {}};
+    class FixedDate extends Date {
+      constructor(...args){
+        super(...(args.length ? args : ['2026-11-10T12:00:00']));
+      }
+      static now(){
+        return new Date('2026-11-10T12:00:00').getTime();
+      }
+    }
+
     const context = vm.createContext({
-      console:quietConsole, Date, Map, Set, JSON,
+      console:quietConsole, Date:FixedDate, Map, Set, JSON,
       db:{}, currentUser:{uid:'staff'}, firebaseFns:cloud.firebaseFns,
       measureAsync:(_name, read) => read(),
       canViewModule:moduleId => permissions.canReadModule(profile, {id:moduleId, active:true}),
@@ -1794,7 +1849,10 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       hasGlobalDataAccess:() => profile.permissionLevel === 'ADMIN', currentSeason:() => '2026-2027', recordPerfEvent() {},
       appDataCache:{teamProfiles:new Map()}, DATA_CACHE_TTL_MS:0, cloneData:value => structuredClone(value),
       collectCentralFirestoreDocs:() => ({}),
+      isPresenceSessionVisibleToModule:row => row.createdFromPresenceModule === true || row.source === 'Présences',
+      isRetiredPresenceSeasonSession:() => false,
       presenceListEvents:async () => {
+        presenceListEventsCalls += 1;
         cloud.reads.push({collection:'sessions', operation:'LIST', constraints:['createdFromPresenceModule == true','teamId/teamIds scoped']});
         cloud.reads.push({collection:'sessions', operation:'LIST', constraints:['source == Présences','teamId/teamIds scoped']});
         cloud.reads.push({collection:'attendance', operation:'LIST', constraints:['teamId/teamIds scoped']});
@@ -1809,15 +1867,17 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
       }),
       uniqueProfileRows:rows => rows, parseStoredJson:() => [], listTeams:async () => documents.teams.map(row => ({id:row.id, ...row.data})),
       normalizePlayer:value => value, playerMatchesTeamIdForAnySeason:(row,id) => row.teamId === id || row.teamIds?.includes(id),
+      homeDateValue:row => { const date = new Date(`${row.date || ''}T${row.startTime || '00:00'}:00`); return Number.isNaN(date.getTime()) ? null : date; },
+      homeLatestMatch:matches => ({row:[...matches].sort((a,b) => new Date(b.date) - new Date(a.date))[0]}),
       canAccessPlayerRecord:row => permissions.canAccessPlayer(profile, row), filterAuthorizedPlayers:rows => permissions.filterAuthorizedPlayers(profile, rows),
       rowMatchesTeamId:(row,id) => row.teamId === id || row.teamIds?.includes(id), firestoreQueryService:() => queryService,
       reportFirestoreReadError:(error, diagnostic) => firestoreQueries.firestoreDiagnostic(error, diagnostic)
     });
     vm.runInContext(sourceFunction(fs.readFileSync('app.js','utf8'), 'teamProfileLoadData'), context);
     try{
-      return {payload:await context.teamProfileLoadData({teamId, forceRefresh:true, ...loadOptions}), reads:cloud.reads, diagnostics};
+      return {payload:await context.teamProfileLoadData({teamId, forceRefresh:true, ...loadOptions}), reads:cloud.reads, diagnostics, presenceListEventsCalls};
     }catch(error){
-      return {error, reads:cloud.reads, diagnostics};
+      return {error, reads:cloud.reads, diagnostics, presenceListEventsCalls};
     }
   }
 
@@ -1863,6 +1923,26 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   const homeWithoutRights = await load(editorWithoutOptionalRights, teamA, [], {homeDashboard:true});
   assert.equal(homeWithoutRights.reads.some(read => forbiddenWithoutRights.includes(read.collection)), false, 'L’accueil Stats + teamProfile doit rester réduit aux cartes autorisées.');
   assert.equal(homeWithoutRights.reads.some(read => read.collection === 'players'), false, 'L’accueil ne doit pas relire le roster inutilement.');
+  assert.deepEqual(Array.from(homeWithoutRights.payload.collections.matchEvents, row => row.eventId), ['event-latest-a'], 'L’accueil doit conserver uniquement les événements du dernier match affiché.');
+  const homeMatchEventReads = homeWithoutRights.reads.filter(read => read.collection === 'matchEvents');
+  assert.equal(homeMatchEventReads.length, 2, 'L’accueil doit remplacer le double chargement par les deux variantes teamId/teamIds du dernier match.');
+  assert(homeMatchEventReads.every(read => read.clauses.some(clause => clause.field === 'matchId' && clause.value === 'match-latest-a')), 'Chaque lecture accueil doit cibler le dernier match affiché.');
+  assert(homeMatchEventReads.some(read => read.clauses.some(clause => clause.field === 'teamId')), 'La compatibilité teamId doit être conservée.');
+  assert(homeMatchEventReads.some(read => read.clauses.some(clause => clause.field === 'teamIds')), 'La compatibilité teamIds doit être conservée.');
+
+  const medicalProfile = {...editorWithoutOptionalRights, allowedModules:['teamProfile','stats','medical']};
+  const homeMedical = await load(medicalProfile, teamA, [], {homeDashboard:true});
+  assert.equal(homeMedical.reads.some(read => ['injuryUpdates','rehabRoutines'].includes(read.collection)), false, 'L’accueil ne doit charger ni injuryUpdates ni rehabRoutines.');
+  assert.deepEqual(Array.from(homeMedical.payload.collections.injuries, row => row.id), ['injury-a']);
+  assert.deepEqual(Array.from(homeMedical.payload.collections.medicalAppointments, row => row.id), ['appointment-a']);
+  assert.deepEqual(Array.from(homeMedical.payload.collections.medicalFollowUps, row => row.id), ['follow-up-a']);
+
+  const fullMedical = await load(medicalProfile, teamA);
+  assert.deepEqual(Array.from(fullMedical.payload.collections.matchEvents, row => row.eventId).sort(), ['event-latest-a','event-old-a'], 'La fiche équipe complète doit conserver tous les événements de l’équipe.');
+  assert.deepEqual(Array.from(fullMedical.payload.collections.injuryUpdates, row => row.id), ['injury-update-a']);
+  assert.deepEqual(Array.from(fullMedical.payload.collections.rehabRoutines, row => row.id), ['rehab-a']);
+  assert.deepEqual(Array.from(fullMedical.payload.collections.medicalAppointments, row => row.id), ['appointment-a']);
+  assert.deepEqual(Array.from(fullMedical.payload.collections.medicalFollowUps, row => row.id), ['follow-up-a']);
 
   const presenceRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','presences']});
   const presenceSessionReads = presenceRights.reads.filter(read => read.collection === 'sessions');
@@ -1870,6 +1950,22 @@ async function testTeamProfileOptionalReadsRespectEffectivePermissions(){
   assert(presenceSessionReads.every(read => read.constraints?.some(value => value.includes('teamId/teamIds'))), 'Chaque requête séance doit rester limitée au périmètre équipe.');
   assert.equal(presenceRights.payload.collections.sessions.some(row => row.id === 'methodology-a' || row.id === 'presence-foreign'), false, 'Présences ne doit exposer ni séance méthodologie ni séance étrangère.');
   assert.deepEqual(Array.from(presenceRights.payload.collections.sessions, row => row.id).sort(), ['presence-legacy-a','presence-modern-a']);
+
+  const homePresenceRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','presences']}, teamA, [], {homeDashboard:true});
+  assert.equal(homePresenceRights.presenceListEventsCalls, 0, 'L’accueil ne doit jamais déclencher le chargement global des présences.');
+  assert(homePresenceRights.reads.filter(read => read.collection === 'sessions').length >= 4, 'L’accueil doit lire les candidats datés pour les formats modernes et historiques.');
+  assert(homePresenceRights.reads.filter(read => read.collection === 'sessions').every(read =>
+    read.clauses.some(clause => clause.type === 'orderBy' && clause.field === 'date')
+    && read.clauses.some(clause => clause.type === 'limit')
+    && read.clauses.some(clause => clause.field === 'teamId' || clause.field === 'teamIds')
+  ), 'Chaque lecture séance de l’accueil doit être datée, ordonnée, bornée et limitée à l’équipe.');
+  assert.equal(homePresenceRights.reads.filter(read => read.collection === 'attendance').length, 2, 'L’accueil doit lire les présences uniquement par teamId/teamIds.');
+  assert(homePresenceRights.reads.filter(read => read.collection === 'attendance').every(read =>
+    read.clauses.some(clause => clause.field === 'sessionId' && clause.value === 'presence-modern-a')
+    && read.clauses.some(clause => clause.field === 'teamId' || clause.field === 'teamIds')
+  ), 'Les présences de l’accueil doivent cibler uniquement la dernière séance effectivement sélectionnée.');
+  assert.deepEqual(Array.from(homePresenceRights.payload.collections.sessions, row => row.id), ['presence-modern-a'], 'Une séance du jour doit être à la fois la dernière et la prochaine, sans charger la suivante.');
+  assert.deepEqual(Array.from(homePresenceRights.payload.collections.attendance, row => row.id), ['attendance-a']);
 
   const testsRights = await load({...editorWithoutOptionalRights, allowedModules:['teamProfile','tests']});
   assert.equal(testsRights.reads.filter(read => ['technicalTests','physicalTests'].includes(read.collection)).length, 4, 'Tests doit lire uniquement les tests techniques et physiques par teamId/teamIds.');
@@ -2026,6 +2122,38 @@ async function testPlayerProfileRuntimeUsesCanonicalGetAndTeamScope(){
   assert.equal(cloud.reads.some(read => read.global), false, 'playerProfile non-admin ne doit lancer aucune LIST globale.');
 }
 
+async function testHomeDashboardPresenceQueriesStayBounded(){
+  const teamId = 'team-u13-a';
+  const cloud = runtimeFirestore({
+    sessions:[
+      {id:'retired-today', data:{sessionId:'retired-today', teamId, teamIds:[teamId], date:'2026-11-10', source:'Présences', season:'2025-2026'}},
+      {id:'next-valid', data:{sessionId:'next-valid', teamIds:[teamId], date:'2026-11-11', source:'Présences'}},
+      {id:'last-valid', data:{sessionId:'last-valid', teamId, date:'2026-11-09', createdFromPresenceModule:true}},
+      {id:'invalid-date', data:{sessionId:'invalid-date', teamId, date:'sans-date', createdFromPresenceModule:true}},
+      {id:'foreign', data:{sessionId:'foreign', teamId:'team-u15-a', date:'2026-11-10', createdFromPresenceModule:true}}
+    ],
+    attendance:[
+      {id:'last-attendance', data:{attendanceId:'last-attendance', sessionId:'last-valid', teamId, playerId:'player-a'}},
+      {id:'other-attendance', data:{attendanceId:'other-attendance', sessionId:'other-session', teamId, playerId:'player-b'}}
+    ]
+  });
+  const candidates = await firestoreQueries.readHomeDashboardSessionCandidates([teamId], {
+    firebaseFns:cloud.firebaseFns, db:{}, today:'2026-11-10', pageSize:1,
+    isEligible:row => row.season !== '2025-2026' && !Number.isNaN(Date.parse(row.date))
+  });
+  assert.deepEqual(candidates.map(row => row.id).sort(), ['last-valid','next-valid']);
+  const sessionReads = cloud.reads.filter(read => read.collection === 'sessions');
+  assert(sessionReads.some(read => read.clauses.some(clause => clause.type === 'startAfter')), 'Un candidat exclu doit déclencher la page bornée suivante.');
+  assert(sessionReads.every(read => read.clauses.some(clause => clause.type === 'limit' && clause.value === 1)), 'Aucune page de candidats ne doit être non bornée.');
+  assert(sessionReads.every(read => !read.global), 'L’accueil ne doit jamais retomber sur une lecture globale de sessions.');
+
+  const attendance = await firestoreQueries.readAttendanceForSessionByTeams('last-valid', [teamId], {firebaseFns:cloud.firebaseFns, db:{}});
+  assert.deepEqual(attendance.map(row => row.id), ['last-attendance']);
+  const attendanceReads = cloud.reads.filter(read => read.collection === 'attendance');
+  assert.equal(attendanceReads.length, 2, 'Les formats teamId et teamIds doivent être conservés pour la dernière séance.');
+  assert(attendanceReads.every(read => read.clauses.some(clause => clause.field === 'sessionId' && clause.value === 'last-valid')));
+}
+
 testPlayerIdsAndSeasons();
 testPlayerIdStaysStableOnEdit();
 testTeamIdsStayShared();
@@ -2058,6 +2186,7 @@ testPlayerDataAuditDetectsDuplicatesAndBrokenLinks();
 testPlayerProfileRenderStartsEmptyAndUsesPlayerIds();
 testCompletedCoachStatsMatchesFeedTeamProfile();
 testPlayerArchiveUsesDirectStatusPatch();
+testSyncLogsQueryKeepsOrderAndServerLimit();
 testPresenceInteractionsStayNonBlocking();
 testPerformanceCriticalPathStaysNonBlocking();
 testTechnicalHistoryCompatibilityAndScoping();
@@ -2071,6 +2200,7 @@ testProfileFirestoreDiagnosticsStayScoped();
 
 Promise.resolve()
   .then(testTeamScopedFirestoreQueryContract)
+  .then(testHomeDashboardPresenceQueriesStayBounded)
   .then(testTeamProfileRuntimeUsesOnlyTeamScopedQueries)
   .then(testTeamProfileOptionalReadsRespectEffectivePermissions)
   .then(testPlayerProfileRuntimeUsesCanonicalGetAndTeamScope)

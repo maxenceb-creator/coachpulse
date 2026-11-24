@@ -15,6 +15,8 @@ if(!storage) throw new Error('CoachPulseStorage doit être chargé avant app.js'
 const firestorePayloadService = window.CoachPulseFirestorePayload;
 if(!firestorePayloadService) throw new Error('CoachPulseFirestorePayload doit être chargé avant app.js');
 const notifier = window.CoachPulseNotify;
+const syncStateService = window.CoachPulseSyncState;
+if(!syncStateService) throw new Error('CoachPulseSyncState doit être chargé avant app.js');
 function notifyUser(message, type='info', options={}){
   if(notifier?.show) return notifier.show(message, {...options, type});
   const method = type === 'error' ? 'error' : type === 'warn' ? 'warn' : 'info';
@@ -48,6 +50,7 @@ let adminAccessChoiceCache = null;
 let appRefreshInProgress = false;
 let localChangeSnapshotTimer = null;
 let presenceCacheGeneration = 0;
+let activePresenceAccessContextKey = '';
 const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
   'coachStatsV170',
   'presenceSeanceV3_6_Excel',
@@ -76,7 +79,7 @@ const appDataCache = {
   athleticRows:{rows:null, loadedAt:0},
   technicalRows:{rows:null, loadedAt:0, key:'', status:'idle', source:'none', error:''},
   technicalFootHints:{rows:null, loadedAt:0, pending:null},
-  presenceEvents:{rows:null, loadedAt:0, key:'', pending:null},
+  presenceEvents:{rows:null, loadedAt:0, key:'', pending:null, months:new Map()},
   playerProfiles:new Map(),
   teamProfiles:new Map()
 };
@@ -275,6 +278,7 @@ function invalidateAppDataCaches(scope='all'){
     appDataCache.presenceEvents.loadedAt = 0;
     appDataCache.presenceEvents.key = '';
     appDataCache.presenceEvents.pending = null;
+    appDataCache.presenceEvents.months.clear();
   }
   if(scope === 'all' || scope === 'players' || scope === 'playerProfiles') appDataCache.playerProfiles.clear();
   if(scope === 'all' || scope === 'players' || scope === 'teams' || scope === 'teamProfiles') appDataCache.teamProfiles.clear();
@@ -418,7 +422,7 @@ function normalizeLoadedStaffProfile(profile={}){
 function accessContext(){
   const profile = accessProfile();
   const authorizedTeamIds = getAuthorizedTeamIds();
-  return {
+  const context = {
     type:'coachpulse-access-context',
     user:{uid:currentUser?.uid || '', email:currentUser?.email || ''},
     profile:{
@@ -439,9 +443,20 @@ function accessContext(){
     },
     modules:Object.fromEntries(moduleRegistry().map(module => [module.id, {read:hasModulePermission(module, 'read'), write:hasModulePermission(module, 'write'), delete:canDeleteData(module.id)}]))
   };
+  context.presenceContextKey = window.CoachPulsePresenceAccessContext?.contextKey?.(context) || '';
+  return context;
+}
+function syncPresenceAccessContext(context=accessContext()){
+  const nextKey = context.presenceContextKey || window.CoachPulsePresenceAccessContext?.contextKey?.(context) || '';
+  if(nextKey === activePresenceAccessContextKey) return false;
+  activePresenceAccessContextKey = nextKey;
+  invalidateAppDataCaches('presences');
+  return true;
 }
 function notifyFramesAccessUpdated(){
-  try{ frame?.contentWindow?.postMessage(accessContext(), '*'); }catch(_e){}
+  const context = accessContext();
+  syncPresenceAccessContext(context);
+  try{ frame?.contentWindow?.postMessage(context, '*'); }catch(_e){}
 }
 function guardAdminAction(label='Action réservée aux éditeurs autorisés'){
   if(isAdmin()) return true;
@@ -1274,11 +1289,24 @@ async function initFirebaseInternal(){
     auth = firebaseFns.getAuth(fbApp);
     await configureAuthPersistence();
     db = firebaseFns.getFirestore(fbApp);
-    try{ await firebaseFns.enableIndexedDbPersistence(db); }catch(_e){}
+    try{
+      await firebaseFns.enableIndexedDbPersistence(db);
+      syncStateService.setPersistence(syncStateService.PERSISTENCE.AVAILABLE);
+    }catch(error){
+      const code = String(error?.code || '').toLowerCase();
+      const status = code.includes('failed-precondition')
+        ? syncStateService.PERSISTENCE.FAILED_PRECONDITION
+        : code.includes('unimplemented')
+          ? syncStateService.PERSISTENCE.UNIMPLEMENTED
+          : syncStateService.PERSISTENCE.ERROR;
+      syncStateService.setPersistence(status, {code:error?.code, message:error?.message});
+      console.warn('[CoachPulse persistence] Persistance IndexedDB indisponible', {status, code:error?.code || 'unknown'});
+    }
     firebaseFns.onAuthStateChanged(auth, async user => {
       const authCallbackStartedAt = authFlowStartedAt || performance.now();
       authReady = true;
       currentUser = user;
+      syncStateService.setUser(user?.uid || null);
       updateSyncState(user ? 'Cloud connecté' : 'Connexion staff requise');
       if(user){
         try{
@@ -1310,6 +1338,7 @@ async function initFirebaseInternal(){
         currentProfile = null;
         stopRealtimeSync();
         stopStaffProfileSubscription();
+        notifyFramesAccessUpdated();
         setLocked(true);
       }
     });
@@ -2688,7 +2717,12 @@ async function teamProfileLoadData(options={}){
     }), {readErrors:payload.readErrors});
 	  directNames.forEach(name => { payload.collections[name] = directReads.values[name]; });
 	  const matchIds = payload.collections.matches.map(row => row.matchId || row.id).filter(Boolean);
-	  const medicalLinkedNames = ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps']
+	  const latestHomeMatch = homeDashboard ? homeLatestMatch(payload.collections.matches, []) : null;
+	  const latestHomeMatchId = latestHomeMatch?.row?.matchId || latestHomeMatch?.row?.id || '';
+	  const medicalLinkedCandidates = homeDashboard
+	    ? ['medicalAppointments','medicalFollowUps']
+	    : ['injuryUpdates','medicalAppointments','rehabRoutines','medicalFollowUps'];
+	  const medicalLinkedNames = medicalLinkedCandidates
 	    .filter(canReadTeamProfileCollection);
     async function readOptionalMedical(name){
       const specs = [
@@ -2702,18 +2736,101 @@ async function teamProfileLoadData(options={}){
       })), {readErrors:payload.readErrors});
       return uniqueRows(specs.flatMap(([field]) => settled.values[field] || []));
     }
+	  async function readHomeMatchEvents(){
+	    if(!latestHomeMatchId) return [];
+	    const specs = [
+	      ['teamId', '=='],
+	      ['teamIds', 'array-contains']
+	    ];
+	    const settled = await firestoreQueryService().settleProfileReads(specs.map(([field, operator]) => ({
+	      name:field, critical:true,
+	      diagnostic:teamProfileDiagnostic('matchEvents', true, {field, operator, values:teamId, matchId:latestHomeMatchId}),
+	      read:async () => {
+	        const query = firebaseFns.query(
+	          firebaseFns.collection(db, 'matchEvents'),
+	          firebaseFns.where('matchId', '==', latestHomeMatchId),
+	          firebaseFns.where(field, operator, teamId)
+	        );
+	        return docsFromSnap(await firebaseFns.getDocs(query));
+	      }
+	    })), {readErrors:payload.readErrors});
+	    return uniqueRows(specs.flatMap(([field]) => settled.values[field] || []));
+	  }
     const detailSpecs = [
       ...(canReadTeamProfileCollection('matchEvents') ? [
-        {name:'teamMatchEvents', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true), read:() => firestoreQueryService().readMatchEventsByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('matchEvents', true)})},
-        {name:'matchEventsByMatch', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true, {field:'matchId', operator:'in', values:matchIds}), read:() => hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds, true) : Promise.resolve([])}
+	        homeDashboard
+	          ? {name:'homeMatchEvents', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true, {matchId:latestHomeMatchId}), read:readHomeMatchEvents}
+	          : {name:'teamMatchEvents', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true), read:() => firestoreQueryService().readMatchEventsByTeams([teamId], {firebaseFns, db, diagnostic:teamProfileDiagnostic('matchEvents', true)})},
+	        ...(!homeDashboard ? [{name:'matchEventsByMatch', critical:true, diagnostic:teamProfileDiagnostic('matchEvents', true, {field:'matchId', operator:'in', values:matchIds}), read:() => hasGlobalDataAccess() ? readWhereIn('matchEvents', 'matchId', matchIds, true) : Promise.resolve([])}] : [])
       ] : []),
       ...medicalLinkedNames.map(name => ({name, critical:true, diagnostic:teamProfileDiagnostic(name, true), read:() => readOptionalMedical(name)}))
     ];
     const detailReads = await firestoreQueryService().settleProfileReads(detailSpecs, {readErrors:payload.readErrors});
-	  payload.collections.matchEvents = uniqueRows([...(detailReads.values.teamMatchEvents || []), ...(detailReads.values.matchEventsByMatch || [])]);
+	  payload.collections.matchEvents = uniqueRows([...(detailReads.values.homeMatchEvents || []), ...(detailReads.values.teamMatchEvents || []), ...(detailReads.values.matchEventsByMatch || [])]);
 	  if(canReadTeamProfileCollection('sessions')){
-	    const presenceEvents = await presenceListEvents({forceRefresh:options.forceRefresh === true});
-	    const cloudPresence = presenceEventsService()?.collectionsFromEvents(presenceEvents) || {sessions:[], attendance:[]};
+	    let cloudPresence;
+	    if(homeDashboard){
+	      const today = new Date();
+	      today.setHours(0,0,0,0);
+	      const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+	      const eligibleSession = row => rowMatchesTeamId(row, teamId)
+	        && isPresenceSessionVisibleToModule(row)
+	        && !isRetiredPresenceSeasonSession(row)
+	        && Boolean(homeDateValue(row));
+	      const localService = presenceEventsService();
+	      const localEvents = (localService?.readEvents?.() || []).filter(event =>
+	        localService?.teamIdsFromEvent?.(event)?.includes(teamId)
+	        && !localService?.isRetiredPresenceSeasonEvent?.(event)
+	      );
+	      const localSessions = localEvents.map(event => ({
+	        ...localService.sessionFromEvent(event),
+	        __homeLocalPending:localService.isPendingEvent?.(event) === true,
+	        cloudSyncedAt:event.cloudSyncedAt || ''
+	      })).filter(eligibleSession);
+	      const cloudSessions = await firestoreQueryService().readHomeDashboardSessionCandidates([teamId], {
+	        firebaseFns, db, today:todayKey, pageSize:6, isEligible:eligibleSession,
+	        diagnostic:teamProfileDiagnostic('sessions', true)
+	      });
+	      const mergedSessions = new Map();
+	      [...cloudSessions, ...localSessions].forEach(row => {
+	        const id = String(row.sessionId || row.id || '').trim();
+	        if(!id) return;
+	        const current = mergedSessions.get(id);
+	        if(!current){ mergedSessions.set(id, row); return; }
+	        const currentTime = Date.parse(current.updatedAtIso || current.updatedAt || current.createdAtIso || current.createdAt || 0) || 0;
+	        const rowTime = Date.parse(row.updatedAtIso || row.updatedAt || row.createdAtIso || row.createdAt || 0) || 0;
+	        if(row.__homeLocalPending || (!current.__homeLocalPending && rowTime >= currentTime)) mergedSessions.set(id, {...current, ...row});
+	      });
+	      const datedSessions = [...mergedSessions.values()].filter(eligibleSession).map(row => ({row, date:homeDateValue(row)}));
+	      const next = datedSessions.filter(item => item.date >= today).sort((a,b) => a.date - b.date)[0]?.row || null;
+	      const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+	      const last = datedSessions.filter(item => item.date < tomorrow).sort((a,b) => b.date - a.date)[0]?.row || null;
+	      const selectedSessions = uniqueRows([last, next].filter(Boolean));
+	      const lastSessionId = String(last?.sessionId || last?.id || '').trim();
+	      const cloudAttendance = lastSessionId
+	        ? await firestoreQueryService().readAttendanceForSessionByTeams(lastSessionId, [teamId], {
+	            firebaseFns, db, diagnostic:teamProfileDiagnostic('attendance', true, {sessionId:lastSessionId})
+	          })
+	        : [];
+	      const localAttendance = localEvents
+	        .filter(event => String(localService.sessionIdFromEvent?.(event) || '') === lastSessionId)
+	        .flatMap(event => (localService.attendanceRowsFromEvent?.(event) || []).map(row => ({
+	          ...row, __homeLocalPending:localService.isPendingEvent?.(event) === true
+	        })));
+	      const mergedAttendance = new Map();
+	      [...cloudAttendance, ...localAttendance].forEach(row => {
+	        const id = String(row.attendanceId || row.id || `${row.sessionId}:${row.playerId}`).trim();
+	        const current = mergedAttendance.get(id);
+	        if(!current || row.__homeLocalPending) mergedAttendance.set(id, current ? {...current, ...row} : row);
+	      });
+	      cloudPresence = {
+	        sessions:selectedSessions,
+	        attendance:[...mergedAttendance.values()]
+	      };
+	    }else{
+	      const presenceEvents = await presenceListEvents({forceRefresh:options.forceRefresh === true});
+	      cloudPresence = presenceEventsService()?.collectionsFromEvents(presenceEvents) || {sessions:[], attendance:[]};
+	    }
 	    payload.collections.sessions = uniqueRows((cloudPresence.sessions || []).filter(row => rowMatchesTeamId(row, teamId)));
 	    const sessionIds = new Set(payload.collections.sessions.map(row => row.sessionId || row.id).filter(Boolean));
 	    payload.collections.attendance = uniqueRows((cloudPresence.attendance || []).filter(row => rowMatchesTeamId(row, teamId) || sessionIds.has(row.sessionId)));
@@ -3532,9 +3649,9 @@ async function syncDataHubItems(items=[], meta={}){
 async function readSyncLogs(limit=20){
   if(!guardAdminAction()) return [];
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
-  const snap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db,'syncLogs'), firebaseFns.orderBy('date','desc')));
+  const snap = await firebaseFns.getDocs(firebaseFns.query(firebaseFns.collection(db,'syncLogs'), firebaseFns.orderBy('date','desc'), firebaseFns.limit(limit)));
   const logs = [];
-  snap.forEach(docSnap => { if(logs.length < limit) logs.push({id:docSnap.id, ...docSnap.data()}); });
+  snap.forEach(docSnap => { logs.push({id:docSnap.id, ...docSnap.data()}); });
   return logs;
 }
 async function adminListPlayers(filters={}){
@@ -4926,12 +5043,33 @@ function matchAssociatedPlayerIds(raw={}){
 function matchSyncCapabilities(){
   return {available:!!(db && currentUser), online:navigator.onLine, canRead:canViewModule('stats'), canWrite:canEditModule('stats')};
 }
+function canonicalMatchTeamId(raw={}){
+  const service=teamsService();
+  const rows=service?.officialTeamRows?.()||[];
+  const references=[raw.teamId,raw.team_id,raw.teamSnapshot?.teamId,raw.teamSnapshot?.name,raw.team,raw.equipe]
+    .map(value=>String(value||'').trim()).filter(Boolean);
+  for(const reference of references){
+    const exact=rows.find(row=>String(row.teamId||row.id)===reference||String(row.name||'').toUpperCase()===reference.toUpperCase());
+    if(exact)return String(exact.teamId||exact.id);
+  }
+  for(const reference of references){
+    const categoryReference=reference.replace(/^(?:team-)+/i,'').replace(/[-_ ]+/g,' ').trim().toUpperCase();
+    if(/^U\d+$/.test(categoryReference)){
+      const categoryMatches=rows.filter(row=>String(row.category||'').toUpperCase()===categoryReference);
+      if(categoryMatches.length!==1)return'';
+      return String(categoryMatches[0].teamId||categoryMatches[0].id);
+    }
+    const candidate=service?.canonicalTeamId?.(reference)||'';
+    if(candidate&&rows.some(row=>String(row.teamId||row.id)===candidate))return candidate;
+  }
+  return'';
+}
 function normalizeMatchForFirestore(raw={}){
   const matchId = matchDocumentId(raw);
   const createdAt = raw.createdAt || raw.date || new Date().toISOString();
   const team = raw.team || raw.equipe || '';
-  const teamId = raw.teamId || raw.team_id || raw.teamSnapshot?.teamId || teamsService()?.canonicalTeamId?.(team) || '';
-  const teamIds = [...new Set([teamId, ...(raw.teamIds || [])].filter(Boolean))];
+  const teamId = canonicalMatchTeamId(raw);
+  const teamIds = [...new Set([teamId,...(raw.teamIds||[]).map(value=>canonicalMatchTeamId({teamId:value}))].filter(Boolean))];
   const season = raw.season || seasonFromDate(createdAt);
   const matchTypeRaw = String(raw.matchType || raw.match_type || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const matchType = ['championship','championnat','league'].includes(matchTypeRaw) ? 'championship'
@@ -6016,7 +6154,7 @@ function presenceCloudEventFromSession(session={}, attendanceRows=[]){
   const dateFromId = sessionId.match(/\d{4}-\d{2}-\d{2}/)?.[0] || '';
   const eventDate = session.date || session.startDate || session.day || dateFromId || '';
   const teamIds = presenceTeamIdRefs(session, session.teamSnapshot, session.sessionSnapshot);
-  const rowsForSession = attendanceRows.filter(row => String(row.sessionId || '') === sessionId && row.playerId && presenceUiStatusFromCode(row.status));
+  const rowsForSession = Array.isArray(attendanceRows) ? attendanceRows : [];
   const embeddedAttendanceIsAuthoritative = Number(session.embeddedAttendanceVersion || 0) >= 2;
   const embeddedAttendance = firestoreSafeData(session.attendance || {});
   const attendance = {...embeddedAttendance};
@@ -6066,15 +6204,10 @@ async function presenceListEvents(options={}){
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const includeRetiredPresenceSeasons = options.includeRetiredPresenceSeasons === true;
   const presenceDebug = debugPerfEnabled();
+  const presenceLoadStartedAt = presenceDebug ? performance.now() : 0;
   const readStats = {queries:0, queryResults:[], queryErrors:[]};
   const authorizedTeamIds = getAuthorizedTeamIds();
-  const cacheKey = [
-    currentUser.uid,
-    presenceSettingsAdminAllowed() ? 'admin' : 'staff',
-    canAccessAllPlayersForModule('presences') ? 'allPlayers' : 'teamScope',
-    authorizedTeamIds.slice().sort().join(','),
-    includeRetiredPresenceSeasons ? 'withRetiredPresenceSeasons' : 'activePresenceSeasons'
-  ].join(':');
+  const cacheKey = `${window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || currentUser.uid}:${includeRetiredPresenceSeasons ? 'withRetiredPresenceSeasons' : 'activePresenceSeasons'}`;
   if(
     options.forceRefresh !== true
     &&
@@ -6082,9 +6215,11 @@ async function presenceListEvents(options={}){
     && appDataCache.presenceEvents.key === cacheKey
     && Date.now() - appDataCache.presenceEvents.loadedAt < DATA_CACHE_TTL_MS
   ){
+    if(presenceDebug) recordPerfEvent('presences:firestore-cache-hit', {documents:appDataCache.presenceEvents.rows.length, queries:0});
     return cloneData(appDataCache.presenceEvents.rows);
   }
   if(appDataCache.presenceEvents.pending && appDataCache.presenceEvents.key === cacheKey){
+    if(presenceDebug) recordPerfEvent('presences:firestore-cache-pending', {queries:0});
     return cloneData(await appDataCache.presenceEvents.pending);
   }
   const docsFromSnap = snap => {
@@ -6094,20 +6229,22 @@ async function presenceListEvents(options={}){
   };
   const readWhere = async (collectionName, field, operator, value) => {
     readStats.queries += 1;
+    const startedAt = presenceDebug ? performance.now() : 0;
     const q = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, operator, value));
     const rows = docsFromSnap(await firebaseFns.getDocs(q));
-    readStats.queryResults.push({collection:collectionName, fields:[field], documents:rows.length});
+    readStats.queryResults.push({collection:collectionName, fields:[field], documents:rows.length, durationMs:presenceDebug ? Math.round(performance.now() - startedAt) : 0});
     return rows;
   };
   const readWhereSafe = async (collectionName, constraints=[]) => {
     readStats.queries += 1;
+    const startedAt = presenceDebug ? performance.now() : 0;
     try{
       const q = firebaseFns.query(
         firebaseFns.collection(db, collectionName),
         ...constraints.map(item => firebaseFns.where(item.field, item.operator, item.value))
       );
       const rows = docsFromSnap(await firebaseFns.getDocs(q));
-      readStats.queryResults.push({collection:collectionName, fields:constraints.map(item => item.field), documents:rows.length});
+      readStats.queryResults.push({collection:collectionName, fields:constraints.map(item => item.field), documents:rows.length, durationMs:presenceDebug ? Math.round(performance.now() - startedAt) : 0});
       return rows;
     }catch(error){
       const code = String(error?.code || '').toLowerCase();
@@ -6215,20 +6352,29 @@ async function presenceListEvents(options={}){
         .map(row => [row.attendanceId || row.id, row])).values()];
     }
     const attendance = scopedRecordsForModuleAccess(attendanceRows, 'presences');
+    const attendanceBySessionId = presenceEventsService()?.indexAttendanceRowsBySessionId?.(attendance) || new Map();
     const events = sessions
-      .map(session => presenceCloudEventFromSession(session, attendance))
+      .map(session => presenceCloudEventFromSession(session, attendanceBySessionId.get(String(session.sessionId || session.id || '')) || []))
       .filter(event => event.id && event.date)
       .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+    if(cacheGeneration !== presenceCacheGeneration || appDataCache.presenceEvents.key !== cacheKey) return [];
     if(presenceDebug){
+      const firestoreDocuments = readStats.queryResults.reduce((total, query) => total + query.documents, 0);
+      recordPerfEvent('presences:firestore-load', {
+        durationMs:Math.round(performance.now() - presenceLoadStartedAt),
+        queries:readStats.queries,
+        documents:firestoreDocuments,
+        returned:events.length,
+        errors:readStats.queryErrors.length
+      });
       console.info('[Présences debug]', {
-        teamId:options.teamId || '', period:options.period || '', startDate:options.startDate || '', endDate:options.endDate || '',
         firestoreQueries:readStats.queries, queryResults:readStats.queryResults, queryErrors:readStats.queryErrors,
         firestoreDocuments:sessionRows.length, beforeFiltering:sessionRows.length,
         afterNormalization:events.length, afterAuthorization:authorizedSessions.length, afterVisibility:sessions.length, returned:events.length
       });
     }
     if(cacheGeneration === presenceCacheGeneration && appDataCache.presenceEvents.key === cacheKey){
-      appDataCache.presenceEvents = {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey, pending:null};
+      Object.assign(appDataCache.presenceEvents, {rows:cloneData(events), loadedAt:Date.now(), key:cacheKey, pending:null});
     }
     return events;
   };
@@ -6239,6 +6385,148 @@ async function presenceListEvents(options={}){
   });
   appDataCache.presenceEvents.pending = trackedLoad;
   return cloneData(await trackedLoad);
+}
+function presenceMonthRange(monthKey=''){
+  const match = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+  if(!match) throw new Error('Mois de séances invalide.');
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if(month < 1 || month > 12) throw new Error('Mois de séances invalide.');
+  const start = `${year}-${String(month).padStart(2, '0')}-01`;
+  const next = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  return {monthKey:`${year}-${String(month).padStart(2, '0')}`, start, next};
+}
+async function presenceListEventsByMonth(options={}){
+  if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const range = presenceMonthRange(options.month);
+  const cacheGeneration = presenceCacheGeneration;
+  const authorizedTeamIds = getAuthorizedTeamIds();
+  const adminScope = presenceSettingsAdminAllowed() || canAccessAllPlayersForModule('presences');
+  if(!adminScope && !authorizedTeamIds.length) return [];
+  const accessKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || `${currentUser.uid}:${adminScope ? 'all' : authorizedTeamIds.slice().sort().join(',')}`;
+  const cacheKey = `${accessKey}:${range.monthKey}`;
+  const cached = appDataCache.presenceEvents.months.get(cacheKey);
+  if(options.forceRefresh !== true && cached?.complete && Date.now() - cached.loadedAt < DATA_CACHE_TTL_MS){
+    if(debugPerfEnabled()) recordPerfEvent('presences:month-cache-hit', {month:range.monthKey, documents:cached.rows.length, queries:0});
+    return cloneData(cached.rows);
+  }
+  if(cached?.pending) return cloneData(await cached.pending);
+  const docsFromSnap = snap => {
+    const rows = [];
+    snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()}));
+    return rows;
+  };
+  const read = async constraints => {
+    const q = firebaseFns.query(
+      firebaseFns.collection(db, 'sessions'),
+      ...constraints.map(item => firebaseFns.where(item.field, item.operator, item.value))
+    );
+    return docsFromSnap(await firebaseFns.getDocs(q));
+  };
+  const load = async () => {
+    const startedAt = debugPerfEnabled() ? performance.now() : 0;
+    const baseRanges = [
+      [{field:'createdFromPresenceModule', operator:'==', value:true}],
+      [{field:'source', operator:'==', value:'Présences'}]
+    ];
+    const reads = [];
+    const dateRange = [
+      {field:'date', operator:'>=', value:range.start},
+      {field:'date', operator:'<', value:range.next}
+    ];
+    if(adminScope){
+      baseRanges.forEach(base => reads.push(read([...base, ...dateRange])));
+    }else{
+      for(let index=0;index<authorizedTeamIds.length;index+=10){
+        const chunk = authorizedTeamIds.slice(index, index + 10);
+        baseRanges.forEach(base => {
+          reads.push(read([...base, {field:'teamId', operator:'in', value:chunk}, ...dateRange]));
+          reads.push(read([...base, {field:'teamIds', operator:'array-contains-any', value:chunk}, ...dateRange]));
+        });
+      }
+    }
+    const sessionRows = (await Promise.all(reads)).flat();
+    if(cacheGeneration !== presenceCacheGeneration || accessKey !== (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '')) return [];
+    const uniqueSessions = [...new Map(sessionRows.map(row => [row.sessionId || row.id, row])).values()];
+    const sessions = scopedRecordsForModuleAccess(uniqueSessions, 'presences')
+      .filter(row => row.sessionId || row.id)
+      .filter(row => isPresenceSessionVisibleToModule(row))
+      .filter(row => !isRetiredPresenceSeasonSession(row));
+    const events = sessions
+      .map(session => presenceCloudEventFromSession(session, []))
+      .filter(event => event.id && event.date)
+      .sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.startTime).localeCompare(String(b.startTime)));
+    if(debugPerfEnabled()) recordPerfEvent('presences:firestore-month-load', {
+      month:range.monthKey,
+      durationMs:Math.round(performance.now() - startedAt),
+      queries:reads.length,
+      documents:sessionRows.length,
+      returned:events.length
+    });
+    const current = appDataCache.presenceEvents.months.get(cacheKey);
+    if(current?.requestId === requestId){
+      appDataCache.presenceEvents.months.set(cacheKey, {rows:cloneData(events), loadedAt:Date.now(), complete:true, pending:null, requestId});
+    }
+    return events;
+  };
+  const requestId = (cached?.requestId || 0) + 1;
+  const pending = load().finally(() => {
+    const current = appDataCache.presenceEvents.months.get(cacheKey);
+    if(current?.requestId === requestId && current.pending === pending) current.pending = null;
+  });
+  appDataCache.presenceEvents.months.set(cacheKey, {rows:cached?.rows || [], loadedAt:cached?.loadedAt || 0, complete:false, pending, requestId});
+  return cloneData(await pending);
+}
+async function presenceLoadEventAttendance(event={}){
+  if(!canViewModule('presences')) throw new Error('Accès non autorisé.');
+  if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
+  const sessionId = String(event.sessionId || event.id || '').trim();
+  if(!sessionId) return {};
+  const cacheGeneration = presenceCacheGeneration;
+  const accessKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '';
+  const rows = [];
+  const authorizedTeamIds = getAuthorizedTeamIds();
+  const adminScope = presenceSettingsAdminAllowed() || canAccessAllPlayersForModule('presences');
+  const reads = [];
+  if(adminScope){
+    reads.push(firebaseFns.getDocs(firebaseFns.query(
+      firebaseFns.collection(db, 'attendance'),
+      firebaseFns.where('sessionId', 'in', [sessionId])
+    )));
+  }else{
+    for(let index=0;index<authorizedTeamIds.length;index+=10){
+      const chunk = authorizedTeamIds.slice(index, index + 10);
+      reads.push(firebaseFns.getDocs(firebaseFns.query(
+        firebaseFns.collection(db, 'attendance'),
+        firebaseFns.where('sessionId', 'in', [sessionId]),
+        firebaseFns.where('teamId', 'in', chunk)
+      )));
+      reads.push(firebaseFns.getDocs(firebaseFns.query(
+        firebaseFns.collection(db, 'attendance'),
+        firebaseFns.where('sessionId', 'in', [sessionId]),
+        firebaseFns.where('teamIds', 'array-contains-any', chunk)
+      )));
+    }
+  }
+  (await Promise.all(reads)).forEach(snap => snap.forEach(docSnap => rows.push({id:docSnap.id, ...docSnap.data()})));
+  if(cacheGeneration !== presenceCacheGeneration || accessKey !== (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '')) return {};
+  const attendance = {};
+  const uniqueRows = [...new Map(rows.map(row => [row.attendanceId || row.id, row])).values()];
+  scopedRecordsForModuleAccess(uniqueRows, 'presences').forEach(row => {
+    const playerId = String(row.playerId || '').trim();
+    if(!playerId) return;
+    attendance[playerId] = {
+      status:presenceUiStatusFromCode(row.status),
+      minutes:Number(row.minutes ?? row.duration ?? 0) || 0,
+      comment:row.comment || row.note || '',
+      attendanceId:row.attendanceId || row.id || '',
+      teamId:row.teamId || event.teamId || '',
+      teamIds:presenceTeamIdRefs(row, row.playerSnapshot),
+      playerSnapshot:row.playerSnapshot || {}
+    };
+  });
+  return attendance;
 }
 function presenceSettingsAdminAllowed(){
   return getCurrentPermissionLevel() === 'ADMIN' || getCurrentUserRole() === 'ADMIN';
@@ -6266,6 +6554,10 @@ async function presenceSaveSettings(settings={}){
 }
 function presenceSubscribeEvents(onChange){
   if(!db || !currentUser || typeof onChange !== 'function') return () => {};
+  const subscriptionGeneration = presenceCacheGeneration;
+  const subscriptionContextKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '';
+  const contextIsCurrent = () => subscriptionGeneration === presenceCacheGeneration
+    && subscriptionContextKey === (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '');
   const authorizedTeamIds = getAuthorizedTeamIds();
   if(!presenceSettingsAdminAllowed() && !canAccessAllPlayersForModule('presences') && !authorizedTeamIds.length) return () => {};
   const queries = [];
@@ -6294,6 +6586,7 @@ function presenceSubscribeEvents(onChange){
     const diagnostic = {function:'presenceSubscribeEvents', module:'presences', scope:authorizedTeamIds.length ? 'authorized-teams' : 'all', collection:'sessions', operation:'listener'};
     const loadingOperation = safeLoadingCall('start', [label, {kind:'sync', diagnostic}]);
     const unsubscribe = firebaseFns.onSnapshot(queryRef, () => {
+    if(!contextIsCurrent()) return;
     try{ loadingOperation?.end?.(); }catch(_error){}
     invalidateAppDataCaches('presences');
     if(initialized++ >= queries.length) onChange();
@@ -6308,11 +6601,59 @@ function presenceSubscribeEvents(onChange){
     try{ unsubscribe(); }catch(_error){}
   });
 }
+function presenceSubscribeEventsByMonth(monthKey, onChange){
+  if(!db || !currentUser || typeof onChange !== 'function') return () => {};
+  const range = presenceMonthRange(monthKey);
+  const authorizedTeamIds = getAuthorizedTeamIds();
+  const adminScope = presenceSettingsAdminAllowed() || canAccessAllPlayersForModule('presences');
+  const subscriptionGeneration = presenceCacheGeneration;
+  const subscriptionContextKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '';
+  const contextIsCurrent = () => subscriptionGeneration === presenceCacheGeneration
+    && subscriptionContextKey === (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '');
+  if(!adminScope && !authorizedTeamIds.length) return () => {};
+  const baseRanges = [
+    [{field:'createdFromPresenceModule', operator:'==', value:true}],
+    [{field:'source', operator:'==', value:'Présences'}]
+  ];
+  const dateRange = [
+    {field:'date', operator:'>=', value:range.start},
+    {field:'date', operator:'<', value:range.next}
+  ];
+  const constraintSets = [];
+  if(adminScope){
+    baseRanges.forEach(base => constraintSets.push([...base, ...dateRange]));
+  }else{
+    for(let index=0;index<authorizedTeamIds.length;index+=10){
+      const chunk = authorizedTeamIds.slice(index, index + 10);
+      baseRanges.forEach(base => {
+        constraintSets.push([...base, {field:'teamId', operator:'in', value:chunk}, ...dateRange]);
+        constraintSets.push([...base, {field:'teamIds', operator:'array-contains-any', value:chunk}, ...dateRange]);
+      });
+    }
+  }
+  let initialized = 0;
+  return (() => {
+    const unsubscribers = constraintSets.map((constraints, index) => {
+      const queryRef = firebaseFns.query(
+        firebaseFns.collection(db, 'sessions'),
+        ...constraints.map(item => firebaseFns.where(item.field, item.operator, item.value))
+      );
+      return firebaseFns.onSnapshot(queryRef, () => {
+        if(!contextIsCurrent()) return;
+        if(initialized++ >= constraintSets.length) onChange({month:range.monthKey});
+      }, error => console.warn(`[Présences] Écoute mensuelle ${index + 1} indisponible`, cleanError(error)));
+    });
+    return () => unsubscribers.forEach(unsubscribe => { try{ unsubscribe(); }catch(_error){} });
+  })();
+}
 function presenceSubscribeSettings(onChange){
   if(!db || !currentUser || typeof onChange !== 'function') return () => {};
+  const subscriptionGeneration = presenceCacheGeneration;
+  const subscriptionContextKey = window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '';
   const diagnostic = {function:'presenceSubscribeSettings', module:'presences', scope:'module', collection:'settings', operation:'listener'};
   const loadingOperation = safeLoadingCall('start', ['attendance-settings:listen', {kind:'sync', diagnostic}]);
   const unsubscribe = firebaseFns.onSnapshot(firebaseFns.doc(db, 'settings', 'presence-module'), snap => {
+    if(subscriptionGeneration !== presenceCacheGeneration || subscriptionContextKey !== (window.CoachPulsePresenceAccessContext?.contextKey?.(accessContext()) || '')) return;
     try{ loadingOperation?.end?.(); }catch(_error){}
     if(snap.exists()) onChange(firestoreSafeData(snap.data()?.value || {}));
   }, error => {
@@ -6326,9 +6667,11 @@ async function presenceSaveEvent(event={}, options={}){
   if(!canAccessAnyPresenceTeam(event)){
     throw new Error('Accès non autorisé à cette équipe.');
   }
+  invalidateAppDataCaches('teamProfiles');
   if(!db || !currentUser) throw new Error('Connexion Firebase requise.');
   const service = presenceEventsService();
-  const session = service?.sessionFromEvent ? service.sessionFromEvent(event) : event;
+  const sanitizedEvent = service?.sanitizePresenceEvent ? service.sanitizePresenceEvent(event) : event;
+  const session = service?.sessionFromEvent ? service.sessionFromEvent(sanitizedEvent) : sanitizedEvent;
   const sessionId = String(session.sessionId || '').trim();
   if(!sessionId || sessionId.startsWith('presence-event-') || sessionId.startsWith('local-attendance-')){
     throw new Error('Identifiant de séance Présences invalide. Recharge les présences avant de réessayer.');
@@ -6371,11 +6714,11 @@ async function presenceSaveEvent(event={}, options={}){
       category:session.category || event.category || event.categorie || ''
     },
     procedure:presencePlainProcedure(session.procedure || event.procedure || event.sessionProcedure),
-    attendance:firestoreSafeData(event.attendance || {}),
+    attendance:firestoreSafeData(service?.sanitizeAttendanceMap ? service.sanitizeAttendanceMap(sanitizedEvent.attendance, sanitizedEvent) : sanitizedEvent.attendance || {}),
     embeddedAttendanceVersion:2
   };
   const safeSessionPayload = firestoreSafeData(sessionPayload);
-  const attendanceRows = (service?.attendanceRowsFromEvent ? service.attendanceRowsFromEvent(event) : [])
+  const attendanceRows = (service?.attendanceRowsFromEvent ? service.attendanceRowsFromEvent(sanitizedEvent) : [])
     .filter(row => row.playerId)
     .map(row => ({
       ...row,
@@ -6389,12 +6732,11 @@ async function presenceSaveEvent(event={}, options={}){
         teamIds:sessionTeamIds,
         procedure:presencePlainProcedure(row.sessionSnapshot?.procedure || sessionPayload.procedure)
       },
-      playerSnapshot:{
-        ...(row.playerSnapshot || {}),
+      playerSnapshot:service?.lightPlayerSnapshot ? service.lightPlayerSnapshot(row.playerSnapshot, {
         playerId:row.playerId,
         teamId:row.playerSnapshot?.teamId || row.teamId || primaryTeamId || '',
         teamIds:presenceTeamIdRefs(row.playerSnapshot, row, sessionTeamIds)
-      }
+      }) : row.playerSnapshot
     }))
     .filter(row => canAccessAnyPresenceTeam(row, row.playerSnapshot, row.sessionSnapshot, sessionTeamIds));
   const nextAttendanceIds = new Set(attendanceRows.map(row => row.attendanceId || row.id).filter(Boolean));
@@ -6567,7 +6909,7 @@ var adminBuildDuplicateMergePlan = typeof adminBuildDuplicateMergePlan === 'func
 var adminMergeDuplicatePlan = typeof adminMergeDuplicatePlan === 'function' ? adminMergeDuplicatePlan : (async () => ({merged:0, skipped:0}));
 var adminAnalyzeCleanPlayersReference = typeof adminAnalyzeCleanPlayersReference === 'function' ? adminAnalyzeCleanPlayersReference : (async () => ({items:[], count:0}));
 var adminApplyCleanPlayersReference = typeof adminApplyCleanPlayersReference === 'function' ? adminApplyCleanPlayersReference : (async () => ({updated:0}));
-window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchSavePostMatchTransactional, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
+window.CoachPulseCentralData = {collections:FIRESTORE_COLLECTIONS, modules:getModuleCatalog, moduleRegistry:getModuleCatalog, seasonFromDate, currentSeason, normalizePlayer, matchSyncCapabilities, matchSaveToFirestore, matchSavePostMatchTransactional, matchListFromFirestore, playerForSeason, playerSeasonSnapshot, categorySnapshotForSeason, listPlayers, listTeams, getPlayer, mergeTechnicalPlayerFootHints, playerMeasurementsCapabilities, playerMeasurementsList, playerMeasurementsAdd, playerMeasurementsUpdate, playerMeasurementsDelete, medicalCapabilities, medicalListPlayers, medicalListData, medicalSaveInjury, medicalAddUpdate, medicalDeleteInjuries, medicalExport, athleticCapabilities, athleticListData, athleticSaveTest, athleticDeleteTest, athleticExport, technicalCapabilities, technicalListData, technicalSaveTest, technicalDeleteTest, presenceListEvents, presenceListEventsByMonth, presenceLoadEventAttendance, presenceSaveEvent, presenceDeleteEvent, presenceLoadSettings, presenceSaveSettings, presenceSubscribeEvents, presenceSubscribeEventsByMonth, presenceSubscribeSettings, playerProfileLoadData, teamProfileLoadData, collectCentralFirestoreDocs, migrateLocalDataToCentralFirestore, pullCentralPlayersToLocal, exportCentralFirestore, importPlayerRowsToFirestore, parseImportFile, buildImportPlan, analyzeImportAgainstFirestore, simulateDataHubSync, syncDataHubItems, readSyncLogs, adminListPlayers, adminBuildDuplicateMergePlan, adminMergeDuplicatePlan, adminRepairPlayerIdsByIdentity, adminRepairTeamIds, adminAnalyzeCleanPlayersReference, adminApplyCleanPlayersReference, adminCreatePlayer, adminUpdatePlayer, adminArchivePlayer, adminDeletePlayer, adminReadChangeLogs, adminExportPlayers, adminListTeamsAndSettings, adminSaveTeam, adminArchiveTeam, adminSaveDatabaseOptions, adminMergePlayers};
 Object.assign(window.CoachPulseCentralData, {matchPrepareHistoricalEventsRevision, technicalDataStatus, accessContext, getAuthorizedTeamIds, canViewModule, canEditModule, canDeleteData, canAccessTeam:canAccessTeamId, canAccessPlayer:canAccessPlayerRecord, canAccessAllPlayersForModule, canAccessPlayerForModule, canAccessRecord, filterAuthorizedTeams, filterAuthorizedPlayers, filterAuthorizedPlayersForModule, filterAuthorizedRecords, filterAuthorizedRecordsForModule});
 function instrumentCentralDataBoundaries(){
   const operations = {
@@ -6596,16 +6938,26 @@ function instrumentCentralDataBoundaries(){
 instrumentCentralDataBoundaries();
 async function syncCloud(manual=false){
   if(applyingCloud) return;
+  const syncUid = currentUser?.uid || null;
+  const syncOperationId = `legacy-cloud:${syncUid || 'anonymous'}`;
   snapshotLocalData({fromCloud:true});
-  if(!navigator.onLine){ storage.markPendingSync(); return updateSyncState('Hors ligne · local OK'); }
+  if(!navigator.onLine){
+    storage.markPendingSync();
+    syncStateService.declareLocal(syncOperationId, {kind:'draft', module:'legacy-cloud-sync'});
+    return updateSyncState('Hors ligne · local en attente');
+  }
   if(!db || !currentUser) return updateSyncState('Connexion staff requise');
+  const syncUser = currentUser;
   const cloudSyncDiagnostic = {function:'syncCloud', module:'cloud', scope:'user', collection:'coachpulse_common_base', operation:'write'};
   const loadingOperation = safeLoadingCall('start', ['cloud:sync', {kind:'sync', diagnostic:cloudSyncDiagnostic}]);
+  let syncAttempt = null;
   try{
+    syncAttempt = syncStateService.markSyncing(syncOperationId, {module:'legacy-cloud-sync'}).operationToken;
     updateSyncState('🔄 Synchronisation...');
     const ref = getCloudRef();
     const payload = buildPayload();
     const existingSnap = await firebaseFns.getDoc(ref);
+    if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     const existingItems = existingSnap.exists() ? existingSnap.data()?.items : {};
     const mergedPayload = {...payload, items:mergedCommonBaseItems(existingItems, payload.items)};
     const safePayload = firestorePayloadService.prepare(mergedPayload, {rootPath:'$', maxBytes:900 * 1024});
@@ -6614,8 +6966,8 @@ async function syncCloud(manual=false){
       ...safePayload,
       updatedAt:firebaseFns.serverTimestamp(),
       updatedAtIso:new Date().toISOString(),
-      updatedBy:currentUser.uid,
-      updatedByEmail:currentUser.email,
+      updatedBy:syncUser.uid,
+      updatedByEmail:syncUser.email,
       updatedByClient:CLIENT_ID,
       itemsHash
     };
@@ -6623,15 +6975,22 @@ async function syncCloud(manual=false){
     // tout en conservant les autres clés legacy récupérées juste au-dessus.
     if(existingSnap.exists()) await firebaseFns.updateDoc(ref, cloudDocument);
     else await firebaseFns.setDoc(ref, cloudDocument);
+    if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     legacyManagedCloudItemsCleaned = true;
     lastCloudItemsHash = itemsHash;
     storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
     storage.clearPendingSync();
     updateCloudKpis();
     updateSyncState('Cloud synchronisé');
+    Promise.resolve(firebaseFns.waitForPendingWrites(db)).then(
+      () => syncStateService.confirm(syncOperationId, {module:'legacy-cloud-sync', token:syncAttempt}),
+      error => syncStateService.fail(syncOperationId, error, {module:'legacy-cloud-sync', token:syncAttempt})
+    );
     try{ loadingOperation?.end?.(); }catch(_error){}
     if(manual) notifySuccess('Synchronisation cloud OK.');
   }catch(e){
+    const failure = syncStateService.fail(syncOperationId, e, {module:'legacy-cloud-sync', token:syncAttempt});
+    if(failure.accepted === false){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     if(e?.name === 'FirestorePayloadError' && debugPerfEnabled()){
       console.error('[CoachPulse sync] Payload Firestore refusé avant écriture', {
         collection:'coachpulse_common_base', documentId:currentUser?.uid || '', operation:'setDoc', property:'items',
@@ -6800,6 +7159,7 @@ async function logout(){
   stopRealtimeSync();
   stopStaffProfileSubscription();
   currentUser = null; currentProfile = null;
+  notifyFramesAccessUpdated();
   clearSensitiveLocalData();
   storage.clearPendingSync();
   setLocked(true);

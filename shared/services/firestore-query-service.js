@@ -89,7 +89,9 @@
     chunks(ids, options.chunkSize || DEFAULT_CHUNK_SIZE).forEach(teamChunk => {
       fields.forEach(field => {
         const operator = field === 'teamId' ? 'in' : 'array-contains-any';
-        const queryRef = firebaseFns.query(firebaseFns.collection(db, collectionName), firebaseFns.where(field, operator, teamChunk));
+        const extraConstraints = (Array.isArray(options.extraConstraints) ? options.extraConstraints : [])
+          .map(([extraField, extraOperator, extraValue]) => firebaseFns.where(extraField, extraOperator, extraValue));
+        const queryRef = firebaseFns.query(firebaseFns.collection(db, collectionName), ...extraConstraints, firebaseFns.where(field, operator, teamChunk));
         reads.push(firebaseFns.getDocs(queryRef).catch(error => {
           const diagnostic = diagnosticContext(options, collectionName, ids, field, operator, teamChunk);
           if(typeof options.onError === 'function') options.onError(error, firestoreDiagnostic(error, diagnostic));
@@ -117,9 +119,79 @@
   function readSessionsByTeams(teamIds, options={}){ return scopedReader('sessions', teamIds, options); }
   function readAttendanceByTeams(teamIds, options={}){ return scopedReader('attendance', teamIds, options); }
 
+  async function readHomeDashboardSessionCandidates(teamIds, options={}){
+    const ids = cleanTeamIds(teamIds);
+    if(!ids.length) return [];
+    const {firebaseFns, db} = options;
+    if(!firebaseFns || !db) throw new Error('Connexion Firebase requise.');
+    const today = String(options.today || '').trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error('Date dashboard invalide.');
+    const pageSize = Math.max(1, Math.min(25, Number(options.pageSize) || 6));
+    const isEligible = typeof options.isEligible === 'function' ? options.isEligible : (() => true);
+    const directions = [
+      {name:'next', operator:'>=', order:'asc'},
+      {name:'last', operator:'<=', order:'desc'}
+    ];
+    const discriminators = [
+      {field:'createdFromPresenceModule', value:true},
+      {field:'source', value:'Présences'}
+    ];
+    const selected = [];
+
+    for(const direction of directions){
+      const streams = [];
+      chunks(ids, options.chunkSize || DEFAULT_CHUNK_SIZE).forEach(teamChunk => {
+        ['teamId','teamIds'].forEach(field => discriminators.forEach(discriminator => {
+          streams.push({teamChunk, field, discriminator, cursor:null, done:false, candidate:null});
+        }));
+      });
+      while(streams.some(stream => !stream.done && !stream.candidate)){
+        const active = streams.filter(stream => !stream.done && !stream.candidate);
+        await Promise.all(active.map(async stream => {
+          const teamOperator = stream.field === 'teamId' ? 'in' : 'array-contains-any';
+          const constraints = [
+            firebaseFns.where(stream.discriminator.field, '==', stream.discriminator.value),
+            firebaseFns.where(stream.field, teamOperator, stream.teamChunk),
+            firebaseFns.where('date', direction.operator, today),
+            firebaseFns.orderBy('date', direction.order)
+          ];
+          if(stream.cursor) constraints.push(firebaseFns.startAfter(stream.cursor));
+          constraints.push(firebaseFns.limit(pageSize));
+          const queryRef = firebaseFns.query(firebaseFns.collection(db, 'sessions'), ...constraints);
+          let snapshot;
+          try{ snapshot = await firebaseFns.getDocs(queryRef); }
+          catch(error){
+            const diagnostic = diagnosticContext(options, 'sessions', ids, stream.field, teamOperator, stream.teamChunk);
+            diagnostic.query = `${diagnostic.query}; where(${stream.discriminator.field}, ==, ${JSON.stringify(stream.discriminator.value)}); where(date, ${direction.operator}, ${today}); orderBy(date, ${direction.order}); limit(${pageSize})`;
+            error.coachPulseDiagnostic = diagnostic;
+            throw error;
+          }
+          const docs = [];
+          snapshot.forEach(item => docs.push(item));
+          const eligible = docs.map(item => options.mapDocument ? options.mapDocument(item) : documentRow(item)).find(isEligible);
+          if(eligible) stream.candidate = eligible;
+          if(docs.length < pageSize) stream.done = true;
+          else stream.cursor = docs[docs.length - 1];
+        }));
+      }
+      selected.push(...streams.map(stream => stream.candidate).filter(Boolean));
+    }
+    return [...new Map(selected.map(row => [String(row.id || row.sessionId || ''), row]).filter(([id]) => id)).values()];
+  }
+
+  async function readAttendanceForSessionByTeams(sessionId, teamIds, options={}){
+    const id = String(sessionId || '').trim();
+    if(!id) return [];
+    return readTeamScopedByIdOrIds('attendance', teamIds, {
+      ...options,
+      extraConstraints:[['sessionId', '==', id]]
+    });
+  }
+
   const service = {
     isCanonicalTeamId, cleanTeamIds, chunks, firestoreDiagnostic, reportFirestoreError, settleProfileReads, readTeamScopedByIdOrIds, readPlayerRosterByTeams,
-    readMatchesByTeams, readMatchEventsByTeams, readSessionsByTeams, readAttendanceByTeams
+    readMatchesByTeams, readMatchEventsByTeams, readSessionsByTeams, readAttendanceByTeams,
+    readHomeDashboardSessionCandidates, readAttendanceForSessionByTeams
   };
   global.CoachPulseFirestoreQueryService = service;
   if(typeof module !== 'undefined' && module.exports) module.exports = service;

@@ -43,6 +43,11 @@ async function main() {
         teamIds: ['team-u11-a'],
         allowedTeamIds: ['team-u11-a']
       });
+      await setDoc(doc(db, 'staff_members', 'foreignTeamStats'), {
+        status: 'ACTIVE', role: 'ENTRAINEUR_ADJOINT', permissionLevel: 'EDITEUR',
+        allowedModules: ['stats'], authorizedTeamIds: ['team-u13-a'],
+        teamIds: ['team-u13-a'], allowedTeamIds: ['team-u13-a']
+      });
       await setDoc(doc(db, 'staff_members', 'teamMedicalCoach'), {
         status: 'ACTIVE', role: 'ENTRAINEUR', permissionLevel: 'EDITEUR',
         allowedModules: ['medical', 'teamProfile'],
@@ -57,6 +62,10 @@ async function main() {
       await setDoc(doc(db, 'staff_members', 'editor'), {
         status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
         allowedModules: ['stats', 'presences', 'tests'], authorizedTeamIds: ['U11']
+      });
+      await setDoc(doc(db, 'staff_members', 'databaseEditor'), {
+        status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
+        allowedModules: ['database'], authorizedTeamIds: ['U11']
       });
       await setDoc(doc(db, 'staff_members', 'adminModuleEditor'), {
         status: 'ACTIVE', role: 'RESPONSABLE', permissionLevel: 'EDITEUR',
@@ -221,7 +230,7 @@ async function main() {
       });
       await setDoc(doc(db, 'sessions', 'real-session'), {
         sessionId: 'real-session', teamId: 'team-u11-a', teamIds: ['team-u11-a'],
-        source: 'Présences', createdFromPresenceModule: true
+        date: '2026-11-10', source: 'Présences', createdFromPresenceModule: true
       });
       await setDoc(doc(db, 'attendance', 'real-attendance'), {
         attendanceId: 'real-attendance', sessionId: 'real-session', playerId: 'real-team-id',
@@ -327,6 +336,36 @@ async function main() {
     });
 
     const db = environment.authenticatedContext('coach').firestore();
+    if (process.env.RULES_MATCH_EVENT_LOAD) {
+      const loadDb = environment.authenticatedContext('realAssistant').firestore();
+      for (const count of process.env.RULES_MATCH_EVENT_LOAD.split(',').map(Number)) {
+        const matchId = `load-match-${count}`;
+        const batch = writeBatch(loadDb);
+        batch.set(doc(loadDb, 'matches', matchId), {
+          matchId, teamId:'team-u11-a', teamIds:['team-u11-a'],
+          revision:1, eventsRevision:count > 0 ? 1 : 0, entryMode:'FULL_POST_MATCH'
+        });
+        for (let index = 0; index < count; index += 1) {
+          const eventId = `load-event-${count}-${index}`;
+          batch.set(doc(loadDb, 'matchEvents', eventId), {
+            eventId, matchId, teamId:'team-u11-a', teamIds:['team-u11-a']
+          });
+        }
+        try {
+          await batch.commit();
+          process.stdout.write(`MATCH_EVENT_LOAD ${count} PASS\n`);
+        } catch (error) {
+          process.stdout.write(`MATCH_EVENT_LOAD ${count} FAIL ${error.code || 'unknown'} ${String(error.message || '').includes('1000 expressions') ? 'EXPRESSION_LIMIT' : 'OTHER'}\n`);
+        }
+      }
+      return;
+    }
+    if (process.env.RULES_MATCH_AUTHORIZED_READ_ONLY === '1') {
+      process.stdout.write('Checking matches authorized read\n');
+      await assertSucceeds(getDoc(doc(db, 'matches', 'mU11')));
+      process.stdout.write('Match authorized read check passed\n');
+      return;
+    }
     for (const [collection, prefix] of [
       ['players', 'p'], ['matches', 'm'], ['sessions', 's'], ['matchEvents', 'e'],
       ['attendance', 'a'], ['technicalTests', 't'], ['injuries', 'i']
@@ -344,7 +383,9 @@ async function main() {
     const assistantDb = environment.authenticatedContext('assistant').firestore();
     const statsAssistantDb = environment.authenticatedContext('statsAssistant').firestore();
     const realAssistantDb = environment.authenticatedContext('realAssistant').firestore();
+    const foreignTeamStatsDb = environment.authenticatedContext('foreignTeamStats').firestore();
     const editorDb = environment.authenticatedContext('editor').firestore();
+    const databaseEditorDb = environment.authenticatedContext('databaseEditor').firestore();
     const adminModuleEditorDb = environment.authenticatedContext('adminModuleEditor').firestore();
     const editorNoModulesDb = environment.authenticatedContext('editorNoModules').firestore();
     const editorEmptyModulesDb = environment.authenticatedContext('editorEmptyModules').firestore();
@@ -520,11 +561,27 @@ async function main() {
       assertSucceeds(getDocs(query(collection(realAssistantDb, 'sessions'), where('source', '==', 'Présences'), where('teamIds', 'array-contains-any', ['team-u11-a']))))
     ]);
     assert.deepEqual([...mergeSnapshots(realSessionSnapshots).keys()], ['real-session']);
+    process.stdout.write('Checking bounded home dashboard session queries\n');
+    await Promise.all([
+      assertSucceeds(getDocs(query(
+        collection(realAssistantDb, 'sessions'), where('createdFromPresenceModule', '==', true),
+        where('teamId', 'in', ['team-u11-a']), where('date', '>=', '2026-11-10'), orderBy('date', 'asc'), limit(6)
+      ))),
+      assertSucceeds(getDocs(query(
+        collection(realAssistantDb, 'sessions'), where('source', '==', 'Présences'),
+        where('teamIds', 'array-contains-any', ['team-u11-a']), where('date', '<=', '2026-11-10'), orderBy('date', 'desc'), limit(6)
+      )))
+    ]);
+    await assertFails(getDocs(query(collection(realAssistantDb, 'sessions'), where('createdFromPresenceModule', '==', true), where('teamId', 'in', ['team-u13-a']), where('date', '>=', '2026-11-10'), orderBy('date', 'asc'), limit(6))));
     const realAttendanceSnapshots = await Promise.all([
       assertSucceeds(getDocs(query(collection(realAssistantDb, 'attendance'), where('teamId', 'in', ['team-u11-a'])))),
       assertSucceeds(getDocs(query(collection(realAssistantDb, 'attendance'), where('teamIds', 'array-contains-any', ['team-u11-a']))))
     ]);
     assert.deepEqual([...mergeSnapshots(realAttendanceSnapshots).keys()].sort(), ['real-attendance', 'real-attendance-history']);
+    await Promise.all([
+      assertSucceeds(getDocs(query(collection(realAssistantDb, 'attendance'), where('sessionId', '==', 'real-session'), where('teamId', 'in', ['team-u11-a'])))),
+      assertSucceeds(getDocs(query(collection(realAssistantDb, 'attendance'), where('sessionId', '==', 'real-session'), where('teamIds', 'array-contains-any', ['team-u11-a']))))
+    ]);
 
     await assertSucceeds(getDocs(query(collection(realAssistantDb, 'teams'), where(documentId(), 'in', ['team-u11-a']))));
     await assertFails(getDocs(query(collection(realAssistantDb, 'players'), where('playerId', 'in', ['real-team-id']))));
@@ -629,8 +686,85 @@ async function main() {
     process.stdout.write('Checking editor and admin writes\n');
     await assertSucceeds(setDoc(doc(editorDb, 'technicalTests', 'editorTest'), {testId: 'editorTest', playerId: 'pU11'}));
     await assertSucceeds(setDoc(doc(adminDb, 'matches', 'adminMatch'), {matchId: 'adminMatch', teamId: 'U13'}));
+    process.stdout.write('Checking player management permissions and team isolation\n');
+    await environment.withSecurityRulesDisabled(async context => {
+      const seedDb = context.firestore();
+      for (const [playerId, teamId] of [
+        ['pDeleteSaisie', 'U11'], ['pDeleteTestsEditor', 'U11'],
+        ['pDeleteDatabaseEditor', 'U11'], ['pDeleteForeign', 'U13'],
+        ['pDeleteAdmin', 'U13']
+      ]) {
+        await setDoc(doc(seedDb, 'players', playerId), {playerId, teamId, status: 'ACTIVE'});
+      }
+    });
+    await assertFails(deleteDoc(doc(db, 'players', 'pDeleteSaisie')));
+    await assertFails(deleteDoc(doc(allPlayersDb, 'players', 'pDeleteForeign')));
+    await assertFails(deleteDoc(doc(editorDb, 'players', 'pDeleteTestsEditor')));
+    await assertFails(deleteDoc(doc(databaseEditorDb, 'players', 'pDeleteForeign')));
+    await assertSucceeds(deleteDoc(doc(databaseEditorDb, 'players', 'pDeleteDatabaseEditor')));
+    await assertSucceeds(deleteDoc(doc(adminDb, 'players', 'pDeleteAdmin')));
     process.stdout.write('Checking authorized match update\n');
     await assertSucceeds(setDoc(doc(db, 'matches', 'mU11'), {score: '1-0'}, {merge:true}));
+    process.stdout.write('Checking scoped first match creation\n');
+    assert.equal((await assertSucceeds(getDoc(doc(realAssistantDb, 'matches', 'new-real-empty')))).exists(), false);
+    await assertFails(getDoc(doc(readerDb, 'matches', 'new-reader-empty')));
+    await assertFails(getDoc(doc(realAssistantDb, 'matches', 'mU13')));
+    await assertSucceeds(setDoc(doc(realAssistantDb, 'matches', 'new-real-no-events'), {
+      matchId:'new-real-no-events', teamId:'team-u11-a', teamIds:['team-u11-a'],
+      revision:1, eventsRevision:0, entryMode:'FULL_POST_MATCH'
+    }));
+    await assertFails(setDoc(doc(realAssistantDb, 'matches', 'new-real-foreign'), {
+      matchId:'new-real-foreign', teamId:'team-u13-a', teamIds:['team-u13-a'],
+      revision:1, eventsRevision:0, entryMode:'FULL_POST_MATCH'
+    }));
+    const firstMatchWithEvents = writeBatch(realAssistantDb);
+    firstMatchWithEvents.set(doc(realAssistantDb, 'matches', 'new-real-with-events'), {
+      matchId:'new-real-with-events', teamId:'team-u11-a', teamIds:['team-u11-a'],
+      revision:1, eventsRevision:1, entryMode:'FULL_POST_MATCH'
+    });
+    firstMatchWithEvents.set(doc(realAssistantDb, 'matchEvents', 'new-real-event'), {
+      eventId:'new-real-event', matchId:'new-real-with-events', teamId:'team-u11-a', teamIds:['team-u11-a']
+    });
+    await assertSucceeds(firstMatchWithEvents.commit());
+    const mismatchedFirstEvent = writeBatch(realAssistantDb);
+    mismatchedFirstEvent.set(doc(realAssistantDb, 'matches', 'new-real-mismatch'), {
+      matchId:'new-real-mismatch', teamId:'team-u11-a', teamIds:['team-u11-a'], revision:1, eventsRevision:1
+    });
+    mismatchedFirstEvent.set(doc(realAssistantDb, 'matchEvents', 'new-real-mismatch-event'), {
+      eventId:'new-real-mismatch-event', matchId:'other-match', teamId:'team-u11-a', teamIds:['team-u11-a']
+    });
+    await assertFails(mismatchedFirstEvent.commit());
+    const wrongTeamFirstEvent = writeBatch(realAssistantDb);
+    wrongTeamFirstEvent.set(doc(realAssistantDb, 'matches', 'new-real-wrong-event-team'), {
+      matchId:'new-real-wrong-event-team', teamId:'team-u11-a', teamIds:['team-u11-a'], revision:1, eventsRevision:1
+    });
+    wrongTeamFirstEvent.set(doc(realAssistantDb, 'matchEvents', 'new-real-wrong-event-team-event'), {
+      eventId:'new-real-wrong-event-team-event', matchId:'new-real-wrong-event-team', teamId:'team-u13-a', teamIds:['team-u13-a']
+    });
+    await assertFails(wrongTeamFirstEvent.commit());
+    const noStatsFirstEvent = writeBatch(assistantDb);
+    noStatsFirstEvent.set(doc(assistantDb, 'matches', 'new-no-stats-match'), {
+      matchId:'new-no-stats-match', teamId:'U11', teamIds:['U11'], revision:1, eventsRevision:1
+    });
+    noStatsFirstEvent.set(doc(assistantDb, 'matchEvents', 'new-no-stats-event'), {
+      eventId:'new-no-stats-event', matchId:'new-no-stats-match', teamId:'U11', teamIds:['U11']
+    });
+    await assertFails(noStatsFirstEvent.commit());
+    const unauthenticatedDb = environment.unauthenticatedContext().firestore();
+    const unauthenticatedFirstEvent = writeBatch(unauthenticatedDb);
+    unauthenticatedFirstEvent.set(doc(unauthenticatedDb, 'matches', 'new-unauthenticated-match'), {
+      matchId:'new-unauthenticated-match', teamId:'team-u11-a', teamIds:['team-u11-a'], revision:1, eventsRevision:1
+    });
+    unauthenticatedFirstEvent.set(doc(unauthenticatedDb, 'matchEvents', 'new-unauthenticated-event'), {
+      eventId:'new-unauthenticated-event', matchId:'new-unauthenticated-match', teamId:'team-u11-a', teamIds:['team-u11-a']
+    });
+    await assertFails(unauthenticatedFirstEvent.commit());
+    await assertFails(setDoc(doc(realAssistantDb, 'matchEvents', 'new-event-without-match'), {
+      eventId:'new-event-without-match', matchId:'missing-match', teamId:'team-u11-a', teamIds:['team-u11-a']
+    }));
+    await assertSucceeds(setDoc(doc(adminDb, 'matches', 'new-admin-match'), {
+      matchId:'new-admin-match', teamId:'team-u13-a', teamIds:['team-u13-a'], revision:1, eventsRevision:0
+    }));
     process.stdout.write('Checking missing match event reads in atomic first-match transactions\n');
     const createFirstMatchInTransaction = (transactionDb, suffix, eventCount, overrides = {}) => runTransaction(transactionDb, async transaction => {
       const matchId = `transaction-match-${suffix}`;
@@ -654,7 +788,7 @@ async function main() {
     for (const eventCount of [0, 1, 20]) {
       await assertSucceeds(createFirstMatchInTransaction(realAssistantDb, `allowed-${eventCount}`, eventCount));
     }
-    const unauthenticatedDb = environment.unauthenticatedContext().firestore();
+    await assertFails(createFirstMatchInTransaction(foreignTeamStatsDb, 'foreign-team-rights', 1));
     for (const [label, deniedDb] of [
       ['unauthenticated', unauthenticatedDb], ['inactive', inactiveDb],
       ['reader', readerDb], ['without-stats', assistantDb]
@@ -672,6 +806,29 @@ async function main() {
     }));
     await assertFails(createFirstMatchInTransaction(realAssistantDb, 'mismatched-team', 1, {
       eventTeamId:'team-u13-a'
+    }));
+    await assertFails(runTransaction(realAssistantDb, async transaction => {
+      const eventRef = doc(realAssistantDb, 'matchEvents', 'transaction-event-missing-match-write');
+      assert.equal((await transaction.get(eventRef)).exists(), false);
+      transaction.set(eventRef, {
+        eventId:eventRef.id, matchId:'transaction-match-not-written',
+        teamId:'team-u11-a', teamIds:['team-u11-a']
+      });
+    }));
+    await assertFails(runTransaction(realAssistantDb, async transaction => {
+      const validEventRef = doc(realAssistantDb, 'matchEvents', 'transaction-event-mixed-valid');
+      const invalidEventRef = doc(realAssistantDb, 'matchEvents', 'transaction-event-mixed-invalid');
+      await Promise.all([transaction.get(validEventRef), transaction.get(invalidEventRef)]);
+      transaction.set(doc(realAssistantDb, 'matches', 'transaction-match-mixed'), {
+        matchId:'transaction-match-mixed', teamId:'team-u11-a', teamIds:['team-u11-a'],
+        revision:1, eventsRevision:1
+      });
+      transaction.set(validEventRef, {
+        eventId:validEventRef.id, matchId:'transaction-match-mixed', teamId:'team-u11-a', teamIds:['team-u11-a']
+      });
+      transaction.set(invalidEventRef, {
+        eventId:invalidEventRef.id, matchId:'transaction-match-mixed', teamId:'team-u13-a', teamIds:['team-u13-a']
+      });
     }));
     await assertFails(createFirstMatchInTransaction(realAssistantDb, 'missing-match', 1, {
       eventMatchId:'absent-match'
