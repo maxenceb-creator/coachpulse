@@ -48,6 +48,22 @@ const incomplete = reconciliation.technicalSettledReadSummary(
 assert.equal(incomplete.complete, false, 'Une requête secondaire échouée doit invalider la preuve de lecture complète.');
 assert.equal(incomplete.error, secondaryFailure);
 
+const sharedCopy = row('shared', 7, {comment:'identique'});
+const crossSourceCandidates = reconciliation.technicalDeduplicateCrossSource(
+  [sharedCopy, row('historical-duplicate', 8), row('historical-duplicate', 8)],
+  [{...sharedCopy}, row('local-only', 9)]
+);
+assert.equal(crossSourceCandidates.length, 4);
+assert.equal(crossSourceCandidates.filter(item => item.technicalTestId === 'historical-duplicate').length, 2);
+assert.equal(reconciliation.technicalLegacyValueUnchanged(
+  {coachStatsV13Rows:'original', concurrentModule:{kept:true}},
+  {confirmed:true, originalLegacyValue:'original'}
+), true);
+assert.equal(reconciliation.technicalLegacyValueUnchanged(
+  {coachStatsV13Rows:'concurrent-change'},
+  {confirmed:true, originalLegacyValue:'original'}
+), false, 'Une modification concurrente de la clé legacy doit imposer une nouvelle preuve.');
+
 const historical = [
   row('history', 10, {reconciliationSourceId:'history'}),
   row('history', 12, {reconciliationSourceId:'history'})
@@ -59,6 +75,8 @@ assert.equal(
   'Une ligne cloud fusionnée ne doit pas masquer la perte d’un enregistrement historique.'
 );
 assert.equal(reconciliation.technicalLegacyReconciliationPlan([row('deleted', 12)], [], ['deleted']).confirmed, true);
+assert.equal(reconciliation.technicalLegacyReconciliationPlan([row('business', 12, {comment:'A'})], [row('business', 12, {comment:'B'})]).confirmed, false);
+assert.equal(reconciliation.technicalLegacyReconciliationPlan([row('business', 12, {objectifs:{max_pfp:20}})], [row('business', 12, {objectifs:{max_pfp:25}})]).confirmed, false);
 
 const remaining = reconciliation.technicalRowsWithoutTombstones(
   [row('active', 1), row('inline-deleted', 2, {deleted:true}), row('cached', 3)],
@@ -74,19 +92,53 @@ vm.runInContext(`${sourceFunction(pageSource, 'rowFinalized')};${sourceFunction(
 assert.equal(pageContext.rowFinalized(row('deleted', 2, {deleted:true})), false);
 assert.deepEqual(Array.from(pageContext.localRows(), item => item.technicalTestId), ['active']);
 
-const reconcileContext = vm.createContext({
-  Error,
-  Array,
-  technicalCloudReadComplete:false,
-  technicalLegacyCloudItemConfirmed:false,
-  localTechnicalPayload:() => [row('legacy', 4)],
-  technicalListData:async () => [],
-  listPlayers:async () => { throw new Error('ne doit pas être appelée'); }
-});
-vm.runInContext(sourceBetween(appSource, 'async function reconcileLegacyTechnicalTests', 'async function technicalListData'), reconcileContext);
-assert.rejects(
-  () => reconcileContext.reconcileLegacyTechnicalTests({coachStatsV13Rows:JSON.stringify([row('legacy', 4)])}),
-  error => error.name === 'TechnicalTestsReconciliationError' && error.unresolved?.[0]?.reason === 'incomplete-read'
-);
-
-console.log('Technical tests sync behavioral scenarios passed.');
+(async () => {
+  const reconcileContext = vm.createContext({
+    Error, Array, JSON, Map, Set, Object,
+    currentUser:{uid:'uid-a'},
+    technicalRowStorageId:source => String(source.technicalTestId || source.testId || source.id || ''),
+    technicalAccessScopeKey:() => 'team-a',
+    localTechnicalPayload:() => [row('legacy', 4)],
+    technicalListData:async () => [],
+    listPlayers:async () => { throw new Error('ne doit pas être appelée'); }
+  });
+  vm.runInContext(sourceBetween(appSource, 'function technicalReconciliationFingerprint', 'async function reconcileLegacyTechnicalTests'), reconcileContext);
+  vm.runInContext(sourceBetween(appSource, 'async function reconcileLegacyTechnicalTests', 'function technicalAccessScopeKey'), reconcileContext);
+  await assert.rejects(
+    () => reconcileContext.reconcileLegacyTechnicalTests({coachStatsV13Rows:JSON.stringify([row('legacy', 4)])}, {uid:'uid-a', scope:'team-a'}),
+    error => error.name === 'TechnicalTestsReconciliationError' && error.unresolved?.[0]?.reason === 'incomplete-read'
+  );
+  await assert.rejects(
+    () => reconcileContext.reconcileLegacyTechnicalTests({coachStatsV13Rows:'{invalid-json'}, {uid:'uid-a', scope:'team-a'}),
+    error => error.name === 'TechnicalTestsReconciliationError' && error.unresolved?.[0]?.reason === 'invalid-json'
+  );
+  await assert.rejects(
+    () => reconcileContext.reconcileLegacyTechnicalTests({coachStatsV13Rows:{not:'an array'}}, {uid:'uid-a', scope:'team-a'}),
+    error => error.name === 'TechnicalTestsReconciliationError' && error.unresolved?.[0]?.reason === 'unexpected-type'
+  );
+  let serverReadCount = 0;
+  reconcileContext.technicalListData = async filters => {
+    serverReadCount += 1;
+    filters.reconciliationProof({uid:'uid-b', scope:'team-a', complete:true, serverConfirmed:true, hasPendingWrites:false, rows:[], deletedIds:[]});
+  };
+  await assert.rejects(
+    () => reconcileContext.reconcileLegacyTechnicalTests({coachStatsV13Rows:JSON.stringify([row('legacy', 4)])}, {uid:'uid-a', scope:'team-a'}),
+    error => error.name === 'TechnicalTestsReconciliationError' && error.unresolved?.[0]?.reason === 'incomplete-read'
+  );
+  assert.equal(serverReadCount, 1);
+  for(const unsafeProof of [
+    {uid:'uid-a', scope:'team-a', complete:true, serverConfirmed:false, hasPendingWrites:false, rows:[], deletedIds:[]},
+    {uid:'uid-a', scope:'team-a', complete:true, serverConfirmed:true, hasPendingWrites:true, rows:[], deletedIds:[]},
+    {uid:'uid-a', scope:'team-b', complete:true, serverConfirmed:true, hasPendingWrites:false, rows:[], deletedIds:[]}
+  ]){
+    reconcileContext.technicalListData = async filters => filters.reconciliationProof(unsafeProof);
+    await assert.rejects(
+      () => reconcileContext.reconcileLegacyTechnicalTests({coachStatsV13Rows:JSON.stringify([row('legacy', 4)])}, {uid:'uid-a', scope:'team-a'}),
+      error => error.name === 'TechnicalTestsReconciliationError' && error.unresolved?.[0]?.reason === 'incomplete-read'
+    );
+  }
+  const absent = await reconcileContext.reconcileLegacyTechnicalTests({}, {uid:'uid-a', scope:'team-a'});
+  assert.equal(absent.skipped, true);
+  assert.equal(serverReadCount, 1, 'La collection technique ne doit pas être relue si la clé legacy cloud est absente.');
+  console.log('Technical tests sync behavioral scenarios passed.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

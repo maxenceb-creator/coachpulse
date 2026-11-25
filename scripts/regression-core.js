@@ -1524,11 +1524,12 @@ function testFirestorePayloadBoundary(){
   assert(appSource.includes("key.startsWith('firestore_')"), 'Les clés internes IndexedDB/Firestore ne doivent jamais être sauvegardées comme données métier.');
   assert(appSource.includes("'presenceSeanceV3_6_Excel',\n  'coachpulse:presenceEvents:v1'"), 'Le fichier Présences historique et le cache moderne doivent être gérés hors du document agrégé.');
   assert(appSource.includes("'coachStatsV170',"), 'L’état Match doit être géré par matches/matchEvents et exclu du document agrégé.');
-  assert(appSource.includes('items:mergedCommonBaseItems(existingItems, payload.items)'), 'La map common_base doit être reconstruite sans les copies déjà normalisées.');
+  assert(appSource.includes('items:mergedCommonBaseItems(latestItems, payload.items'), 'La map common_base doit être reconstruite depuis la dernière version relue en transaction.');
   assert(appSource.includes('!FIRESTORE_MANAGED_LOCAL_KEYS.has(k)'), 'Une ancienne copie cloud ne doit pas réinjecter un état métier géré par collection.');
   assert(appSource.includes('|| FIRESTORE_MANAGED_LOCAL_KEYS.has(key)'), 'Les données déjà fractionnées dans les collections centrales doivent être exclues de common_base.');
   assert(!appSource.includes('PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS'), 'Aucune exception ne doit réinjecter les données Présences dans le document Firestore unique.');
-  assert(appSource.includes('firebaseFns.updateDoc(ref, cloudDocument)'), 'Un document existant doit remplacer sa map items afin de réellement retirer les copies normalisées volumineuses.');
+  assert(appSource.includes('firebaseFns.runTransaction(db, async transaction =>'), 'La base commune doit être relue et modifiée atomiquement.');
+  assert(appSource.includes('transaction.update(ref, cloudDocument)'), 'Un document existant doit remplacer sa map items dans la transaction afin de retirer les copies normalisées volumineuses.');
   assert(appSource.includes("e?.name === 'FirestorePayloadError' && debugPerfEnabled()"), 'Le diagnostic détaillé doit rester réservé au mode debug.');
   assert(appSource.includes("collection:'coachpulse_common_base'"), 'Le diagnostic doit identifier la collection exacte.');
 }
