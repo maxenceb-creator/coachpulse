@@ -84,6 +84,42 @@ const remaining = reconciliation.technicalRowsWithoutTombstones(
 );
 assert.deepEqual(remaining.map(item => item.technicalTestId), ['active']);
 
+const syncGuardContext = vm.createContext({
+  Error,
+  currentUser:{uid:'uid-a'},
+  currentScope:'team-a',
+  technicalAccessScopeKey(){ return this.currentScope; },
+  syncStateService:{isCurrent:() => true}
+});
+vm.runInContext(sourceBetween(appSource, 'function assertSyncCloudAttemptCurrent', 'async function syncCloud'), syncGuardContext);
+
+async function simulateGuardedTransaction(context, changeIdentity){
+  const writes = [];
+  const transaction = {
+    async get(){
+      changeIdentity(context);
+      return {exists:() => true};
+    },
+    update(){ writes.push('update'); }
+  };
+  await assert.rejects(async () => {
+    context.assertSyncCloudAttemptCurrent('attempt-a', 'uid-a', 'team-a');
+    await transaction.get();
+    context.assertSyncCloudAttemptCurrent('attempt-a', 'uid-a', 'team-a');
+    transaction.update();
+  }, error => error.name === 'SyncCloudAttemptChangedError');
+  assert.deepEqual(writes, [], 'Un changement de compte ou de périmètre après transaction.get() doit interrompre la tentative sans écriture.');
+}
+
+const syncScopeGuardContext = vm.createContext({
+  Error,
+  currentUser:{uid:'uid-a'},
+  currentScope:'team-a',
+  technicalAccessScopeKey(){ return this.currentScope; },
+  syncStateService:{isCurrent:() => true}
+});
+vm.runInContext(sourceBetween(appSource, 'function assertSyncCloudAttemptCurrent', 'async function syncCloud'), syncScopeGuardContext);
+
 const pageContext = vm.createContext({
   storageJson:() => [row('active', 1), row('deleted', 2, {deleted:true})],
   TECHNICAL_ROWS_KEY:'coachStatsV13Rows'
@@ -93,6 +129,8 @@ assert.equal(pageContext.rowFinalized(row('deleted', 2, {deleted:true})), false)
 assert.deepEqual(Array.from(pageContext.localRows(), item => item.technicalTestId), ['active']);
 
 (async () => {
+  await simulateGuardedTransaction(syncGuardContext, context => { context.currentUser = {uid:'uid-b'}; });
+  await simulateGuardedTransaction(syncScopeGuardContext, context => { context.currentScope = 'team-b'; });
   const reconcileContext = vm.createContext({
     Error, Array, JSON, Map, Set, Object,
     currentUser:{uid:'uid-a'},

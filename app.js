@@ -7136,6 +7136,14 @@ function instrumentCentralDataBoundaries(){
   });
 }
 instrumentCentralDataBoundaries();
+function assertSyncCloudAttemptCurrent(syncAttempt, syncUid, syncScope){
+  const currentUid = currentUser?.uid || null;
+  const currentScope = technicalAccessScopeKey();
+  if(syncStateService.isCurrent(syncAttempt) && currentUid === syncUid && currentScope === syncScope) return;
+  const error = new Error('Le compte ou le périmètre utilisateur a changé pendant la synchronisation.');
+  error.name = 'SyncCloudAttemptChangedError';
+  throw error;
+}
 async function syncCloud(manual=false){
   if(applyingCloud) return;
   const syncUid = currentUser?.uid || null;
@@ -7148,6 +7156,7 @@ async function syncCloud(manual=false){
   }
   if(!db || !currentUser) return updateSyncState('Connexion staff requise');
   const syncUser = currentUser;
+  const syncScope = technicalAccessScopeKey();
   const cloudSyncDiagnostic = {function:'syncCloud', module:'cloud', scope:'user', collection:'coachpulse_common_base', operation:'write'};
   const loadingOperation = safeLoadingCall('start', ['cloud:sync', {kind:'sync', diagnostic:cloudSyncDiagnostic}]);
   let syncAttempt = null;
@@ -7160,11 +7169,13 @@ async function syncCloud(manual=false){
     const existingSnap = await firebaseFns.getDocFromServer(ref);
     if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     const existingItems = existingSnap.exists() ? existingSnap.data()?.items : {};
-    const reconciliation = await reconcileLegacyTechnicalTests(existingItems, {uid:syncUser.uid, scope:technicalAccessScopeKey(), token:syncAttempt});
+    const reconciliation = await reconcileLegacyTechnicalTests(existingItems, {uid:syncUser.uid, scope:syncScope, token:syncAttempt});
     if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     let itemsHash = '';
     await firebaseFns.runTransaction(db, async transaction => {
+      assertSyncCloudAttemptCurrent(syncAttempt, syncUser.uid, syncScope);
       const latestSnap = await transaction.get(ref);
+      assertSyncCloudAttemptCurrent(syncAttempt, syncUser.uid, syncScope);
       const latestItems = latestSnap.exists() ? latestSnap.data()?.items || {} : {};
       if(!technicalLegacyValueUnchanged(latestItems, reconciliation)){
         const error = new Error('La base commune a changé pendant la réconciliation. Une nouvelle vérification est requise.');
@@ -7183,6 +7194,7 @@ async function syncCloud(manual=false){
         updatedByClient:CLIENT_ID,
         itemsHash
       };
+      assertSyncCloudAttemptCurrent(syncAttempt, syncUser.uid, syncScope);
       if(latestSnap.exists()) transaction.update(ref, cloudDocument);
       else transaction.set(ref, cloudDocument);
     });
