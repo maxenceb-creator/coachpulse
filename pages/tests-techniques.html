@@ -101,10 +101,10 @@ function technicalRowIds(row={},fallback=''){return uniqueTextList([row.draftId,
 function technicalRowId(row={},fallback=''){return technicalRowIds(row,fallback)[0]||'';}
 function technicalRowMatches(row={},testId=''){const target=String(testId||'').trim();return !!target&&technicalRowIds(row).includes(target);}
 function normalizePendingTechnicalRow(row={}){const draftId=technicalRowId(row)||`draft-${Date.now()}-${row.playerId||row.joueuse||'test'}`;return {...row,draftId,id:String(row.id||draftId).startsWith('draft-')?draftId:(row.id||draftId),finalized:false,status:'draft'};}
-function rowFinalized(row={}){return !(row.finalized===false||row.status==='draft'||row.status==='pending');}
+function rowFinalized(row={}){return row.deleted!==true&&!(row.finalized===false||row.status==='draft'||row.status==='pending');}
 function rowDisplayName(row={}){return playerById(row.playerId)?.label||row.playerName||playerById(row.joueuse)?.label||row?.playerSnapshot?.displayName||row.joueuse||'Joueuse';}
 
-function localRows(){return storageJson(TECHNICAL_ROWS_KEY,[])}
+function localRows(){return storageJson(TECHNICAL_ROWS_KEY,[]).filter(row=>row?.deleted!==true)}
 	function setLocalRows(rows){storageSetJson(TECHNICAL_ROWS_KEY,rows);resetTechnicalRowsCache();}
 function pendingRows(){return storageJson(TECHNICAL_PENDING_ROWS_KEY,[])}
 function setPendingRows(rows){storageSetJson(TECHNICAL_PENDING_ROWS_KEY,rows);storageSetJson(TECHNICAL_PENDING_BACKUP_KEY,rows);resetTechnicalRowsCache();}
