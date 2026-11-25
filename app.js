@@ -61,6 +61,7 @@ const FIRESTORE_MANAGED_LOCAL_KEYS = new Set([
   'coachpulse:centralPlayers',
   'coachpulse:athleticTests',
   'coachpulse:medicalData',
+  'coachStatsV13Rows',
   'coachpulse:technicalPlayerFootHints'
 ]);
 const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
@@ -72,7 +73,7 @@ const CLOUD_SYNC_LOCAL_ONLY_KEYS = new Set([
 const DATA_CACHE_TTL_MS = 5 * 60 * 1000;
 const CLOUD_PLAYERS_REFRESH_THROTTLE_MS = 30 * 1000;
 const APP_SHELL_CACHE_PREFIX = 'coachpulse-';
-const APP_SHELL_VERSION = '20261015-release-v94';
+const APP_SHELL_VERSION = '20261125-technical-tests-sync-hotfix-v95';
 const APP_SHELL_VERSION_KEY = 'coachpulse:appShellVersion';
 const APP_SHELL_REFRESH_KEY = 'coachpulse:appShellRefreshVersion';
 const appDataCache = {
@@ -85,6 +86,9 @@ const appDataCache = {
 };
 let technicalPlayerFootHintsCache = null;
 let legacyManagedCloudItemsCleaned = false;
+let technicalLegacyCloudItemConfirmed = false;
+let technicalCloudRowsById = new Map();
+let technicalCloudDeletedIds = new Set();
 const HOME_TEAM_SELECTION_KEY = 'coachpulse:home:selectedTeamId';
 let homeDashboardRequestId = 0;
 let centralPlayersRefreshPending = null;
@@ -1492,7 +1496,8 @@ function buildBoundedAutoBackupPayload(payload, maxBytes=AUTO_BACKUP_MAX_BYTES){
 function mergedCommonBaseItems(existingItems={}, localItems={}){
   const preserved = {};
   Object.entries(existingItems && typeof existingItems === 'object' ? existingItems : {}).forEach(([key, value]) => {
-    if(!FIRESTORE_MANAGED_LOCAL_KEYS.has(key) && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(key)) preserved[key] = value;
+    if(key === 'coachStatsV13Rows' && !technicalLegacyCloudItemConfirmed) preserved[key] = value;
+    else if(!FIRESTORE_MANAGED_LOCAL_KEYS.has(key) && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(key)) preserved[key] = value;
   });
   return {...preserved, ...(localItems || {})};
 }
@@ -4636,7 +4641,9 @@ function localTechnicalPayload(){
   return parseStoredJson('coachStatsV13Rows', []);
 }
 function saveLocalTechnicalPayload(payload){
-  return setLocalStorageWithQuotaRecovery('coachStatsV13Rows', JSON.stringify(Array.isArray(payload) ? payload : []));
+  const stored = setLocalStorageWithQuotaRecovery('coachStatsV13Rows', JSON.stringify(Array.isArray(payload) ? payload : []));
+  if(stored === false) throw new Error('Sauvegarde locale des tests techniques impossible. Les données cloud n’ont pas été modifiées.');
+  return stored;
 }
 function athleticRowStorageId(row={}, fallback=''){
   return String(row.physicalTestId || row.testId || row.id || fallback || '').trim();
@@ -5856,6 +5863,56 @@ function normalizeTechnicalRows(rawRows=[], players=[]){
   });
   return [...grouped.values()].sort((a,b) => String(a.date || '').localeCompare(String(b.date || '')));
 }
+function technicalReconciliationFingerprint(row={}){
+  const tests = Object.fromEntries(Object.entries(row.tests || {}).filter(([, value]) => value !== '' && value != null).sort(([left], [right]) => left.localeCompare(right)));
+  return JSON.stringify({
+    playerId:String(row.playerId || row.joueuse || '').trim(),
+    date:String(row.date || '').trim(),
+    season:String(row.season || row.saison || '').trim(),
+    teamId:String(row.teamId || '').trim(),
+    tests
+  });
+}
+function technicalLegacyReconciliationPlan(legacyRows=[], cloudRows=[], deletedIds=[]){
+  const cloudById = new Map(cloudRows.map(row => [technicalRowStorageId(row), row]));
+  const deleted = new Set(deletedIds);
+  const unresolved = [];
+  legacyRows.forEach(row => {
+    const id = technicalRowStorageId(row);
+    if(deleted.has(id)) return;
+    const cloud = cloudById.get(id);
+    if(!cloud) unresolved.push({id:id || 'unknown', reason:'legacy-only'});
+    else if(technicalReconciliationFingerprint(cloud) !== technicalReconciliationFingerprint(row)) unresolved.push({id, reason:'conflict'});
+  });
+  return {confirmed:unresolved.length === 0, total:legacyRows.length, unresolved};
+}
+async function reconcileLegacyTechnicalTests(existingItems={}){
+  technicalLegacyCloudItemConfirmed = false;
+  let legacyRaw = existingItems?.coachStatsV13Rows;
+  if(typeof legacyRaw === 'string'){
+    try{ legacyRaw = JSON.parse(legacyRaw); }catch(_error){ legacyRaw = null; }
+  }
+  if(!Array.isArray(legacyRaw)) legacyRaw = [];
+  const localRaw = localTechnicalPayload();
+  const candidatesRaw = [...legacyRaw, ...localRaw];
+  if(!candidatesRaw.length){
+    technicalLegacyCloudItemConfirmed = true;
+    return {confirmed:true, total:0, unresolved:[]};
+  }
+  await technicalListData({season:'all', forceRefresh:true});
+  const players = await listPlayers({season:'all', includeArchived:true, moduleId:'tests'});
+  const legacyRows = normalizeTechnicalRows(candidatesRaw, players).filter(technicalRowIsFinalized);
+  const unresolved = [];
+  unresolved.push(...technicalLegacyReconciliationPlan(legacyRows, [...technicalCloudRowsById.values()], technicalCloudDeletedIds).unresolved);
+  technicalLegacyCloudItemConfirmed = unresolved.length === 0;
+  if(!technicalLegacyCloudItemConfirmed){
+    const error = new Error(`Réconciliation des tests techniques incomplète (${unresolved.length} élément(s)). La copie legacy est conservée.`);
+    error.name = 'TechnicalTestsReconciliationError';
+    error.unresolved = unresolved;
+    throw error;
+  }
+  return {confirmed:true, total:legacyRows.length, unresolved:[]};
+}
 async function technicalListData(filters={}){
   return measureAsync('technicalListData', async () => {
     if(!guardTechnical('read')){
@@ -5934,9 +5991,13 @@ async function technicalListData(filters={}){
       try{
         const scopedRead = await readScopedTechnicalTests();
         const scopedRows = scopedRead.rows;
-        scopedRows.forEach(row => {
+        technicalCloudDeletedIds = new Set(scopedRows.filter(row => row.deleted === true).map(row => technicalRowStorageId(row)).filter(Boolean));
+        const activeScopedRows = scopedRows.filter(row => row.deleted !== true);
+        technicalCloudRowsById = new Map(normalizeTechnicalRows(activeScopedRows, players).map(row => [technicalRowStorageId(row), row]));
+        activeScopedRows.forEach(row => {
           const id = technicalRowStorageId(row);
-          if(id) rawById.set(id, row);
+          const localRow = id ? rawById.get(id) : null;
+          if(id && localRow?.syncPending !== true) rawById.set(id, row);
         });
         if(!scopedRead.complete){
           const partialRows = scopedRecordsForModuleAccess(normalizeTechnicalRows([...rawById.values()], players), 'tests');
@@ -5945,6 +6006,8 @@ async function technicalListData(filters={}){
           return filterRows(partialRows);
         }
       }catch(error){
+        technicalCloudRowsById = new Map();
+        technicalCloudDeletedIds = new Set();
         const code = String(error?.code || '').toLowerCase();
         const status = code.includes('permission') ? 'permission-denied' : 'network-error';
         Object.assign(appDataCache.technicalRows, {status, source:rawById.size ? 'local-fallback' : 'none', error:cleanError(error)});
@@ -6034,6 +6097,7 @@ async function technicalSaveTest(test={}){
     objectifs:test.objectifs || {},
     testType:test.testType || 'jongles',
     type:'technicalTest',
+    deleted:false,
     finalized,
     status:finalized ? 'finalized' : (test.status && test.status !== 'finalized' ? test.status : ''),
     finalizedAtIso:finalized ? (test.finalizedAtIso || now) : (test.finalizedAtIso || ''),
@@ -6081,7 +6145,22 @@ async function technicalDeleteTest(testId){
     || incoming
     || {};
   if(target.teamId && !canAccessTeamId(target.teamId)) throw new Error('Accès non autorisé à cette équipe.');
-  if(db && currentUser) await firebaseFns.deleteDoc(firebaseFns.doc(db, 'technicalTests', technicalTestId)).catch(error => console.warn('CoachPulse technical test already absent or delete skipped', error));
+  if(db && currentUser){
+    const deletedAtIso = new Date().toISOString();
+    const teamIds = athleticTeamIdsFromSources(target, target.playerSnapshot);
+    const deletion = firestoreSafeData({
+      deleted:true,
+      deletedAtIso,
+      deletedBy:currentUser.uid,
+      deletedByEmail:currentUser.email || '',
+      updatedAtIso:deletedAtIso,
+      updatedBy:currentUser.uid,
+      updatedByEmail:currentUser.email || '',
+      teamId:target.teamId || target.playerSnapshot?.teamId || teamIds[0] || '',
+      teamIds
+    });
+    await firebaseFns.setDoc(firebaseFns.doc(db, 'technicalTests', technicalTestId), {...deletion, updatedAt:firebaseFns.serverTimestamp ? firebaseFns.serverTimestamp() : undefined}, {merge:true});
+  }
   saveLocalTechnicalPayload(local.filter(row => technicalRowStorageId(row) !== technicalTestId));
   invalidateAppDataCaches('technical');
   invalidateAppDataCaches('playerProfiles');
@@ -6959,6 +7038,8 @@ async function syncCloud(manual=false){
     const existingSnap = await firebaseFns.getDoc(ref);
     if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     const existingItems = existingSnap.exists() ? existingSnap.data()?.items : {};
+    await reconcileLegacyTechnicalTests(existingItems);
+    if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     const mergedPayload = {...payload, items:mergedCommonBaseItems(existingItems, payload.items)};
     const safePayload = firestorePayloadService.prepare(mergedPayload, {rootPath:'$', maxBytes:900 * 1024});
     const itemsHash = hashItems(safePayload.items);
