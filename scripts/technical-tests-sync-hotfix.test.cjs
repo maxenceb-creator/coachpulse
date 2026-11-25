@@ -180,6 +180,23 @@ assert.deepEqual(Array.from(pageContext.localRows(), item => item.technicalTestI
   assert.equal(absent.skipped, true);
   assert.equal(serverReadCount, 1, 'La collection technique ne doit pas être relue si la clé legacy cloud est absente.');
 
+  await assert.rejects(
+    () => reconcileContext.reconcileLegacyTechnicalTests({coachStatsV13Rows:JSON.stringify([{date:'08/06/2026', playerName:'Ligne historique'}])}, {uid:'uid-a', scope:'team-a'}),
+    error => error.name === 'TechnicalTestsReconciliationError' && error.unresolved?.[0]?.reason === 'protected-idless-row',
+    'La ligne sans ID du 08/06/2026 ne doit jamais être retirée automatiquement.'
+  );
+
+  const mergeContext = vm.createContext({Set, FIRESTORE_MANAGED_LOCAL_KEYS:new Set(['coachStatsV13Rows', 'coachStatsV170']), CLOUD_SYNC_LOCAL_ONLY_KEYS:new Set()});
+  vm.runInContext(sourceBetween(appSource, 'function mergedCommonBaseItems', 'function countLocalDataItems'), mergeContext);
+  const independentlyMerged = mergeContext.mergedCommonBaseItems(
+    {coachStatsV13Rows:'technical-history', coachStatsV170:'match-history', preference:'kept'},
+    {localDraft:'pending'},
+    {removableLegacyKeys:new Set(['coachStatsV170'])}
+  );
+  assert.equal(independentlyMerged.coachStatsV13Rows, 'technical-history', 'Une preuve technique manquante ne doit pas retirer la clé technique.');
+  assert.equal(Object.hasOwn(independentlyMerged, 'coachStatsV170'), false, 'Une autre clé prouvée doit pouvoir être retirée indépendamment.');
+  assert.equal(independentlyMerged.localDraft, 'pending', 'Les données locales en attente doivent rester dans le payload.');
+
   const syncFunctions = [
     sourceBetween(appSource, 'function mergedCommonBaseItems', 'function countLocalDataItems'),
     sourceBetween(appSource, 'function technicalReconciliationFingerprint', 'function technicalAccessScopeKey'),
@@ -208,8 +225,8 @@ assert.deepEqual(Array.from(pageContext.localRows(), item => item.technicalTestI
     'Avant réconciliation, le payload legacy doit reproduire le dépassement initial exact.'
   );
 
-  async function runSyncScenario(cloudRows){
-    const commonDocument = structuredClone(oversizedPayload);
+  async function runSyncScenario(cloudRows, initialDocument=oversizedPayload){
+    const commonDocument = structuredClone(initialDocument);
     const technicalTests = structuredClone(cloudRows);
     const writes = [];
     const storageState = new Map();
@@ -287,6 +304,15 @@ assert.deepEqual(Array.from(pageContext.localRows(), item => item.technicalTestI
     assert.equal(unsafe.storageState.get('pending'), true);
     assert.equal(unsafe.syncState.failed, true);
   }
+  const compactLegacy = {
+    version:'CoachPulse PWA', savedAt:'2026-11-25T10:00:00.000Z', user:{uid:'uid-a'},
+    items:{sharedModule:{kept:true}, coachStatsV13Rows:JSON.stringify(legacyRows)}
+  };
+  const incompleteButIndependent = await runSyncScenario(canonicalRows.slice(0, -1), compactLegacy);
+  assert.equal(incompleteButIndependent.writes.length, 1, 'Une preuve technique incomplète ne doit pas bloquer les autres écritures autorisées si le payload reste sous budget.');
+  assert.equal(incompleteButIndependent.commonDocument.items.coachStatsV13Rows, compactLegacy.items.coachStatsV13Rows, 'Le snapshot technique non qualifié doit rester strictement inchangé.');
+  assert.deepEqual(incompleteButIndependent.commonDocument.items.localModule, {kept:true}, 'La donnée locale indépendante doit être synchronisée.');
+  assert.equal(incompleteButIndependent.syncState.failed, false);
   console.log(`syncCloud payload: ${targetInitialBytes} -> ${finalBytes} bytes; ${canonicalRows.length} technical results preserved.`);
   console.log('Technical tests sync behavioral scenarios passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

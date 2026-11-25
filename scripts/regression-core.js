@@ -1516,9 +1516,10 @@ function testFirestorePayloadBoundary(){
       }
     }
   });
-  vm.runInContext(`${managedKeysSource}\n${localOnlyKeysSource}\n${collectLocalStorageSource}\n${mergedCommonBaseItemsSource}\nthis.result = collectLocalStorage();\nthis.merged = mergedCommonBaseItems({presenceSeanceV3_6_Excel:'large', 'coachpulse:presenceEvents:v1':'large', legacyPreference:'preserved'}, this.result);`, commonBaseContext);
+  vm.runInContext(`${managedKeysSource}\n${localOnlyKeysSource}\n${collectLocalStorageSource}\n${mergedCommonBaseItemsSource}\nthis.result = collectLocalStorage();\nthis.merged = mergedCommonBaseItems({presenceSeanceV3_6_Excel:'large', 'coachpulse:presenceEvents:v1':'large', legacyPreference:'preserved'}, this.result);\nthis.provenMerged = mergedCommonBaseItems({presenceSeanceV3_6_Excel:'large', 'coachpulse:presenceEvents:v1':'large', legacyPreference:'preserved'}, this.result, {removableLegacyKeys:new Set(['presenceSeanceV3_6_Excel'])});`, commonBaseContext);
   assert.deepEqual(Object.keys(commonBaseContext.result), ['coachpulse:ordinary-setting'], 'Les historiques Match et Présences gérés par collections ne doivent plus entrer dans common_base.');
-  assert.deepEqual(Object.keys(commonBaseContext.merged).sort(), ['coachpulse:ordinary-setting', 'legacyPreference'], 'La reconstruction doit retirer les copies Présences normalisées sans perdre les autres données legacy.');
+  assert.deepEqual(Object.keys(commonBaseContext.merged).sort(), ['coachpulse:ordinary-setting', 'coachpulse:presenceEvents:v1', 'legacyPreference', 'presenceSeanceV3_6_Excel'], 'La reconstruction doit conserver chaque copie legacy sans preuve explicite.');
+  assert.deepEqual(Object.keys(commonBaseContext.provenMerged).sort(), ['coachpulse:ordinary-setting', 'coachpulse:presenceEvents:v1', 'legacyPreference'], 'Une autorisation de retrait ne doit agir que sur la clé legacy prouvée.');
   assert(appSource.includes("const safePayload = firestorePayloadService.prepare(mergedPayload, {rootPath:'$', maxBytes:900 * 1024});"), 'La synchronisation globale doit nettoyer et borner le document complet juste avant écriture.');
   assert(appSource.includes('...safePayload,'), 'setDoc doit recevoir le payload reconstruit, jamais le payload brut.');
   assert(appSource.includes("key.startsWith('firestore_')"), 'Les clés internes IndexedDB/Firestore ne doivent jamais être sauvegardées comme données métier.');
@@ -1526,7 +1527,7 @@ function testFirestorePayloadBoundary(){
   assert(appSource.includes("'coachStatsV170',"), 'L’état Match doit être géré par matches/matchEvents et exclu du document agrégé.');
   assert(appSource.includes('items:mergedCommonBaseItems(latestItems, payload.items'), 'La map common_base doit être reconstruite depuis la dernière version relue en transaction.');
   assert(appSource.includes('!FIRESTORE_MANAGED_LOCAL_KEYS.has(k)'), 'Une ancienne copie cloud ne doit pas réinjecter un état métier géré par collection.');
-  assert(appSource.includes('|| FIRESTORE_MANAGED_LOCAL_KEYS.has(key)'), 'Les données déjà fractionnées dans les collections centrales doivent être exclues de common_base.');
+  assert(appSource.includes('removableLegacyKeys.has(key)'), 'Une donnée fractionnée ne doit être retirée de common_base qu’après preuve explicite par clé.');
   assert(!appSource.includes('PRESENCE_COMMON_BASE_COMPATIBILITY_KEYS'), 'Aucune exception ne doit réinjecter les données Présences dans le document Firestore unique.');
   assert(appSource.includes('firebaseFns.runTransaction(db, async transaction =>'), 'La base commune doit être relue et modifiée atomiquement.');
   assert(appSource.includes('transaction.update(ref, cloudDocument)'), 'Un document existant doit remplacer sa map items dans la transaction afin de retirer les copies normalisées volumineuses.');
