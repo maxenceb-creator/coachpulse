@@ -4,6 +4,7 @@ const vm = require('node:vm');
 
 const appSource = fs.readFileSync('app.js', 'utf8');
 const pageSource = fs.readFileSync('pages/tests-techniques.html', 'utf8');
+const firestorePayloadService = require('../shared/utils/firestore-payload-service.js');
 
 function sourceBetween(source, start, end){
   const from = source.indexOf(start);
@@ -178,5 +179,114 @@ assert.deepEqual(Array.from(pageContext.localRows(), item => item.technicalTestI
   const absent = await reconcileContext.reconcileLegacyTechnicalTests({}, {uid:'uid-a', scope:'team-a'});
   assert.equal(absent.skipped, true);
   assert.equal(serverReadCount, 1, 'La collection technique ne doit pas être relue si la clé legacy cloud est absente.');
+
+  const syncFunctions = [
+    sourceBetween(appSource, 'function mergedCommonBaseItems', 'function countLocalDataItems'),
+    sourceBetween(appSource, 'function technicalReconciliationFingerprint', 'function technicalAccessScopeKey'),
+    sourceBetween(appSource, 'function assertSyncCloudAttemptCurrent', 'async function pullCloud')
+  ].join('\n');
+  const canonicalRows = Array.from({length:48}, (_, index) => row(`technical-${index}`, index + 1, {
+    comment:`Résultat technique ${index}`,
+    finalized:true,
+    status:'finalized'
+  }));
+  const legacyRows = canonicalRows.map(source => ({...source}));
+  const targetInitialBytes = 995859;
+  const initialPayload = padding => ({
+    version:'CoachPulse PWA', savedAt:'2026-11-25T10:00:00.000Z', user:{uid:'uid-a'},
+    items:{sharedModule:{kept:true, label:'donnée commune'}, coachStatsV13Rows:JSON.stringify(legacyRows.map((item, index) => index ? item : {...item, legacyPadding:'x'.repeat(padding)}))}
+  });
+  const baseBytes = firestorePayloadService.inspectSize(initialPayload(0)).bytes;
+  const oversizedPayload = initialPayload(targetInitialBytes - baseBytes);
+  const oversizedInspection = firestorePayloadService.inspectSize(oversizedPayload);
+  assert.equal(oversizedInspection.bytes, targetInitialBytes, 'Le document synthétique doit reproduire exactement les 995859 octets estimés.');
+  assert.throws(
+    () => firestorePayloadService.prepare(oversizedPayload, {rootPath:'$', maxBytes:900 * 1024}),
+    error => error.name === 'FirestorePayloadError'
+      && error.path === '$.items.coachStatsV13Rows'
+      && error.reason.includes('document estimé à 995859 octets (budget 921600)'),
+    'Avant réconciliation, le payload legacy doit reproduire le dépassement initial exact.'
+  );
+
+  async function runSyncScenario(cloudRows){
+    const commonDocument = structuredClone(oversizedPayload);
+    const technicalTests = structuredClone(cloudRows);
+    const writes = [];
+    const storageState = new Map();
+    const syncState = {
+      token:'attempt-sync-cloud', current:true, confirmed:false, failed:false,
+      markSyncing(){ return {operationToken:this.token}; },
+      isCurrent(token){ return this.current && token === this.token; },
+      confirm(){ this.confirmed = true; return {accepted:true}; },
+      fail(_operation, error){ this.failed = true; this.error = error; return {accepted:true}; },
+      declareLocal(){}
+    };
+    const context = vm.createContext({
+      Error, Array, Date, JSON, Map, Set, Object, Promise, String, TextEncoder, structuredClone,
+      console, navigator:{onLine:true}, applyingCloud:false, db:{kind:'mock-firestore'},
+      currentUser:{uid:'uid-a', email:'coach@example.test'}, CLIENT_ID:'behavior-test-client',
+      FIRESTORE_MANAGED_LOCAL_KEYS:new Set(['coachStatsV13Rows']), CLOUD_SYNC_LOCAL_ONLY_KEYS:new Set(),
+      firestorePayloadService, syncStateService:syncState,
+      snapshotLocalData(){}, updateSyncState(){}, updateCloudKpis(){}, notifySuccess(){}, notifyError(){},
+      safeLoadingCall(){ return {end(){}, fail(){}}; }, loadingFailureContext(){ return {}; },
+      cleanError(error){ return error.message; }, debugPerfEnabled(){ return false; },
+      getCloudRef(){ return {path:'coachpulse_common_base/uid-a'}; },
+      buildPayload(){ return {version:'CoachPulse PWA', savedAt:'2026-11-25T10:00:01.000Z', user:{uid:'uid-a'}, items:{localModule:{kept:true}}}; },
+      collectLocalStorage(){ return {localModule:{kept:true}}; },
+      localTechnicalPayload(){ return []; },
+      technicalAccessScopeKey(){ return 'all'; },
+      listPlayers:async () => [],
+      normalizeTechnicalRows(rows){ return rows.map(item => ({...item, reconciliationSourceId:item.reconciliationSourceId || item.technicalTestId})); },
+      normalizeTechnicalRowsForReconciliation(rows){ return rows.map(item => ({...item, reconciliationSourceId:item.reconciliationSourceId || item.technicalTestId})); },
+      technicalRowStorageId(item, fallback=''){ return String(item.technicalTestId || item.testId || item.id || fallback); },
+      technicalListData:async filters => {
+        filters.reconciliationProof({
+          uid:'uid-a', scope:'all', attempt:filters.reconciliationAttempt, complete:true,
+          serverConfirmed:true, hasPendingWrites:false,
+          rows:technicalTests.map(item => ({...item, reconciliationSourceId:item.technicalTestId})), deletedIds:[]
+        });
+        return technicalTests;
+      },
+      hashItems(value){ return String(firestorePayloadService.inspectSize(value).bytes); },
+      storage:{
+        set(key, value){ storageState.set(key, value); }, clearPendingSync(){ storageState.set('pending', false); },
+        markPendingSync(){ storageState.set('pending', true); }
+      },
+      firebaseFns:{
+        getDocFromServer:async () => ({exists:() => true, data:() => structuredClone(commonDocument)}),
+        serverTimestamp:() => 'mock-server-timestamp', waitForPendingWrites:async () => {},
+        runTransaction:async (_db, callback) => callback({
+          get:async () => ({exists:() => true, data:() => structuredClone(commonDocument)}),
+          update(_ref, document){ writes.push(structuredClone(document)); Object.assign(commonDocument, structuredClone(document)); },
+          set(_ref, document){ writes.push(structuredClone(document)); Object.assign(commonDocument, structuredClone(document)); }
+        })
+      }
+    });
+    vm.runInContext(syncFunctions, context);
+    await context.syncCloud(false);
+    await Promise.resolve();
+    return {commonDocument, technicalTests, writes, storageState, syncState};
+  }
+
+  const success = await runSyncScenario(canonicalRows);
+  assert.equal(success.writes.length, 1, `La synchronisation globale doit effectuer une écriture Firestore unique (${success.syncState.error?.stack || 'sans erreur'}).`);
+  assert.equal(Object.hasOwn(success.commonDocument.items, 'coachStatsV13Rows'), false, 'La clé legacy doit être supprimée après preuve complète.');
+  assert.deepEqual(success.commonDocument.items.sharedModule, {kept:true, label:'donnée commune'});
+  assert.deepEqual(success.commonDocument.items.localModule, {kept:true});
+  assert.deepEqual(success.technicalTests, canonicalRows, 'Chaque résultat technique doit rester conservé dans technicalTests.');
+  const finalBytes = firestorePayloadService.inspectSize(success.writes[0]).bytes;
+  assert.ok(finalBytes < 900 * 1024, `Le payload réconcilié (${finalBytes} octets) doit rester sous 900 Kio.`);
+  assert.equal(success.storageState.get('pending'), false);
+  assert.equal(success.syncState.failed, false);
+
+  for(const unsafeRows of [canonicalRows.slice(0, -1), canonicalRows.map((item, index) => index === 0 ? {...item, comment:'divergent'} : item)]){
+    const unsafe = await runSyncScenario(unsafeRows);
+    assert.equal(unsafe.writes.length, 0, 'Une preuve manquante ou divergente ne doit produire aucune écriture destructive.');
+    assert.equal(Object.hasOwn(unsafe.commonDocument.items, 'coachStatsV13Rows'), true, 'La clé legacy doit être conservée si la preuve échoue.');
+    assert.deepEqual(unsafe.commonDocument.items.sharedModule, {kept:true, label:'donnée commune'});
+    assert.equal(unsafe.storageState.get('pending'), true);
+    assert.equal(unsafe.syncState.failed, true);
+  }
+  console.log(`syncCloud payload: ${targetInitialBytes} -> ${finalBytes} bytes; ${canonicalRows.length} technical results preserved.`);
   console.log('Technical tests sync behavioral scenarios passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
