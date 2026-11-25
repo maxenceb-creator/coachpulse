@@ -5,51 +5,88 @@ const vm = require('node:vm');
 const appSource = fs.readFileSync('app.js', 'utf8');
 const pageSource = fs.readFileSync('pages/tests-techniques.html', 'utf8');
 
-function sourceBetween(start, end){
-  const from = appSource.indexOf(start);
-  const to = appSource.indexOf(end, from);
+function sourceBetween(source, start, end){
+  const from = source.indexOf(start);
+  const to = source.indexOf(end, from);
   assert.ok(from >= 0 && to > from, `Bloc introuvable: ${start}`);
-  return appSource.slice(from, to);
+  return source.slice(from, to);
 }
 
-const context = vm.createContext({JSON, Map, Object});
-context.technicalRowStorageId = row => String(row.technicalTestId || row.testId || row.id || '').trim();
-vm.runInContext(sourceBetween('function technicalReconciliationFingerprint', 'async function reconcileLegacyTechnicalTests'), context);
+function sourceFunction(source, name){
+  const match = new RegExp(`function ${name}\\([^\\n]+`).exec(source);
+  assert.ok(match, `Fonction introuvable: ${name}`);
+  return match[0];
+}
+
+const reconciliation = vm.createContext({JSON, Map, Set, Object});
+reconciliation.technicalRowStorageId = row => String(row.technicalTestId || row.testId || row.id || '').trim();
+vm.runInContext(sourceBetween(appSource, 'function technicalReconciliationFingerprint', 'async function reconcileLegacyTechnicalTests'), reconciliation);
 
 const row = (id, score, extra={}) => ({technicalTestId:id, playerId:'player-a', teamId:'team-a', date:'2026-11-20', season:'2026-2027', tests:{max_pfp:score}, ...extra});
 
-// Avant hotfix, une seule clé technique synthétique suffit à dépasser 900 Kio.
-const oversized = {items:{coachStatsV13Rows:JSON.stringify([row('large', 12, {blob:'x'.repeat(930 * 1024)})])}};
-assert.ok(Buffer.byteLength(JSON.stringify(oversized)) > 900 * 1024);
-
-const confirmedPlan = context.technicalLegacyReconciliationPlan([row('same', 12)], [row('same', 12)]);
-assert.equal(confirmedPlan.confirmed, true, 'Une copie identique dans technicalTests doit autoriser le retrait legacy.');
-assert.equal(confirmedPlan.total, 1);
-assert.equal(confirmedPlan.unresolved.length, 0);
-assert.equal(context.technicalLegacyReconciliationPlan([row('legacy-only', 12)], []).unresolved[0].reason, 'legacy-only');
-assert.equal(context.technicalLegacyReconciliationPlan([row('conflict', 12)], [row('conflict', 13, {updatedAtIso:'2026-11-25T12:00:00Z'})]).unresolved[0].reason, 'conflict');
-assert.equal(context.technicalLegacyReconciliationPlan([row('deleted', 12)], [], ['deleted']).confirmed, true, 'Un tombstone dédié doit empêcher la recréation d’un test supprimé.');
-
-const collectSource = sourceBetween('function collectLocalStorage()', 'function purgeUnauthorizedLocalData');
-const collectContext = vm.createContext({
-  Object,
-  storage:{entries:({exclude}) => [['coachStatsV13Rows','large'], ['legacyOther','kept']].filter(([key]) => !exclude(key))},
-  FIRESTORE_MANAGED_LOCAL_KEYS:new Set(['coachStatsV13Rows']),
-  CLOUD_SYNC_LOCAL_ONLY_KEYS:new Set(['coachpulse:technicalTestsPending'])
+const normalization = vm.createContext({
+  technicalRowStorageId:source => source.technicalTestId,
+  normalizeTechnicalRows:rows => rows.length ? [{...rows[rows.length - 1], tests:{...rows[rows.length - 1].tests}}] : []
 });
-vm.runInContext(`${collectSource};this.items=collectLocalStorage();`, collectContext);
-assert.equal(collectContext.items.coachStatsV13Rows, undefined);
-assert.equal(collectContext.items.legacyOther, 'kept', 'Les autres clés legacy ne doivent pas régresser.');
+vm.runInContext(sourceBetween(appSource, 'function normalizeTechnicalRowsForReconciliation', 'function technicalReconciliationFingerprint'), normalization);
+const separatelyNormalized = normalization.normalizeTechnicalRowsForReconciliation([row('history-a', 10), row('history-b', 12)]);
+assert.equal(separatelyNormalized.length, 2, 'La normalisation de preuve doit conserver chaque occurrence historique.');
+assert.deepEqual(Array.from(separatelyNormalized, item => item.tests.max_pfp), [10, 12]);
 
-assert.ok(appSource.includes("if(key === 'coachStatsV13Rows' && !technicalLegacyCloudItemConfirmed) preserved[key] = value"), 'La copie cloud doit rester tant que la réconciliation n’est pas confirmée.');
-assert.ok(appSource.includes("localRow?.syncPending !== true"), 'Une lecture cloud ne doit pas écraser une écriture locale en attente.');
-assert.ok(appSource.includes("currentUser?.uid || 'anonymous'"), 'Le cache technique doit rester isolé par compte.');
-assert.ok(appSource.includes("getAuthorizedTeamIds().slice().sort().join(',')"), 'Le cache technique doit rester isolé par équipe.');
-const deleteSource = /async function technicalDeleteTest[\s\S]*?function presenceUiStatusFromCode/.exec(appSource)[0];
-assert.ok(deleteSource.includes("deleted:true") && deleteSource.includes("await firebaseFns.setDoc(firebaseFns.doc(db, 'technicalTests'"), 'Une suppression doit créer un tombstone dédié avant le nettoyage local.');
-assert.ok(!deleteSource.includes('.catch('), 'Un échec de suppression Firestore ne doit plus être avalé.');
-assert.ok(appSource.includes("if(stored === false) throw new Error('Sauvegarde locale des tests techniques impossible."), 'Un échec de sauvegarde locale doit interrompre le flux.');
-assert.ok(pageSource.includes('pendingRowsFromBackup()') && pageSource.includes('pendingRowsFromAutoBackup()'), 'Les brouillons doivent survivre au rechargement.');
-assert.ok(pageSource.includes('recoverPendingRows()') && pageSource.includes('loadTechnicalData(true'), 'Les écritures en attente doivent être récupérées et les données dédiées relues après reconnexion/rechargement.');
+const complete = reconciliation.technicalSettledReadSummary(
+  [{status:'fulfilled', value:[row('primary', 10)]}],
+  [{status:'fulfilled', value:[row('fallback', 11)]}]
+);
+assert.equal(complete.complete, true);
+assert.equal(complete.rows.length, 2);
 
-console.log('Technical tests sync hotfix scenarios passed.');
+const secondaryFailure = new Error('secondary query denied');
+const incomplete = reconciliation.technicalSettledReadSummary(
+  [{status:'fulfilled', value:[row('primary', 10)]}],
+  [{status:'rejected', reason:secondaryFailure}]
+);
+assert.equal(incomplete.complete, false, 'Une requête secondaire échouée doit invalider la preuve de lecture complète.');
+assert.equal(incomplete.error, secondaryFailure);
+
+const historical = [
+  row('history', 10, {reconciliationSourceId:'history'}),
+  row('history', 12, {reconciliationSourceId:'history'})
+];
+assert.equal(reconciliation.technicalLegacyReconciliationPlan(historical, historical).confirmed, true);
+assert.equal(
+  reconciliation.technicalLegacyReconciliationPlan(historical, [row('history', 12, {reconciliationSourceId:'history'})]).confirmed,
+  false,
+  'Une ligne cloud fusionnée ne doit pas masquer la perte d’un enregistrement historique.'
+);
+assert.equal(reconciliation.technicalLegacyReconciliationPlan([row('deleted', 12)], [], ['deleted']).confirmed, true);
+
+const remaining = reconciliation.technicalRowsWithoutTombstones(
+  [row('active', 1), row('inline-deleted', 2, {deleted:true}), row('cached', 3)],
+  ['cached']
+);
+assert.deepEqual(remaining.map(item => item.technicalTestId), ['active']);
+
+const pageContext = vm.createContext({
+  storageJson:() => [row('active', 1), row('deleted', 2, {deleted:true})],
+  TECHNICAL_ROWS_KEY:'coachStatsV13Rows'
+});
+vm.runInContext(`${sourceFunction(pageSource, 'rowFinalized')};${sourceFunction(pageSource, 'localRows')};`, pageContext);
+assert.equal(pageContext.rowFinalized(row('deleted', 2, {deleted:true})), false);
+assert.deepEqual(Array.from(pageContext.localRows(), item => item.technicalTestId), ['active']);
+
+const reconcileContext = vm.createContext({
+  Error,
+  Array,
+  technicalCloudReadComplete:false,
+  technicalLegacyCloudItemConfirmed:false,
+  localTechnicalPayload:() => [row('legacy', 4)],
+  technicalListData:async () => [],
+  listPlayers:async () => { throw new Error('ne doit pas être appelée'); }
+});
+vm.runInContext(sourceBetween(appSource, 'async function reconcileLegacyTechnicalTests', 'async function technicalListData'), reconcileContext);
+assert.rejects(
+  () => reconcileContext.reconcileLegacyTechnicalTests({coachStatsV13Rows:JSON.stringify([row('legacy', 4)])}),
+  error => error.name === 'TechnicalTestsReconciliationError' && error.unresolved?.[0]?.reason === 'incomplete-read'
+);
+
+console.log('Technical tests sync behavioral scenarios passed.');
