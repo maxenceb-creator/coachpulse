@@ -1491,10 +1491,14 @@ function buildBoundedAutoBackupPayload(payload, maxBytes=AUTO_BACKUP_MAX_BYTES){
   return bounded;
 }
 function mergedCommonBaseItems(existingItems={}, localItems={}, options={}){
+  const removableLegacyKeys = options.removableLegacyKeys instanceof Set
+    ? options.removableLegacyKeys
+    : new Set(options.removableLegacyKeys || []);
   const preserved = {};
   Object.entries(existingItems && typeof existingItems === 'object' ? existingItems : {}).forEach(([key, value]) => {
-    if(key === 'coachStatsV13Rows' && options.removeTechnicalLegacy !== true) preserved[key] = value;
-    else if(!FIRESTORE_MANAGED_LOCAL_KEYS.has(key) && !CLOUD_SYNC_LOCAL_ONLY_KEYS.has(key)) preserved[key] = value;
+    if(CLOUD_SYNC_LOCAL_ONLY_KEYS.has(key)) return;
+    if(FIRESTORE_MANAGED_LOCAL_KEYS.has(key) && removableLegacyKeys.has(key)) return;
+    preserved[key] = value;
   });
   return {...preserved, ...(localItems || {})};
 }
@@ -5952,6 +5956,11 @@ function technicalLegacyReconciliationPlan(legacyRows=[], cloudRows=[], deletedI
   });
   return {confirmed:unresolved.length === 0, total:legacyRows.length, unresolved};
 }
+function protectedTechnicalLegacyRow(row={}){
+  const explicitId = row.technicalTestId || row.testId || row.id || row.reconciliationSourceId;
+  const date = String(row.date || row.testDate || '').trim();
+  return !explicitId && /^(?:2026-06-08|08[\/.\-]06[\/.\-]2026)$/.test(date);
+}
 async function reconcileLegacyTechnicalTests(existingItems={}, attempt={}){
   if(!Object.prototype.hasOwnProperty.call(existingItems || {}, 'coachStatsV13Rows')) return {confirmed:false, skipped:true, reason:'legacy-absent'};
   const originalLegacyValue = existingItems.coachStatsV13Rows;
@@ -5969,6 +5978,12 @@ async function reconcileLegacyTechnicalTests(existingItems={}, attempt={}){
     const error = new Error('Format legacy inattendu. La copie originale est conservée.');
     error.name = 'TechnicalTestsReconciliationError';
     error.unresolved = [{id:'legacy-json', reason:'unexpected-type'}];
+    throw error;
+  }
+  if(legacyRaw.some(protectedTechnicalLegacyRow)){
+    const error = new Error('La ligne technique sans ID du 08/06/2026 reste protégée dans le snapshot legacy.');
+    error.name = 'TechnicalTestsReconciliationError';
+    error.unresolved = [{id:'technical-2026-06-08-without-id', reason:'protected-idless-row'}];
     throw error;
   }
   const localRaw = localTechnicalPayload();
@@ -6005,6 +6020,38 @@ async function reconcileLegacyTechnicalTests(existingItems={}, attempt={}){
     throw error;
   }
   return {confirmed:true, total:legacyRows.length, unresolved:[], originalLegacyValue, uid:proof.uid, scope:proof.scope};
+}
+const LEGACY_COMMON_BASE_RECONCILERS = Object.freeze({
+  coachStatsV13Rows:reconcileLegacyTechnicalTests
+});
+const LEGACY_COMMON_BASE_PROTECTED_KEYS = Object.freeze([
+  'presenceSeanceV3_6_Excel',
+  'coachStatsV170',
+  'coachpulse:athleticTests',
+  'coachpulse:technicalPlayerFootHints'
+]);
+async function reconcileLegacyCommonBaseItems(existingItems={}, attempt={}){
+  const removableLegacyKeys = new Set();
+  const decisions = {};
+  for(const [key, reconciler] of Object.entries(LEGACY_COMMON_BASE_RECONCILERS)){
+    if(!Object.prototype.hasOwnProperty.call(existingItems || {}, key)){
+      decisions[key] = {confirmed:false, skipped:true, reason:'legacy-absent'};
+      continue;
+    }
+    try{
+      const result = await reconciler(existingItems, attempt);
+      decisions[key] = result;
+      if(result?.confirmed === true) removableLegacyKeys.add(key);
+    }catch(error){
+      decisions[key] = {confirmed:false, error, unresolved:error?.unresolved || []};
+    }
+  }
+  LEGACY_COMMON_BASE_PROTECTED_KEYS.forEach(key => {
+    if(Object.prototype.hasOwnProperty.call(existingItems || {}, key)){
+      decisions[key] = {confirmed:false, reason:'no-qualified-conservation-proof'};
+    }
+  });
+  return {removableLegacyKeys, decisions};
 }
 function technicalAccessScopeKey(){
   return isAdmin() || canAccessAllPlayersForModule('tests') ? 'all' : getAuthorizedTeamIds().slice().sort().join(',');
@@ -7169,7 +7216,7 @@ async function syncCloud(manual=false){
     const existingSnap = await firebaseFns.getDocFromServer(ref);
     if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     const existingItems = existingSnap.exists() ? existingSnap.data()?.items : {};
-    const reconciliation = await reconcileLegacyTechnicalTests(existingItems, {uid:syncUser.uid, scope:syncScope, token:syncAttempt});
+    const legacyReconciliation = await reconcileLegacyCommonBaseItems(existingItems, {uid:syncUser.uid, scope:syncScope, token:syncAttempt});
     if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
     let itemsHash = '';
     await firebaseFns.runTransaction(db, async transaction => {
@@ -7177,12 +7224,13 @@ async function syncCloud(manual=false){
       const latestSnap = await transaction.get(ref);
       assertSyncCloudAttemptCurrent(syncAttempt, syncUser.uid, syncScope);
       const latestItems = latestSnap.exists() ? latestSnap.data()?.items || {} : {};
-      if(!technicalLegacyValueUnchanged(latestItems, reconciliation)){
+      const technicalReconciliation = legacyReconciliation.decisions.coachStatsV13Rows || {};
+      if(legacyReconciliation.removableLegacyKeys.has('coachStatsV13Rows') && !technicalLegacyValueUnchanged(latestItems, technicalReconciliation)){
         const error = new Error('La base commune a changé pendant la réconciliation. Une nouvelle vérification est requise.');
         error.name = 'TechnicalTestsReconciliationError';
         throw error;
       }
-      const mergedPayload = {...payload, items:mergedCommonBaseItems(latestItems, payload.items, {removeTechnicalLegacy:reconciliation.confirmed === true})};
+      const mergedPayload = {...payload, items:mergedCommonBaseItems(latestItems, payload.items, {removableLegacyKeys:legacyReconciliation.removableLegacyKeys})};
       const safePayload = firestorePayloadService.prepare(mergedPayload, {rootPath:'$', maxBytes:900 * 1024});
       itemsHash = hashItems(safePayload.items);
       const cloudDocument = {
@@ -7199,16 +7247,15 @@ async function syncCloud(manual=false){
       else transaction.set(ref, cloudDocument);
     });
     if(!syncStateService.isCurrent(syncAttempt)){ try{ loadingOperation?.end?.(); }catch(_error){} return; }
+    await firebaseFns.waitForPendingWrites(db);
+    assertSyncCloudAttemptCurrent(syncAttempt, syncUser.uid, syncScope);
     legacyManagedCloudItemsCleaned = true;
     lastCloudItemsHash = itemsHash;
     storage.set('coachpulse:lastCloudSync', new Date().toISOString(), {recover:true});
     storage.clearPendingSync();
     updateCloudKpis();
     updateSyncState('Cloud synchronisé');
-    Promise.resolve(firebaseFns.waitForPendingWrites(db)).then(
-      () => syncStateService.confirm(syncOperationId, {module:'legacy-cloud-sync', token:syncAttempt}),
-      error => syncStateService.fail(syncOperationId, error, {module:'legacy-cloud-sync', token:syncAttempt})
-    );
+    syncStateService.confirm(syncOperationId, {module:'legacy-cloud-sync', token:syncAttempt});
     try{ loadingOperation?.end?.(); }catch(_error){}
     if(manual) notifySuccess('Synchronisation cloud OK.');
   }catch(e){
