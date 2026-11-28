@@ -1751,6 +1751,11 @@
       const presenceContextTracker = presenceAccessContexts.createTracker();
       let presenceUiReady = false;
       let presenceContextReloadTimer = null;
+      window.CoachPulsePresenceReconciliationState = () => ({
+        pendingLocalSave:presenceLocalSaveTimer != null,
+        pendingCloudWrites:presenceCloudWriteChains.size,
+        pendingCloudTimers:presenceCloudSaveTimers.size
+      });
       function progressivePresenceLoadingEnabled(){
         try{ return progressivePresenceLoadingAvailable && localStorage.getItem("coachpulse:presenceProgressiveMonths") !== "0"; }
         catch(_error){ return progressivePresenceLoadingAvailable; }

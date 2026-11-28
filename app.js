@@ -5928,6 +5928,236 @@ function technicalRowsWithoutTombstones(rows=[], deletedIds=[]){
   const deleted = new Set(deletedIds);
   return rows.filter(row => row?.deleted !== true && !deleted.has(technicalRowStorageId(row)));
 }
+const LEGACY_PRESENCE_TOP_LEVEL_KEYS = new Set(['sessions']);
+const LEGACY_PRESENCE_SESSION_KEYS = new Set([
+  'id','sessionId','date','start','startTime','end','endTime','duration','type','theme','title',
+  'categories','category','categorie','team','teamId','teamIds','source','entries','comment','comments','note',
+  'metadata','meta','procedure','sessionProcedure','createdAt','createdAtIso','updatedAt','updatedAtIso'
+]);
+const LEGACY_PRESENCE_ENTRY_KEYS = new Set([
+  'code','status','minutes','duration','note','comment','attendanceId','playerId','playerName','joueuse',
+  'teamId','teamIds','playerSnapshot','createdAt','createdAtIso','updatedAt','updatedAtIso','metadata','meta'
+]);
+function presenceReconciliationError(reason, id='presence-reconciliation', message='Réconciliation Présences insuffisante. La copie legacy est conservée.'){
+  const error = new Error(message);
+  error.name = 'PresenceReconciliationError';
+  error.unresolved = [{id, reason}];
+  return error;
+}
+function presenceStableValue(value){
+  if(Array.isArray(value)) return value.map(presenceStableValue);
+  if(value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, presenceStableValue(value[key])]));
+  return value;
+}
+function presenceLegacyValueUnchanged(latestItems={}, reconciliation={}){
+  if(reconciliation.confirmed !== true) return true;
+  if(!Object.prototype.hasOwnProperty.call(latestItems, 'presenceSeanceV3_6_Excel')) return false;
+  return JSON.stringify(presenceStableValue(latestItems.presenceSeanceV3_6_Excel))
+    === JSON.stringify(presenceStableValue(reconciliation.originalLegacyValue));
+}
+function presenceUnsupportedKeys(value={}, allowedKeys=new Set()){
+  if(!value || typeof value !== 'object' || Array.isArray(value)) return ['unexpected-type'];
+  return Object.keys(value).filter(key => !allowedKeys.has(key));
+}
+function presenceLegacySessionId(session={}){
+  return String(session.sessionId || session.id || stableFirestoreId('session', session.date, session.type, session.theme)).trim();
+}
+function presenceNormalizedStatus(value=''){
+  const raw = String(value || '').trim();
+  const ui = presenceUiStatusFromCode(raw);
+  return String(ui || raw).trim();
+}
+function presenceSessionFingerprint(session={}){
+  return JSON.stringify(presenceStableValue({
+    sessionId:String(session.sessionId || session.id || '').trim(),
+    date:String(session.date || '').trim(),
+    startTime:String(session.startTime || session.start || '').trim(),
+    endTime:String(session.endTime || session.end || '').trim(),
+    duration:Number(session.duration || 0),
+    type:String(session.type || 'Séance').trim(),
+    theme:String(session.theme || session.title || '').trim(),
+    categories:Array.isArray(session.categories) ? session.categories.map(String).sort() : (session.categories || session.category || session.categorie || ''),
+    team:String(session.team || '').trim(),
+    teamId:String(session.teamId || '').trim(),
+    teamIds:Array.isArray(session.teamIds) ? session.teamIds.map(String).sort() : [],
+    source:String(session.source || 'Présences').trim(),
+    comment:String(session.comment || session.comments || session.note || '').trim(),
+    metadata:session.metadata || session.meta || {},
+    procedure:presencePlainProcedure(session.procedure || session.sessionProcedure)
+  }));
+}
+function presenceAttendanceFingerprint(row={}){
+  return JSON.stringify(presenceStableValue({
+    sessionId:String(row.sessionId || '').trim(),
+    playerId:String(row.playerId || '').trim(),
+    status:presenceNormalizedStatus(row.status || row.code),
+    minutes:Number(row.minutes ?? row.duration ?? 0) || 0,
+    comment:String(row.comment || row.note || '').trim(),
+    playerName:String(row.playerName || row.joueuse || row.playerSnapshot?.displayName || '').trim(),
+    teamId:String(row.teamId || '').trim(),
+    teamIds:Array.isArray(row.teamIds) ? row.teamIds.map(String).sort() : [],
+    metadata:row.metadata || row.meta || {}
+  }));
+}
+function presenceDeletionFingerprint(row={}){
+  return JSON.stringify(presenceStableValue({
+    sessionId:String(row.sessionId || '').trim(),
+    date:String(row.date || '').trim(),
+    source:String(row.source || '').trim(),
+    deletedBy:String(row.deletedBy || '').trim(),
+    deletedAtIso:String(row.deletedAtIso || row.deletedAt || '').trim()
+  }));
+}
+function presenceLegacyRows(legacy={}){
+  const unsupportedTopLevel = presenceUnsupportedKeys(legacy, LEGACY_PRESENCE_TOP_LEVEL_KEYS);
+  if(unsupportedTopLevel.length) throw presenceReconciliationError('unsupported-property', `legacy.${unsupportedTopLevel[0]}`);
+  if(!Array.isArray(legacy.sessions)) throw presenceReconciliationError('unexpected-type', 'legacy.sessions');
+  const sessions = [];
+  const attendance = [];
+  legacy.sessions.forEach((rawSession, sessionIndex) => {
+    const unsupportedSession = presenceUnsupportedKeys(rawSession, LEGACY_PRESENCE_SESSION_KEYS);
+    if(unsupportedSession.length) throw presenceReconciliationError('unsupported-property', `session-${sessionIndex}.${unsupportedSession[0]}`);
+    if(!rawSession.entries || typeof rawSession.entries !== 'object' || Array.isArray(rawSession.entries)){
+      throw presenceReconciliationError('unexpected-type', `session-${sessionIndex}.entries`);
+    }
+    const sessionId = presenceLegacySessionId(rawSession);
+    if(!sessionId || !String(rawSession.date || '').trim()) throw presenceReconciliationError('missing-identity', `session-${sessionIndex}`);
+    sessions.push({...rawSession, sessionId});
+    Object.entries(rawSession.entries).forEach(([entryKey, rawEntry]) => {
+      if(!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) throw presenceReconciliationError('unexpected-type', `${sessionId}.entries.${entryKey}`);
+      const unsupportedEntry = presenceUnsupportedKeys(rawEntry, LEGACY_PRESENCE_ENTRY_KEYS);
+      if(unsupportedEntry.length) throw presenceReconciliationError('unsupported-property', `${sessionId}.entries.${entryKey}.${unsupportedEntry[0]}`);
+      const playerId = String(rawEntry.playerId || entryKey || '').trim();
+      if(!playerId || !presenceNormalizedStatus(rawEntry.status || rawEntry.code)) throw presenceReconciliationError('missing-identity', `${sessionId}.entries.${entryKey}`);
+      attendance.push({...rawEntry, sessionId, playerId});
+    });
+  });
+  return {sessions, attendance};
+}
+function presenceReconciliationPlan(legacyRows={}, cloudRows={}, deletionLogs=[]){
+  const sessionsById = new Map();
+  (cloudRows.sessions || []).forEach(row => {
+    const id = String(row.sessionId || row.id || '').trim();
+    if(!sessionsById.has(id)) sessionsById.set(id, []);
+    sessionsById.get(id).push(row);
+  });
+  const attendanceByPair = new Map();
+  (cloudRows.attendance || []).forEach(row => {
+    const pair = `${String(row.sessionId || '').trim()}::${String(row.playerId || '').trim()}`;
+    if(!attendanceByPair.has(pair)) attendanceByPair.set(pair, []);
+    attendanceByPair.get(pair).push(row);
+  });
+  const deletionBySessionId = new Map();
+  deletionLogs.forEach(row => {
+    const id = String(row.sessionId || '').trim();
+    if(!deletionBySessionId.has(id)) deletionBySessionId.set(id, []);
+    deletionBySessionId.get(id).push(row);
+  });
+  const unresolved = [];
+  const deletedSessionIds = new Set();
+  const transactionEvidence = [];
+  legacyRows.sessions.forEach(session => {
+    const id = session.sessionId;
+    const candidates = sessionsById.get(id) || [];
+    if(candidates.length === 1){
+      if(presenceSessionFingerprint(session) !== presenceSessionFingerprint(candidates[0])) unresolved.push({id, reason:'session-conflict'});
+      else transactionEvidence.push({collection:'sessions', id:String(candidates[0].id || candidates[0].sessionId || ''), fingerprint:presenceSessionFingerprint(candidates[0])});
+      return;
+    }
+    if(candidates.length > 1){ unresolved.push({id, reason:'ambiguous-session'}); return; }
+    const deletions = deletionBySessionId.get(id) || [];
+    const valid = deletions.filter(log => String(log.source || '') === 'Présences'
+      && String(log.deletedBy || '').trim() && String(log.deletedAtIso || log.deletedAt || '').trim()
+      && String(log.date || '').trim() === String(session.date || '').trim());
+    if(valid.length !== 1) unresolved.push({id, reason:valid.length > 1 ? 'ambiguous-deletion' : 'unconfirmed-deletion'});
+    else {
+      deletedSessionIds.add(id);
+      transactionEvidence.push({collection:'presenceDeletionLogs', id:String(valid[0].id || valid[0].sessionId || ''), fingerprint:presenceDeletionFingerprint(valid[0])});
+    }
+  });
+  legacyRows.attendance.forEach(row => {
+    if(deletedSessionIds.has(row.sessionId)) return;
+    const pair = `${row.sessionId}::${row.playerId}`;
+    const candidates = attendanceByPair.get(pair) || [];
+    if(candidates.length !== 1){ unresolved.push({id:pair, reason:candidates.length ? 'ambiguous-attendance' : 'missing-attendance'}); return; }
+    if(presenceAttendanceFingerprint(row) !== presenceAttendanceFingerprint(candidates[0])) unresolved.push({id:pair, reason:'attendance-conflict'});
+    else transactionEvidence.push({collection:'attendance', id:String(candidates[0].id || candidates[0].attendanceId || ''), fingerprint:presenceAttendanceFingerprint(candidates[0])});
+  });
+  if(transactionEvidence.some(item => !item.id)) unresolved.push({id:'transaction-evidence', reason:'missing-document-id'});
+  return {confirmed:unresolved.length === 0, unresolved, deletedSessionIds:[...deletedSessionIds], transactionEvidence};
+}
+async function assertPresenceReconciliationCurrent(transaction, reconciliation={}){
+  if(reconciliation.confirmed !== true) return;
+  for(const evidence of reconciliation.transactionEvidence || []){
+    const snap = await transaction.get(firebaseFns.doc(db, evidence.collection, evidence.id));
+    if(!snap.exists()) throw presenceReconciliationError('concurrent-change', `${evidence.collection}/${evidence.id}`);
+    const row = {id:snap.id, ...snap.data()};
+    const fingerprint = evidence.collection === 'sessions'
+      ? presenceSessionFingerprint(row)
+      : evidence.collection === 'attendance'
+        ? presenceAttendanceFingerprint(row)
+        : presenceDeletionFingerprint(row);
+    if(fingerprint !== evidence.fingerprint) throw presenceReconciliationError('concurrent-change', `${evidence.collection}/${evidence.id}`);
+  }
+}
+async function presenceLocalReconciliationProof(){
+  if(storage.isPendingSync()) throw presenceReconciliationError('pending-local-sync', 'coachpulse:pendingSync');
+  const frameState = frame?.contentWindow?.CoachPulsePresenceReconciliationState?.();
+  if(frameState && (frameState.pendingLocalSave || frameState.pendingCloudWrites || frameState.pendingCloudTimers)){
+    throw presenceReconciliationError('pending-local-write', 'presence-write-queue');
+  }
+  if(typeof storage.getDurableJson !== 'function') throw presenceReconciliationError('indexeddb-read-unavailable', 'coachpulse:presenceEvents:v1');
+  const durable = await storage.getDurableJson('coachpulse:presenceEvents:v1', []);
+  if(durable.indexedDbReadComplete !== true) throw presenceReconciliationError('indexeddb-read-incomplete', 'coachpulse:presenceEvents:v1');
+  const events = Array.isArray(durable.value) ? durable.value : null;
+  if(!events) throw presenceReconciliationError('unexpected-type', 'coachpulse:presenceEvents:v1');
+  if(events.some(event => presenceEventsService()?.isPendingEvent?.(event) !== false)) throw presenceReconciliationError('pending-local-presence', 'coachpulse:presenceEvents:v1');
+  const pendingBackup = storage.getJson('coachpulse:presenceEvents:pendingBackup:v1', []);
+  if(Array.isArray(pendingBackup) && pendingBackup.length) throw presenceReconciliationError('pending-local-backup', 'coachpulse:presenceEvents:pendingBackup:v1');
+  return {complete:true, source:durable.source, revision:durable.revision};
+}
+async function presenceServerReconciliationProof(attempt={}){
+  if(typeof firebaseFns.getDocsFromServer !== 'function') throw presenceReconciliationError('server-read-unavailable', 'firestore');
+  if(!presenceSettingsAdminAllowed() && !canAccessAllPlayersForModule('presences')) throw presenceReconciliationError('incomplete-scope', 'presences-scope');
+  const readCollection = async name => {
+    const snap = await firebaseFns.getDocsFromServer(firebaseFns.collection(db, name));
+    if(snap.metadata?.fromCache === true || snap.metadata?.hasPendingWrites === true) throw presenceReconciliationError('incomplete-server-read', name);
+    const rows = [];
+    snap.forEach(docSnap => {
+      if(docSnap.metadata?.fromCache === true || docSnap.metadata?.hasPendingWrites === true) throw presenceReconciliationError('incomplete-server-read', `${name}/${docSnap.id}`);
+      rows.push({id:docSnap.id, ...docSnap.data()});
+    });
+    return rows;
+  };
+  const [sessions, attendance, deletionLogs] = await Promise.all([
+    readCollection('sessions'), readCollection('attendance'), readCollection('presenceDeletionLogs')
+  ]);
+  return {uid:String(currentUser?.uid || ''), scope:String(attempt.scope || ''), attempt:attempt.token, complete:true, serverConfirmed:true, hasPendingWrites:false, sessions, attendance, deletionLogs};
+}
+async function reconcileLegacyPresence(existingItems={}, attempt={}){
+  if(!Object.prototype.hasOwnProperty.call(existingItems || {}, 'presenceSeanceV3_6_Excel')) return {confirmed:false, skipped:true, reason:'legacy-absent'};
+  const originalLegacyValue = existingItems.presenceSeanceV3_6_Excel;
+  let legacy = originalLegacyValue;
+  if(typeof legacy === 'string'){
+    try{ legacy = JSON.parse(legacy); }
+    catch(_error){ throw presenceReconciliationError('invalid-json', 'legacy-json'); }
+  }
+  const legacyRows = presenceLegacyRows(legacy);
+  await presenceLocalReconciliationProof();
+  const proof = await presenceServerReconciliationProof(attempt);
+  const expectedUid = String(attempt.uid || currentUser?.uid || '');
+  if(!proof.complete || !proof.serverConfirmed || proof.hasPendingWrites || proof.uid !== expectedUid
+    || proof.scope !== String(attempt.scope || '') || proof.attempt !== attempt.token || String(currentUser?.uid || '') !== expectedUid){
+    throw presenceReconciliationError('incomplete-server-read', 'firestore');
+  }
+  const plan = presenceReconciliationPlan(legacyRows, {sessions:proof.sessions, attendance:proof.attendance}, proof.deletionLogs);
+  if(!plan.confirmed){
+    const error = presenceReconciliationError('unresolved', 'presence-reconciliation', `Réconciliation Présences incomplète (${plan.unresolved.length} élément(s)). La copie legacy est conservée.`);
+    error.unresolved = plan.unresolved;
+    throw error;
+  }
+  return {confirmed:true, totalSessions:legacyRows.sessions.length, totalAttendance:legacyRows.attendance.length, deletedSessionIds:plan.deletedSessionIds, transactionEvidence:plan.transactionEvidence, unresolved:[], originalLegacyValue, uid:proof.uid, scope:proof.scope};
+}
 function technicalSettledReadSummary(primaryResults=[], fallbackResults=[]){
   const failures = [...primaryResults, ...fallbackResults].filter(result => result.status === 'rejected');
   const rows = [...primaryResults, ...fallbackResults].flatMap(result => result.status === 'fulfilled' ? result.value : []);
@@ -6022,10 +6252,10 @@ async function reconcileLegacyTechnicalTests(existingItems={}, attempt={}){
   return {confirmed:true, total:legacyRows.length, unresolved:[], originalLegacyValue, uid:proof.uid, scope:proof.scope};
 }
 const LEGACY_COMMON_BASE_RECONCILERS = Object.freeze({
+  presenceSeanceV3_6_Excel:reconcileLegacyPresence,
   coachStatsV13Rows:reconcileLegacyTechnicalTests
 });
 const LEGACY_COMMON_BASE_PROTECTED_KEYS = Object.freeze([
-  'presenceSeanceV3_6_Excel',
   'coachStatsV170',
   'coachpulse:athleticTests',
   'coachpulse:technicalPlayerFootHints'
@@ -7229,6 +7459,16 @@ async function syncCloud(manual=false){
         const error = new Error('La base commune a changé pendant la réconciliation. Une nouvelle vérification est requise.');
         error.name = 'TechnicalTestsReconciliationError';
         throw error;
+      }
+      const presenceReconciliation = legacyReconciliation.decisions.presenceSeanceV3_6_Excel || {};
+      if(legacyReconciliation.removableLegacyKeys.has('presenceSeanceV3_6_Excel') && !presenceLegacyValueUnchanged(latestItems, presenceReconciliation)){
+        const error = new Error('La base commune Présences a changé pendant la réconciliation. Une nouvelle vérification est requise.');
+        error.name = 'PresenceReconciliationError';
+        throw error;
+      }
+      if(legacyReconciliation.removableLegacyKeys.has('presenceSeanceV3_6_Excel')){
+        await assertPresenceReconciliationCurrent(transaction, presenceReconciliation);
+        assertSyncCloudAttemptCurrent(syncAttempt, syncUser.uid, syncScope);
       }
       const mergedPayload = {...payload, items:mergedCommonBaseItems(latestItems, payload.items, {removableLegacyKeys:legacyReconciliation.removableLegacyKeys})};
       const safePayload = firestorePayloadService.prepare(mergedPayload, {rootPath:'$', maxBytes:900 * 1024});
