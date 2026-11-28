@@ -5967,6 +5967,54 @@ function presenceNormalizedStatus(value=''){
   const ui = presenceUiStatusFromCode(raw);
   return String(ui || raw).trim();
 }
+function presenceOwn(value={}, key=''){
+  return Object.prototype.hasOwnProperty.call(value || {}, key);
+}
+function presenceTimestampValue(value){
+  if(value == null || value === '') return value;
+  const date = typeof value?.toDate === 'function' ? value.toDate() : value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date?.getTime?.()) ? presenceStableValue(value) : date.toISOString();
+}
+function presenceComparableValue(value, kind='exact'){
+  if(kind === 'timestamp') return presenceTimestampValue(value);
+  if(kind === 'number') return Number(value || 0);
+  if(kind === 'status') return presenceNormalizedStatus(value);
+  if(kind === 'string') return String(value ?? '').trim();
+  return presenceStableValue(value);
+}
+function presencePropertyPreserved(legacy={}, cloud={}, key='', targets=[key], kind='exact'){
+  if(!presenceOwn(legacy, key)) return true;
+  const expected = JSON.stringify(presenceComparableValue(legacy[key], kind));
+  const target = targets.find(candidate => presenceOwn(cloud, candidate));
+  return Boolean(target) && JSON.stringify(presenceComparableValue(cloud[target], kind)) === expected;
+}
+const PRESENCE_SESSION_PROPERTY_PROOF = Object.freeze({
+  id:{targets:['id','sessionId'], kind:'string'}, sessionId:{targets:['sessionId','id'], kind:'string'}, date:{kind:'string'},
+  start:{targets:['startTime','start'], kind:'string'}, startTime:{targets:['startTime','start'], kind:'string'},
+  end:{targets:['endTime','end'], kind:'string'}, endTime:{targets:['endTime','end'], kind:'string'}, duration:{kind:'number'},
+  type:{kind:'string'}, theme:{targets:['theme','title'], kind:'string'}, title:{targets:['title','theme'], kind:'string'},
+  categories:{targets:['categories']}, category:{targets:['category','categories']}, categorie:{targets:['categorie','categories']},
+  team:{kind:'string'}, teamId:{kind:'string'}, teamIds:{}, source:{kind:'string'},
+  comment:{targets:['comment','comments','note'], kind:'string'}, comments:{targets:['comments','comment','note'], kind:'string'}, note:{targets:['note','comment','comments'], kind:'string'},
+  metadata:{targets:['metadata','meta']}, meta:{targets:['meta','metadata']},
+  procedure:{targets:['procedure','sessionProcedure']}, sessionProcedure:{targets:['sessionProcedure','procedure']},
+  createdAt:{targets:['createdAt','createdAtIso'], kind:'timestamp'}, createdAtIso:{targets:['createdAtIso','createdAt'], kind:'timestamp'},
+  updatedAt:{targets:['updatedAt','updatedAtIso'], kind:'timestamp'}, updatedAtIso:{targets:['updatedAtIso','updatedAt'], kind:'timestamp'}
+});
+const PRESENCE_ENTRY_PROPERTY_PROOF = Object.freeze({
+  code:{targets:['status','code'], kind:'status'}, status:{targets:['status','code'], kind:'status'},
+  minutes:{targets:['minutes','duration'], kind:'number'}, duration:{targets:['duration','minutes'], kind:'number'},
+  note:{targets:['comment','note'], kind:'string'}, comment:{targets:['comment','note'], kind:'string'},
+  attendanceId:{targets:['attendanceId','id'], kind:'string'}, playerId:{kind:'string'},
+  playerName:{targets:['playerName','joueuse'], kind:'string'}, joueuse:{targets:['joueuse','playerName'], kind:'string'},
+  teamId:{kind:'string'}, teamIds:{}, playerSnapshot:{},
+  createdAt:{targets:['createdAt','createdAtIso'], kind:'timestamp'}, createdAtIso:{targets:['createdAtIso','createdAt'], kind:'timestamp'},
+  updatedAt:{targets:['updatedAt','updatedAtIso'], kind:'timestamp'}, updatedAtIso:{targets:['updatedAtIso','updatedAt'], kind:'timestamp'},
+  metadata:{targets:['metadata','meta']}, meta:{targets:['meta','metadata']}
+});
+function presencePropertiesPreserved(legacy={}, cloud={}, proof={}){
+  return Object.entries(proof).every(([key, rule]) => presencePropertyPreserved(legacy, cloud, key, rule.targets || [key], rule.kind));
+}
 function presenceSessionFingerprint(session={}){
   return JSON.stringify(presenceStableValue({
     sessionId:String(session.sessionId || session.id || '').trim(),
@@ -5983,7 +6031,9 @@ function presenceSessionFingerprint(session={}){
     source:String(session.source || 'Présences').trim(),
     comment:String(session.comment || session.comments || session.note || '').trim(),
     metadata:session.metadata || session.meta || {},
-    procedure:presencePlainProcedure(session.procedure || session.sessionProcedure)
+    procedure:presencePlainProcedure(session.procedure || session.sessionProcedure),
+    createdAt:presenceTimestampValue(session.createdAtIso || session.createdAt || ''),
+    updatedAt:presenceTimestampValue(session.updatedAtIso || session.updatedAt || '')
   }));
 }
 function presenceAttendanceFingerprint(row={}){
@@ -5996,7 +6046,11 @@ function presenceAttendanceFingerprint(row={}){
     playerName:String(row.playerName || row.joueuse || row.playerSnapshot?.displayName || '').trim(),
     teamId:String(row.teamId || '').trim(),
     teamIds:Array.isArray(row.teamIds) ? row.teamIds.map(String).sort() : [],
-    metadata:row.metadata || row.meta || {}
+    metadata:row.metadata || row.meta || {},
+    attendanceId:String(row.attendanceId || row.id || '').trim(),
+    playerSnapshot:presenceStableValue(row.playerSnapshot || {}),
+    createdAt:presenceTimestampValue(row.createdAtIso || row.createdAt || ''),
+    updatedAt:presenceTimestampValue(row.updatedAtIso || row.updatedAt || '')
   }));
 }
 function presenceDeletionFingerprint(row={}){
@@ -6060,7 +6114,7 @@ function presenceReconciliationPlan(legacyRows={}, cloudRows={}, deletionLogs=[]
     const id = session.sessionId;
     const candidates = sessionsById.get(id) || [];
     if(candidates.length === 1){
-      if(presenceSessionFingerprint(session) !== presenceSessionFingerprint(candidates[0])) unresolved.push({id, reason:'session-conflict'});
+      if(!presencePropertiesPreserved(session, candidates[0], PRESENCE_SESSION_PROPERTY_PROOF)) unresolved.push({id, reason:'session-conflict'});
       else transactionEvidence.push({collection:'sessions', id:String(candidates[0].id || candidates[0].sessionId || ''), fingerprint:presenceSessionFingerprint(candidates[0])});
       return;
     }
@@ -6080,7 +6134,7 @@ function presenceReconciliationPlan(legacyRows={}, cloudRows={}, deletionLogs=[]
     const pair = `${row.sessionId}::${row.playerId}`;
     const candidates = attendanceByPair.get(pair) || [];
     if(candidates.length !== 1){ unresolved.push({id:pair, reason:candidates.length ? 'ambiguous-attendance' : 'missing-attendance'}); return; }
-    if(presenceAttendanceFingerprint(row) !== presenceAttendanceFingerprint(candidates[0])) unresolved.push({id:pair, reason:'attendance-conflict'});
+    if(!presencePropertiesPreserved(row, candidates[0], PRESENCE_ENTRY_PROPERTY_PROOF)) unresolved.push({id:pair, reason:'attendance-conflict'});
     else transactionEvidence.push({collection:'attendance', id:String(candidates[0].id || candidates[0].attendanceId || ''), fingerprint:presenceAttendanceFingerprint(candidates[0])});
   });
   if(transactionEvidence.some(item => !item.id)) unresolved.push({id:'transaction-evidence', reason:'missing-document-id'});
@@ -6102,8 +6156,17 @@ async function assertPresenceReconciliationCurrent(transaction, reconciliation={
 }
 async function presenceLocalReconciliationProof(){
   if(storage.isPendingSync()) throw presenceReconciliationError('pending-local-sync', 'coachpulse:pendingSync');
-  const frameState = frame?.contentWindow?.CoachPulsePresenceReconciliationState?.();
-  if(frameState && (frameState.pendingLocalSave || frameState.pendingCloudWrites || frameState.pendingCloudTimers)){
+  let frameWindow;
+  try{ frameWindow = frame?.contentWindow; }catch(_error){ throw presenceReconciliationError('iframe-inaccessible', 'presence-frame'); }
+  if(!frameWindow || typeof frameWindow.CoachPulsePresenceReconciliationState !== 'function'){
+    throw presenceReconciliationError('local-state-unavailable', 'CoachPulsePresenceReconciliationState');
+  }
+  let frameState;
+  try{ frameState = frameWindow.CoachPulsePresenceReconciliationState(); }catch(_error){ throw presenceReconciliationError('local-state-unavailable', 'CoachPulsePresenceReconciliationState'); }
+  if(!frameState || !Number.isSafeInteger(frameState.revision) || !frameState.contextRevision){
+    throw presenceReconciliationError('local-state-incomplete', 'CoachPulsePresenceReconciliationState');
+  }
+  if(frameState.pendingLocalSave || frameState.pendingCloudWrites || frameState.pendingCloudTimers){
     throw presenceReconciliationError('pending-local-write', 'presence-write-queue');
   }
   if(typeof storage.getDurableJson !== 'function') throw presenceReconciliationError('indexeddb-read-unavailable', 'coachpulse:presenceEvents:v1');
@@ -6114,7 +6177,14 @@ async function presenceLocalReconciliationProof(){
   if(events.some(event => presenceEventsService()?.isPendingEvent?.(event) !== false)) throw presenceReconciliationError('pending-local-presence', 'coachpulse:presenceEvents:v1');
   const pendingBackup = storage.getJson('coachpulse:presenceEvents:pendingBackup:v1', []);
   if(Array.isArray(pendingBackup) && pendingBackup.length) throw presenceReconciliationError('pending-local-backup', 'coachpulse:presenceEvents:pendingBackup:v1');
-  return {complete:true, source:durable.source, revision:durable.revision};
+  return {complete:true, source:durable.source, revision:durable.revision, frameWindow, frameRevision:frameState.revision, contextRevision:String(frameState.contextRevision)};
+}
+async function assertPresenceLocalReconciliationCurrent(expected={}){
+  const current = await presenceLocalReconciliationProof();
+  if(current.frameWindow !== expected.frameWindow || current.frameRevision !== expected.frameRevision
+    || current.contextRevision !== expected.contextRevision || current.revision !== expected.revision){
+    throw presenceReconciliationError('concurrent-local-change', 'presence-local-state');
+  }
 }
 async function presenceServerReconciliationProof(attempt={}){
   if(typeof firebaseFns.getDocsFromServer !== 'function') throw presenceReconciliationError('server-read-unavailable', 'firestore');
@@ -6143,7 +6213,7 @@ async function reconcileLegacyPresence(existingItems={}, attempt={}){
     catch(_error){ throw presenceReconciliationError('invalid-json', 'legacy-json'); }
   }
   const legacyRows = presenceLegacyRows(legacy);
-  await presenceLocalReconciliationProof();
+  const localProof = await presenceLocalReconciliationProof();
   const proof = await presenceServerReconciliationProof(attempt);
   const expectedUid = String(attempt.uid || currentUser?.uid || '');
   if(!proof.complete || !proof.serverConfirmed || proof.hasPendingWrites || proof.uid !== expectedUid
@@ -6156,7 +6226,7 @@ async function reconcileLegacyPresence(existingItems={}, attempt={}){
     error.unresolved = plan.unresolved;
     throw error;
   }
-  return {confirmed:true, totalSessions:legacyRows.sessions.length, totalAttendance:legacyRows.attendance.length, deletedSessionIds:plan.deletedSessionIds, transactionEvidence:plan.transactionEvidence, unresolved:[], originalLegacyValue, uid:proof.uid, scope:proof.scope};
+  return {confirmed:true, totalSessions:legacyRows.sessions.length, totalAttendance:legacyRows.attendance.length, deletedSessionIds:plan.deletedSessionIds, transactionEvidence:plan.transactionEvidence, unresolved:[], originalLegacyValue, uid:proof.uid, scope:proof.scope, localProof};
 }
 function technicalSettledReadSummary(primaryResults=[], fallbackResults=[]){
   const failures = [...primaryResults, ...fallbackResults].filter(result => result.status === 'rejected');
@@ -7468,6 +7538,8 @@ async function syncCloud(manual=false){
       }
       if(legacyReconciliation.removableLegacyKeys.has('presenceSeanceV3_6_Excel')){
         await assertPresenceReconciliationCurrent(transaction, presenceReconciliation);
+        assertSyncCloudAttemptCurrent(syncAttempt, syncUser.uid, syncScope);
+        await assertPresenceLocalReconciliationCurrent(presenceReconciliation.localProof);
         assertSyncCloudAttemptCurrent(syncAttempt, syncUser.uid, syncScope);
       }
       const mergedPayload = {...payload, items:mergedCommonBaseItems(latestItems, payload.items, {removableLegacyKeys:legacyReconciliation.removableLegacyKeys})};

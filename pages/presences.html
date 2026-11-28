@@ -1751,9 +1751,14 @@
       const presenceContextTracker = presenceAccessContexts.createTracker();
       let presenceUiReady = false;
       let presenceContextReloadTimer = null;
+      let presenceReconciliationRevision = 0;
+      let presenceReconciliationActiveLocalWrites = 0;
+      let presenceReconciliationActiveCloudWrites = 0;
       window.CoachPulsePresenceReconciliationState = () => ({
-        pendingLocalSave:presenceLocalSaveTimer != null,
-        pendingCloudWrites:presenceCloudWriteChains.size,
+        revision:presenceReconciliationRevision,
+        contextRevision:JSON.stringify(presenceContextToken()),
+        pendingLocalSave:presenceLocalSaveTimer != null || presenceReconciliationActiveLocalWrites > 0,
+        pendingCloudWrites:presenceCloudWriteChains.size + presenceReconciliationActiveCloudWrites,
         pendingCloudTimers:presenceCloudSaveTimers.size
       });
       function progressivePresenceLoadingEnabled(){
@@ -1791,6 +1796,7 @@
         return mergePresenceEvents(preserved, current);
       }
       function invalidatePresenceAccessContext(reason="access-change"){
+        presenceReconciliationRevision += 1;
         presenceMonthRequestId += 1;
         presenceNavigationRequestId += 1;
         presenceMonthLoads.clear();
@@ -2270,15 +2276,22 @@
         return presenceEventsMemoryCache;
       }
       async function persistPresenceEventsSnapshot(events){
-        presenceDurableEventsCache = Array.isArray(events) ? events : [];
-        if(storage?.setDurableJson){
-          const result = await storage.setDurableJson(PRESENCE_EVENTS_KEY, events);
-          if(!result.ok) warnPresenceLocalSaveFailure();
-          return result.ok;
+        presenceReconciliationRevision += 1;
+        presenceReconciliationActiveLocalWrites += 1;
+        try{
+          presenceDurableEventsCache = Array.isArray(events) ? events : [];
+          if(storage?.setDurableJson){
+            const result = await storage.setDurableJson(PRESENCE_EVENTS_KEY, events);
+            if(!result.ok) warnPresenceLocalSaveFailure();
+            return result.ok;
+          }
+          const persisted = setJson(PRESENCE_EVENTS_KEY, events);
+          if(!persisted) warnPresenceLocalSaveFailure();
+          return persisted;
+        }finally{
+          presenceReconciliationActiveLocalWrites -= 1;
+          presenceReconciliationRevision += 1;
         }
-        const persisted = setJson(PRESENCE_EVENTS_KEY, events);
-        if(!persisted) warnPresenceLocalSaveFailure();
-        return persisted;
       }
       async function hydratePresenceEventsFromDurableStorage(){
         if(!storage?.getDurableJson) return;
@@ -2301,6 +2314,7 @@
         return persistPresenceEventsSnapshot(compacted);
       }
       function queuePresenceEventsLocalSave(events){
+        presenceReconciliationRevision += 1;
         presenceEventsMemoryCache = filterPresenceEventsForCurrentContext(Array.isArray(events) ? events : []);
         const token = presenceContextToken();
         if(presenceLocalSaveTimer != null){
@@ -2501,9 +2515,17 @@
         if(!api?.presenceSaveEvent) throw new Error("Synchronisation cloud indisponible.");
         const normalized = normalizePresenceEventForStorage(event);
         if(!normalized.teamId) throw new Error("teamId obligatoire pour synchroniser l'événement.");
-        return api.presenceSaveEvent(normalized, {origin});
+        const commit = () => { return api.presenceSaveEvent(normalized, {origin}); };
+        presenceReconciliationRevision += 1;
+        presenceReconciliationActiveCloudWrites += 1;
+        try{ return await commit(); }
+        finally{
+          presenceReconciliationActiveCloudWrites -= 1;
+          presenceReconciliationRevision += 1;
+        }
       }
       function schedulePresenceEventCloudSave(eventId, delay=650){
+        presenceReconciliationRevision += 1;
         const token = presenceContextToken();
         clearTimeout(presenceCloudSaveTimers.get(eventId));
         setSessionMessage("Modification enregistrée localement…", "");
@@ -2539,7 +2561,7 @@
         const syncedIds = [];
         for(const event of eventsToSync){
           if(!presenceContextIsCurrent(token)) return syncedIds.length;
-          await api.presenceSaveEvent(event, {origin:"initial-pending-sync"});
+          await pushPresenceEventToCloud(event, "initial-pending-sync");
           if(!presenceContextIsCurrent(token)) return syncedIds.length;
           syncedIds.push(event.id);
         }
@@ -2550,7 +2572,13 @@
       async function deletePresenceEventFromCloud(event){
         const api = centralDataApi();
         if(!api?.presenceDeleteEvent) throw new Error("Suppression cloud indisponible.");
-        return api.presenceDeleteEvent(event);
+        presenceReconciliationRevision += 1;
+        presenceReconciliationActiveCloudWrites += 1;
+        try{ return await api.presenceDeleteEvent(event); }
+        finally{
+          presenceReconciliationActiveCloudWrites -= 1;
+          presenceReconciliationRevision += 1;
+        }
       }
       async function reconcileDeletedPresenceEventsFromCloud(events=[], token=presenceContextToken()){
         if(!presenceContextIsCurrent(token)) return {deleted:0, failed:0, stale:true};
@@ -2558,7 +2586,7 @@
         const marked = (Array.isArray(events) ? events : []).filter(event => event?.id && isDeletedPresenceEvent(event));
         if(!marked.length || !api?.presenceDeleteEvent) return {deleted:0, failed:0};
         if(!presenceContextIsCurrent(token)) return {deleted:0, failed:0, stale:true};
-        const results = await Promise.allSettled(marked.map(event => api.presenceDeleteEvent(event)));
+        const results = await Promise.allSettled(marked.map(event => deletePresenceEventFromCloud(event)));
         if(!presenceContextIsCurrent(token)) return {deleted:0, failed:0, stale:true};
         const deleted = results.filter(result => result.status === "fulfilled").length;
         const failed = results.length - deleted;
@@ -2578,7 +2606,7 @@
           if(key) deletedKeys.add(key);
         });
         saveDeletedPresenceEventMarkers(deletedIds, deletedKeys, {syncCloud:true});
-        Promise.allSettled(retired.map(event => api.presenceDeleteEvent(event))).then(results => {
+        Promise.allSettled(retired.map(event => deletePresenceEventFromCloud(event))).then(results => {
           const deleted = results.filter(result => result.status === "fulfilled").length;
           const failed = results.length - deleted;
           if(deleted) setSessionMessage(`${deleted} événement(s) Présences 2025-2026 supprimé(s).`, "success");
