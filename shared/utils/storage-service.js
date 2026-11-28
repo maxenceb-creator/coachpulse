@@ -202,15 +202,22 @@
   async function getDurableJson(key, fallback){
     const local = readLocalDurableSnapshot(key, fallback);
     let indexed = null;
-    try{ indexed = await durableDbRequest('readonly', store => store.get(key)); }
-    catch(error){ console.warn('[CoachPulse persistence] Lecture IndexedDB indisponible', error); }
+    let indexedDbReadComplete = false;
+    let indexedDbError = null;
+    try{
+      indexed = await durableDbRequest('readonly', store => store.get(key));
+      indexedDbReadComplete = true;
+    }catch(error){
+      indexedDbError = error;
+      console.warn('[CoachPulse persistence] Lecture IndexedDB indisponible', error);
+    }
     const validIndexed = indexed && Number(indexed.revision) > 0 && Object.prototype.hasOwnProperty.call(indexed, 'value');
     const chosen = validIndexed && Number(indexed.revision) >= local.revision
       ? {...indexed, source:'indexedDB'}
       : local;
     durableRevisions.set(key, Math.max(local.revision, Number(indexed?.revision) || 0));
     memory.set(key, JSON.stringify(chosen.value));
-    return chosen;
+    return {...chosen, indexedDbReadComplete, indexedDbError};
   }
 
   function setDurableJson(key, value){
